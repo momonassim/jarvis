@@ -541,27 +541,36 @@ const stamp = (rows, qui) => { const up = rows.map(r => r.updated_at).filter(Boo
 
 function applyEnergie(rows) {
   const e = byId.energie; if (!rows.length) { e.status = "À brancher"; e.say = "Plenitude n’est pas encore relu."; return; }
-  const pay = rows.filter(r => r.kind === "paiement" && r.date).sort((a, b) => b.date.localeCompare(a.date));
+  const today = new Date().toISOString().slice(0, 10), ENS = ["Gaz", "Électricité"];
   const conso = Object.fromEntries(rows.filter(r => r.kind === "conso").map(r => [r.label, r.data]));
-  const contrats = rows.filter(r => r.kind === "contrat");
-  const last = pay[0], lastAmt = last ? Number(last.amount) : null;
-  const prev = pay.find(r => Number(r.amount) !== lastAmt);
-  const since = prev ? pay.filter(r => r.date > prev.date).slice(-1)[0] : null;
-  const year = String(new Date().getFullYear()), py = pay.filter(r => r.date.startsWith(year));
-  const tot = py.reduce((a, r) => a + Number(r.amount), 0);
-  const el = conso["Électricité"], gz = conso["Gaz"];
+  const plan = Object.fromEntries(rows.filter(r => r.kind === "echeancier").map(r => [r.label, r]));
+  const sorted = k => rows.filter(r => r.kind === k && r.date).sort((a, b) => a.date.localeCompare(b.date));
+  const pay = sorted("paiement"), ech = sorted("echeance").filter(r => r.date >= today);
+  const next = {}; ENS.forEach(n => next[n] = ech.find(r => r.label === n));
+  const tot = ENS.reduce((a, n) => a + (next[n] ? Number(next[n].amount) : 0), 0);
+  const dern = {}; ENS.forEach(n => dern[n] = pay.filter(r => r.label === n).slice(-1)[0]);
+  const mois = d => MOIS[Number(d.slice(5, 7)) - 1];
   e.place = "Plenitude";
-  e.status = last ? eur(lastAmt) + " par mois" : "—";
-  let say = last ? (prev ? `Ton prélèvement Plenitude est passé de ${eur(prev.amount)} à ${eur(lastAmt)} par mois depuis ${since ? MOIS[Number(since.date.slice(5, 7)) - 1] : "peu"}.` : `Ton prélèvement Plenitude est de ${eur(lastAmt)} par mois.`) : "";
-  if (el && gz && el.kwh && gz.kwh) say += ` Le dernier mois relevé (${(el.mois || []).slice(-1)[0] || "—"}) : ${el.kwh.slice(-1)[0]} kWh d’électricité et ${gz.kwh.slice(-1)[0]} kWh de gaz.`;
-  e.say = nb(say.trim());
-  e.facts = [[`Prélevé en ${year}`, nb(`${eur(tot)} en ${py.length} fois`)], ["Contrats", contrats.length ? `${contrats.length} actifs` : "—"]];
+  e.status = tot ? eur(tot) + " par mois" : "—";
+  let say = tot ? `À partir de ${mois(next.Gaz?.date || next["Électricité"].date)}, tu paies ${eur(tot)} par mois : ${next.Gaz ? eur(next.Gaz.amount) + " de gaz" : ""}${next.Gaz && next["Électricité"] ? " et " : ""}${next["Électricité"] ? eur(next["Électricité"].amount) + " d’électricité" : ""}.` : "Pas d’échéancier Plenitude relu.";
+  if (dern.Gaz && next.Gaz && Number(dern.Gaz.amount) > Number(next.Gaz.amount) + 1) {
+    const hauts = pay.filter(r => r.label === "Gaz" && Number(r.amount) > Number(next.Gaz.amount) + 1);
+    const trop = hauts.reduce((a, r) => a + Number(r.amount) - Number(next.Gaz.amount), 0);
+    say += ` Le gaz a été prélevé à ${eur(dern.Gaz.amount)} en ${hauts.map(r => mois(r.date)).join(" et ")} : environ ${eur(trop)} de plus que l’échéancier. À surveiller sur la prochaine facture.`;
+  }
+  e.say = nb(say);
+  const pf = (plan.Gaz || plan["Électricité"])?.data?.prochaine_facture;
+  e.facts = [["Gaz", next.Gaz ? eur(next.Gaz.amount) + " par mois" : "—"], ["Électricité", next["Électricité"] ? eur(next["Électricité"].amount) + " par mois" : "—"], ["Prochaine facture", pf ? frd(pf) : "—"]];
   const d = [];
-  if (contrats.length) d.push({ t: "Contrats", d: contrats[0].label.replace(/ (Électricité|Gaz).*$/i, ""), v: `${contrats.length} actifs`, where: "Espace client Plenitude", lines: contrats.map(c => [c.label, c.data?.statut || "Actif"]) });
+  ENS.forEach(n => { const p = plan[n], l = ech.filter(r => r.label === n); if (!l.length) return;
+    d.push({ t: "Échéancier " + n.toLowerCase(), d: `${mois(l[0].date)} ${l[0].date.slice(0, 4)} → ${mois(l.slice(-1)[0].date)} ${l.slice(-1)[0].date.slice(0, 4)}`, v: eur(l[0].amount), where: "Espace client Plenitude",
+      lines: [["Offre", p?.data?.offre || "—"], ["Consommation estimée", p?.data?.conso_annuelle_kwh ? nb(p.data.conso_annuelle_kwh.toLocaleString("fr-FR") + " kWh par an") : "—"], ...l.map(r => [frd(r.date), eur(r.amount)])] }); });
+  ENS.forEach(n => { const l = pay.filter(r => r.label === n).reverse(); if (!l.length) return;
+    d.push({ t: "Prélèvements " + n.toLowerCase(), d: "Déjà payés", v: eur(l[0].amount), where: "Espace client Plenitude", lines: l.map(r => [frd(r.date), eur(r.amount)]) }); });
+  const el = conso["Électricité"], gz = conso["Gaz"];
   if (el) d.push({ t: "Consommation électricité", d: (el.mois || []).join(" et "), v: nb(el.kwh.slice(-1)[0] + " kWh"), where: "Espace client Plenitude", lines: (el.mois || []).map((m, i) => [m, nb(el.kwh[i] + " kWh")]) });
   if (gz) d.push({ t: "Consommation gaz", d: (gz.mois || []).join(" et "), v: nb(gz.kwh.slice(-1)[0] + " kWh"), where: "Espace client Plenitude", lines: (gz.mois || []).map((m, i) => [m, nb(gz.kwh[i] + " kWh")]) });
-  pay.forEach(r => d.push({ t: "Prélèvement", d: frd(r.date), v: eur(r.amount), where: "Espace client Plenitude", lines: [["Statut", r.data?.statut || "—"]] }));
-  e.docs = d; e.live = stamp(rows, "relu par ton iPhone");
+  e.docs = d; e.live = stamp(rows, "relu chez Plenitude");
 }
 
 function applyFoncia(rows) {

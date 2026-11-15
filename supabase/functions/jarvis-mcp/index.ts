@@ -78,13 +78,24 @@ function logement(rows: Row[], detail: boolean) {
 }
 function energie(rows: Row[], detail: boolean) {
   const e = rows.filter((r) => r.source === "plenitude"); if (!e.length) return "Pas encore relu.";
-  const pay = e.filter((r) => r.kind === "paiement" && r.date).sort((a, b) => b.date!.localeCompare(a.date!));
+  const td = today(), ENS = ["Gaz", "Électricité"];
+  const srt = (k: string) => e.filter((r) => r.kind === k && r.date).sort((a, b) => a.date!.localeCompare(b.date!));
+  const pay = srt("paiement"), ech = srt("echeance").filter((r) => r.date! >= td);
+  const plan = Object.fromEntries(e.filter((r) => r.kind === "echeancier").map((r) => [r.label, r.data]));
   const conso = Object.fromEntries(e.filter((r) => r.kind === "conso").map((r) => [r.label, r.data]));
-  const contrats = e.filter((r) => r.kind === "contrat").map((r) => r.label);
-  let t = pay[0] ? `Prélèvement Plenitude : ${eur(pay[0].amount)} par mois (dernier le ${frd(pay[0].date)}).` : "";
-  for (const [k, v] of Object.entries(conso) as [string, any][]) t += ` ${k} : ${(v.mois ?? []).map((m: string, i: number) => `${m} ${v.kwh?.[i]} kWh`).join(", ")}.`;
-  if (contrats.length) t += ` Contrats : ${contrats.join(", ")}.`;
-  if (detail) t += "\nPrélèvements :\n" + pay.map((r) => `- ${frd(r.date)} : ${eur(r.amount)} (${r.data?.statut ?? ""})`).join("\n");
+  let tot = 0, t = "Données lues chez Plenitude (échéancier officiel et historique des paiements).";
+  for (const n of ENS) {
+    const nx = ech.find((r) => r.label === n), last = pay.filter((r) => r.label === n).slice(-1)[0];
+    if (nx) tot += Number(nx.amount);
+    t += ` ${n} : ${nx ? `${eur(nx.amount)} par mois à partir du ${frd(nx.date)}` : "pas d'échéance à venir"}` + (last ? `, dernier prélèvement ${eur(last.amount)} le ${frd(last.date)}` : "") + (plan[n]?.conso_annuelle_kwh ? `, conso estimée ${plan[n].conso_annuelle_kwh} kWh/an` : "") + ".";
+  }
+  if (tot) t += ` Total à venir : ${eur(tot)} par mois.`;
+  const pf = (plan["Gaz"] ?? plan["Électricité"])?.prochaine_facture; if (pf) t += ` Prochaine facture prévue le ${frd(pf)}.`;
+  for (const [k, v] of Object.entries(conso) as [string, any][]) t += ` Conso ${k} : ${(v.mois ?? []).map((m: string, i: number) => `${m} ${v.kwh?.[i]} kWh`).join(", ")}.`;
+  if (detail) for (const n of ENS) {
+    t += `\nÉchéancier ${n} :\n` + ech.filter((r) => r.label === n).map((r) => `- ${frd(r.date)} : ${eur(r.amount)}`).join("\n");
+    t += `\nPrélèvements ${n} déjà payés :\n` + pay.filter((r) => r.label === n).reverse().map((r) => `- ${frd(r.date)} : ${eur(r.amount)}`).join("\n");
+  }
   return t;
 }
 function sante(rows: Row[], detail: boolean) {
