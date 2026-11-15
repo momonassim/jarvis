@@ -1010,7 +1010,6 @@ async function openSettings() {
    Papiers jamais acceptés : ceux qui portent un numéro de sécu, un IBAN, une pièce d'identité,
    un papier de préfecture ou le papier d'une autre personne. */
 const INTERDITS = [
-  [/bulletin|paie/i, "bulletin de paie : il contient ton n° de sécu et ton IBAN"],
   [/permis|identit|passeport|sajalni/i, "pièce d’identité"],
   [/s[ée]jour|prolongation|pr[ée]fecture/i, "papier de préfecture"],
   [/attestation ?de ?droits|ameli|attestationpaiement|carsat/i, "contient un n° de sécu"],
@@ -1022,7 +1021,7 @@ const LIEUX_PAPIERS = { home: "Chez toi", energie: "Gaz et électricité", garag
 function blocPapiers() {
   const c = document.createElement("div"); c.className = "set";
   c.innerHTML = '<div class="stop"><b>Ajouter mes papiers</b><span></span></div>'
-    + '<small>Choisis tes PDF (par exemple dans Téléchargements), autant que tu veux. Jarvis les lit, les range tout seul au bon lieu et leur donne un nom clair. Il refuse ceux qui portent ton n° de sécu, ton IBAN ou une pièce d’identité.</small>'
+    + '<small>Choisis tes PDF (par exemple dans Téléchargements), autant que tu veux. Jarvis les lit, les range tout seul au bon lieu et leur donne un nom clair. Tes bulletins de paie vont dans Travail. Il refuse les pièces d’identité et les autres papiers qui portent ton n° de sécu ou ton IBAN.</small>'
     + '<div class="row2"><button class="btn main" type="button" style="flex:1">Choisir des PDF…</button></div>'
     + '<input type="file" accept="application/pdf,.pdf" multiple hidden><div class="dep"></div>';
   const btn = c.querySelector(".btn"), inp = c.querySelector("input"), out = c.querySelector(".dep"), st = c.querySelector(".stop span");

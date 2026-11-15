@@ -19,7 +19,7 @@ const LIEUX: Record<string, string> = {
   garage: "Voiture : assurance auto, contrôle technique, entretien, réparation, amende liée à la conduite non encore traitée par les impôts, historique du véhicule",
   impots: "Impôts et amendes : avis d'impôt, taxe, amende (ANTAI), majoration, paiement au Trésor public",
   clinique: "Santé : rendez-vous médical, ordonnance, facture d'hôpital ou de clinique, mutuelle, remboursement",
-  usine: "Travail : contrat de travail, planning, attestation employeur, formation (pas les bulletins de paie)",
+  usine: "Travail : contrat de travail, planning, attestation employeur, formation, bulletins de paie",
   mairie: "Papiers administratifs divers : mairie, CAF, attestations, courriers officiels qui ne vont nulle part ailleurs",
   banque: "Argent : courrier de banque, crédit, prêt, épargne (sans IBAN ni relevé de compte)",
   medecin: "Le bébé : crèche, pédiatre, vaccins, carnet, papiers concernant l'enfant",
@@ -45,11 +45,13 @@ const CONSIGNE = `Tu es Jarvis, l'assistant perso de Sabri. On te donne un PDF q
 Lis-le et range-le toi-même. Lieux possibles :
 ${Object.entries(LIEUX).map(([k, v]) => `- ${k} = ${v}`).join("\n")}
 
-Refuse le papier (champ refus rempli) s'il contient au moins une de ces choses :
+Exception : un bulletin de paie de Sabri est TOUJOURS accepté et rangé dans usine,
+même s'il porte son n° de sécu et son IBAN (titre « Bulletin de paie », sous-titre = le mois et l'année, ex. « Octobre 2026 »).
+
+Pour tous les autres papiers, refuse (champ refus rempli) s'il contient au moins une de ces choses :
 un numéro de sécurité sociale complet, un IBAN ou un numéro de compte bancaire complet,
 une pièce d'identité (carte d'identité, passeport, permis de conduire, titre de séjour),
 un papier de préfecture, ou s'il s'agit du papier d'une autre personne que Sabri et sa famille.
-Un bulletin de paie est toujours refusé (il porte le n° de sécu et l'IBAN).
 Sinon, refus = null, et choisis le lieu le plus logique. Appelle toujours l'outil « ranger ».`;
 
 Deno.serve(async (req) => {
