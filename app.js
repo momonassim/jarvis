@@ -927,8 +927,75 @@ async function openSettings() {
     inp.addEventListener("keydown", e => { if (e.key === "Enter") b.click(); });
     o.append(c);
   });
+  o.append(blocPapiers());
   o.append(blocVoix());
   o.append(blocConnecteur());
+}
+
+/* ---------- Ajouter mes papiers (depuis le Mac ou l'iPhone) ----------
+   Jarvis reconnaît le papier à son nom et le range au bon lieu.
+   Papiers jamais acceptés : ceux qui portent un numéro de sécu, un IBAN, une pièce d'identité,
+   un papier de préfecture ou le papier d'une autre personne. */
+const INTERDITS = [
+  [/bulletin|paie/i, "bulletin de paie : il contient ton n° de sécu et ton IBAN"],
+  [/permis|identit|passeport|sajalni/i, "pièce d’identité"],
+  [/s[ée]jour|prolongation|pr[ée]fecture/i, "papier de préfecture"],
+  [/attestation ?de ?droits|ameli|attestationpaiement|carsat/i, "contient un n° de sécu"],
+  [/cession|carte.?grise|carte-g|cerfa|signee/i, "papier de vente ou carte grise : contient l’identité d’autres personnes"],
+  [/billet|tunisair/i, "papier d’une autre personne"],
+  [/\brib\b|iban/i, "relevé bancaire (IBAN)"],
+];
+const CONNUS = [
+  [/avis_d_impot_2026/i, "impots", "Avis d’impôt 2026", "Revenus 2025"],
+  [/avis_d_impot_2025/i, "impots", "Avis d’impôt 2025", "Revenus 2024"],
+  [/page de confirmation/i, "impots", "Amende de stationnement", null],
+  [/contr[ôo]le technique/i, "garage", "Contrôle technique", null],
+  [/^assurance/i, "garage", "Assurance auto", null],
+  [/^facture\.pdf$/i, "garage", "Facture carte grise", null],
+  [/^VF7K/i, "garage", "Rapport d’historique du véhicule", "DS5 · vol et prêt vérifiés"],
+  [/hopital|h[ôo]pital/i, "clinique", "Paiement clinique", null],
+  [/justificatif de rendez-vous/i, "clinique", "Justificatif MédinLyon", "05/12/2025 à 09:45"],
+];
+const LIEUX_PAPIERS = { garage: "Voiture", impots: "Impôts et amendes", clinique: "Santé", usine: "Travail", mairie: "Papiers", banque: "Banque", orange: "Abonnements", medecin: "Bébé" };
+function blocPapiers() {
+  const c = document.createElement("div"); c.className = "set";
+  c.innerHTML = '<div class="stop"><b>Ajouter mes papiers</b><span></span></div>'
+    + '<small>Choisis tes PDF (par exemple dans Téléchargements). Jarvis les reconnaît et les range au bon lieu. Il refuse ceux qui portent ton n° de sécu, ton IBAN ou une pièce d’identité.</small>'
+    + '<div class="row2"><button class="btn main" type="button" style="flex:1">Choisir des PDF…</button></div>'
+    + '<input type="file" accept="application/pdf,.pdf" multiple hidden><div class="dep"></div>';
+  const btn = c.querySelector(".btn"), inp = c.querySelector("input"), out = c.querySelector(".dep"), st = c.querySelector(".stop span");
+  btn.addEventListener("click", () => inp.click());
+  const ligne = (t, cls) => { const e = document.createElement("small"); e.textContent = t; if (cls) e.className = cls; out.append(e); return e; };
+  inp.addEventListener("change", async () => {
+    const files = [...inp.files]; inp.value = ""; out.textContent = ""; if (!files.length) return;
+    let ok = 0;
+    for (const f of files) {
+      const n = f.name, ban = INTERDITS.find(([re]) => re.test(n));
+      if (ban) { ligne("✕ " + n + " — pas rangé (" + ban[1] + ")"); continue; }
+      let k = CONNUS.find(([re]) => re.test(n)), lieu, titre, sous;
+      if (k) { [, lieu, titre, sous] = k; }
+      else {
+        const e = ligne("? " + n + " — où le ranger ? ");
+        const sel = document.createElement("select"); sel.innerHTML = '<option value="">Ne pas ranger</option>' + Object.entries(LIEUX_PAPIERS).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+        e.append(sel);
+        lieu = await new Promise(res => sel.addEventListener("change", () => res(sel.value), { once: true }));
+        if (!lieu) { e.textContent = "✕ " + n + " — pas rangé"; continue; }
+        titre = n.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").trim(); sous = null; e.remove();
+      }
+      if (f.size > 20e6) { ligne("✕ " + n + " — trop lourd"); continue; }
+      const slug = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.]+/g, "-").toLowerCase();
+      const path = "mac/" + lieu + "/" + slug;
+      const l = ligne("… " + n);
+      const { error } = await sb.storage.from("papiers").upload(path, f, { upsert: true, contentType: "application/pdf" });
+      if (error) { l.textContent = "✕ " + n + " — envoi raté : " + error.message; continue; }
+      const { error: e2 } = await sb.rpc("jarvis_attach_doc", { p_lieu: lieu, p_t: titre, p_d: sous, p_path: path });
+      if (e2) { l.textContent = "✕ " + n + " — pas relié : " + e2.message; continue; }
+      l.textContent = "✓ " + titre + " → " + (LIEUX_PAPIERS[lieu] || lieu); ok++;
+    }
+    st.textContent = ok ? ok + " rangé" + (ok > 1 ? "s" : "") + " ✓" : ""; st.className = ok ? "ok" : "";
+    if (ok) loadAll();
+  });
+  return c;
 }
 function blocConnecteur() {
   const URL_MCP = SB_URL + "/functions/v1/jarvis-mcp";
