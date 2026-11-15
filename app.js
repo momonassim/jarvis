@@ -794,7 +794,11 @@ async function send() {
       headers: { "Content-Type": "application/json", apikey: SB_KEY, Authorization: "Bearer " + (session ? session.access_token : "") },
       body: JSON.stringify({ system: context(), messages: history }) });
     if (!r.ok) { let j = {}; try { j = await r.json(); } catch (_) {}
-      throw new Error(j.error === "cle_absente" ? "Il me manque ta clé Claude : touche la roue ⚙️ en haut, colle-la dans « Clé Claude » et je te réponds." : j.error === "interdit" ? "Reconnecte-toi, je ne te reconnais plus." : "Je n’arrive pas à joindre Claude (" + (j.status || r.status) + ")."); }
+      throw new Error(j.error === "cle_absente" ? "Il me manque ta clé Claude : touche la roue ⚙️ en haut, colle-la dans « Clé Claude » et je te réponds." : j.error === "interdit" ? "Reconnecte-toi, je ne te reconnais plus." :
+        /workspace/i.test(j.detail || "") ? "Ta clé Claude n’est rattachée à aucun espace (workspace). Crée une clé dans un espace sur platform.claude.com, puis colle-la dans les Réglages ⚙️." :
+        /credit|balance|billing/i.test(j.detail || "") ? "Ta clé Claude n’a plus de crédit. Vérifie Billing sur platform.claude.com." :
+        /invalid x-api-key|authentication/i.test(j.detail || "") ? "Ta clé Claude est refusée. Recolle-la dans les Réglages ⚙️." :
+        "Je n’arrive pas à joindre Claude (" + (j.status || r.status) + ")."); }
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { value, done } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
       let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
