@@ -767,7 +767,7 @@ function openTalk(p) {
   ["Qu’est-ce que je dois payer ce mois-ci ?", "Prends un rendez-vous médical", "Qu’est-ce qui manque ?"].forEach(q => { const b = document.createElement("button"); b.className = "chip"; b.textContent = q;
     b.addEventListener("click", () => { if (/rendez-vous/.test(q)) { openBook(); return; } input.value = q; send(); }); chips.append(b); });
 }
-function closeTalk(keep) { if (!talkOpen) return; talkOpen = false; $("talk").classList.remove("open"); input.blur(); stopListen(); if (!keep) { viewShiftGoal = 0; $("ask").classList.remove("away"); } }
+function closeTalk(keep) { if (!talkOpen) return; talkOpen = false; $("talk").classList.remove("open"); input.blur(); stopListen(); voix.stop(); if (!keep) { viewShiftGoal = 0; $("ask").classList.remove("away"); } }
 $("ask").addEventListener("click", () => openTalk(null));
 $("tClose").addEventListener("click", () => closeTalk());
 swipeClose($("talk").querySelector(".card"), () => closeTalk());
@@ -787,7 +787,9 @@ ${papiers}`;
 }
 async function send() {
   const t = input.value.trim(); if (!t || busy) return; input.value = ""; bubble("me", t); history.push({ role: "user", content: t });
-  const out = bubble("j", "…"); busy = true; $("send").disabled = true; let text = "";
+  const out = bubble("j", "…"); busy = true; $("send").disabled = true; let text = "", said = 0;
+  const parle = voiceMode || lireToujours();
+  if (parle) voix.stop();
   try {
     const { data: { session } } = await sb.auth.getSession();
     const r = await fetch(SB_URL + "/functions/v1/jarvis-chat", { method: "POST",
@@ -802,40 +804,81 @@ async function send() {
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { value, done } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
       let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-        if (!line.startsWith("data:")) continue; try { const ev = JSON.parse(line.slice(5)); if (ev.type === "content_block_delta" && ev.delta && ev.delta.text) { text += ev.delta.text; out.textContent = text; msgs.scrollTop = msgs.scrollHeight; } } catch (_) {} } }
+        if (!line.startsWith("data:")) continue; try { const ev = JSON.parse(line.slice(5)); if (ev.type === "content_block_delta" && ev.delta && ev.delta.text) { text += ev.delta.text; out.textContent = text; msgs.scrollTop = msgs.scrollHeight; } } catch (_) {} }
+      // Jarvis commence à parler dès la première phrase finie, sans attendre la fin
+      if (parle) { const m = text.slice(said).match(/^[\s\S]*?[.!?…:](?=\s)/); if (m) { voix.dire(m[0]); said += m[0].length; } } }
     if (!text) throw new Error("Je n’ai rien reçu, réessaie.");
-    history.push({ role: "assistant", content: text }); if (voiceMode) speak(text);
-  } catch (e) { out.textContent = e.message || "Je n’arrive pas à répondre là, réessaie."; history.pop(); }
-  finally { busy = false; $("send").disabled = false; }
+    history.push({ role: "assistant", content: text });
+    if (parle && text.slice(said).trim()) voix.dire(text.slice(said));
+  } catch (e) { out.textContent = e.message || "Je n’arrive pas à répondre là, réessaie."; history.pop(); if (parle) voix.dire(out.textContent); }
+  finally { busy = false; $("send").disabled = false; voix.finPossible(); }
 }
 $("send").addEventListener("click", send);
-input.addEventListener("keydown", e => { voiceMode = false; if (e.key === "Enter") send(); });
+input.addEventListener("keydown", e => { voiceMode = false; convo = false; if (e.key === "Enter") send(); });
 
-/* ---------- La voix : tu parles, Jarvis répond à voix haute ---------- */
+/* ---------- La voix : vraie conversation, mains libres ----------
+   Tu touches le micro une fois : tu parles, Jarvis répond à voix haute,
+   puis il t'écoute de nouveau. Touche le micro pour arrêter.
+   Le cerveau, c'est Claude. La voix, c'est la meilleure voix française de ton appareil. */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const micBtn = $("mic"), vhint = $("vhint");
-let rec = null, listening = false, voiceMode = false, heard = "";
-if (SR) { micBtn.hidden = false; vhint.textContent = "Touche le micro et parle"; }
-else vhint.textContent = "Pour dicter, touche le micro du clavier";
-function speak(text) {
-  if (!("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text.slice(0, 1500)); u.lang = "fr-FR"; u.rate = 1.03;
-  const v = speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang)); const best = v.find(x => /premium|enhanced|amélioré/i.test(x.name)) || v.find(x => /fr-FR/i.test(x.lang)) || v[0]; if (best) u.voice = best;
-  u.onstart = () => micBtn.classList.add("talking"); u.onend = u.onerror = () => micBtn.classList.remove("talking");
-  speechSynthesis.speak(u);
-}
-function stopListen() { if (rec && listening) { try { rec.stop(); } catch (_) {} } }
-micBtn.addEventListener("click", () => {
-  if ("speechSynthesis" in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance("")); } // débloque la voix sur iPhone
-  if (listening) { stopListen(); return; }
+let rec = null, listening = false, voiceMode = false, convo = false, heard = "";
+const store = { get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} } };
+const lireToujours = () => store.get("jarvis.lire") === "1";
+const HINT = SR ? "Touche le micro pour parler avec Jarvis" : "Pour dicter, touche le micro du clavier";
+if (SR) micBtn.hidden = false;
+vhint.textContent = HINT;
+
+const voix = {
+  attente: 0,
+  liste() { return ("speechSynthesis" in window) ? speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang)) : []; },
+  note(v) { return (/premium/i.test(v.name) ? 6 : 0) + (/enhanced|amélioré|améliorée|natural|neural/i.test(v.name) ? 4 : 0) + (/fr-FR/i.test(v.lang) ? 2 : 0) + (v.localService ? 1 : 0)
+    + (/^(Amélie|Thomas|Audrey|Aurélie|Marie|Daniel|Jacques)/i.test(v.name) ? 1 : 0) - (/compact|eloquence|grandma|grandpa|rocko|shelley|sandy|flo|reed|eddy/i.test(v.name) ? 5 : 0); },
+  choisie() { const l = this.liste(), n = store.get("jarvis.voix"); return l.find(v => v.name === n) || l.sort((a, b) => this.note(b) - this.note(a))[0] || null; },
+  dire(t) {
+    t = (t || "").replace(/[*_#`>]/g, "").replace(/\s+/g, " ").trim(); if (!t || !("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(t); const v = this.choisie(); if (v) u.voice = v; u.lang = v ? v.lang : "fr-FR"; u.rate = 1.0; u.pitch = 1.0;
+    this.attente++; micBtn.classList.add("talking"); vhint.textContent = convo ? "Jarvis parle… touche le micro pour l’arrêter" : "Jarvis parle…";
+    u.onend = u.onerror = () => { this.attente = Math.max(0, this.attente - 1); this.finPossible(); };
+    speechSynthesis.speak(u);
+  },
+  stop() { this.attente = 0; if ("speechSynthesis" in window) speechSynthesis.cancel(); micBtn.classList.remove("talking"); },
+  finPossible() {
+    if (this.attente || busy) return;
+    micBtn.classList.remove("talking");
+    if (convo && talkOpen) setTimeout(() => { if (convo && talkOpen && !listening && !busy && !this.attente) ecouter(); }, 250);
+    else vhint.textContent = HINT;
+  },
+};
+if ("speechSynthesis" in window) speechSynthesis.addEventListener?.("voiceschanged", () => {});
+
+function stopListen() { convo = false; if (rec && listening) { try { rec.abort(); } catch (_) {} } listening = false; micBtn.classList.remove("on"); }
+function ecouter() {
+  if (!SR) return;
   rec = new SR(); rec.lang = "fr-FR"; rec.interimResults = true; rec.continuous = false;
   heard = ""; input.value = ""; voiceMode = true;
-  rec.onstart = () => { listening = true; micBtn.classList.add("on"); vhint.textContent = "Je t’écoute… touche le micro quand tu as fini"; };
+  rec.onstart = () => { listening = true; micBtn.classList.add("on"); vhint.textContent = "Je t’écoute…"; };
   rec.onresult = e => { let t = ""; for (const r of e.results) t += r[0].transcript; heard = t; input.value = t; };
-  rec.onerror = e => { if (e.error === "not-allowed" || e.error === "service-not-allowed") { vhint.textContent = "Micro refusé : autorise-le dans Réglages, ou écris"; } };
-  rec.onend = () => { listening = false; micBtn.classList.remove("on"); vhint.textContent = "Touche le micro et parle"; if (heard.trim()) send(); };
-  try { rec.start(); } catch (_) { vhint.textContent = "Le micro n’a pas démarré, réessaie"; }
+  rec.onerror = e => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") { convo = false; vhint.textContent = "Micro refusé : autorise-le pour Safari dans les réglages de l’iPhone"; }
+    else if (e.error === "no-speech" && convo) vhint.textContent = "Je n’ai rien entendu… touche le micro pour reprendre";
+  };
+  rec.onend = () => {
+    listening = false; micBtn.classList.remove("on");
+    if (heard.trim()) { send(); return; }
+    if (convo) { convo = false; vhint.textContent = "Je n’ai rien entendu. Touche le micro pour reprendre"; }
+  };
+  try { rec.start(); } catch (_) { convo = false; vhint.textContent = "Touche le micro pour me répondre"; }
+}
+micBtn.addEventListener("click", () => {
+  // en pleine conversation : un toucher arrête tout
+  if (convo || listening || voix.attente) {
+    const parlait = voix.attente > 0; voix.stop();
+    if (listening) { try { rec.stop(); } catch (_) {} convo = false; return; } // il envoie ce que tu as dit
+    convo = false; vhint.textContent = parlait ? "D’accord, je me tais. Touche le micro pour reprendre" : HINT; return;
+  }
+  if ("speechSynthesis" in window) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } // débloque la voix sur iPhone
+  convo = true; ecouter();
 });
 
 /* =========================================================
@@ -875,6 +918,27 @@ async function openSettings() {
     inp.addEventListener("keydown", e => { if (e.key === "Enter") b.click(); });
     o.append(c);
   });
+  o.append(blocVoix());
+}
+function blocVoix() {
+  const c = document.createElement("div"); c.className = "set";
+  c.innerHTML = '<div class="stop"><b>Voix de Jarvis</b><span></span></div><div class="row2"><select></select><button class="btn main" type="button">Écouter</button></div>'
+    + '<label class="tog"><input type="checkbox"> Lire aussi les réponses quand j’écris</label>'
+    + '<small>Pour une voix naturelle, télécharge une fois une voix française « Premium » (gratuit) : Réglages de l’iPhone › Accessibilité › Contenu énoncé › Voix › Français, par exemple « Amélie (Premium) » ou « Thomas (amélioré) ». Puis reviens ici et choisis-la.</small>';
+  const sel = c.querySelector("select"), b = c.querySelector("button"), st = c.querySelector(".stop span"), tog = c.querySelector(".tog input");
+  tog.checked = lireToujours(); tog.addEventListener("change", () => store.set("jarvis.lire", tog.checked ? "1" : "0"));
+  const remplir = () => {
+    const l = voix.liste().sort((a, b) => voix.note(b) - voix.note(a)), cur = voix.choisie();
+    sel.innerHTML = "";
+    if (!l.length) { const o = document.createElement("option"); o.textContent = "Aucune voix française trouvée"; sel.append(o); sel.disabled = true; st.textContent = ""; return; }
+    sel.disabled = false;
+    l.forEach(v => { const o = document.createElement("option"); o.value = v.name; o.textContent = v.name.replace(/\s*\(.*?\)\s*$/, "") + (/premium/i.test(v.name) ? " · Premium" : /enhanced|amélior/i.test(v.name) ? " · Améliorée" : "") + (/fr-CA/i.test(v.lang) ? " (Canada)" : /fr-BE/i.test(v.lang) ? " (Belgique)" : /fr-CH/i.test(v.lang) ? " (Suisse)" : ""); if (cur && v.name === cur.name) o.selected = true; sel.append(o); });
+    const top = voix.note(l[0]) >= 6; st.textContent = top ? "Voix naturelle ✓" : "Voix de base"; st.className = top ? "ok" : "";
+  };
+  remplir(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = remplir;
+  sel.addEventListener("change", () => store.set("jarvis.voix", sel.value));
+  b.addEventListener("click", () => { voix.stop(); voix.dire("Bonjour" + (S.prenom ? " " + S.prenom : "") + ", c’est Jarvis. Je suis là quand tu as besoin de moi."); setTimeout(() => voix.finPossible(), 50); });
+  return c;
 }
 function closeSettings(keep) { if (!setOpen) return; setOpen = false; $("setsheet").classList.remove("open"); document.activeElement?.blur?.(); if (!keep) { viewShiftGoal = 0; $("ask").classList.remove("away"); } }
 $("gear").addEventListener("click", () => setOpen ? closeSettings() : openSettings());

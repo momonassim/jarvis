@@ -173,5 +173,8 @@ p.empty{margin:0}
 .set .btn{flex:0 0 auto;min-height:46px;padding:0 16px}
 .set small{font-size:12.5px;font-weight:600;color:var(--ink2)}
 #sOut{margin-top:16px}
+.set select{flex:1;min-width:0;border:1px solid var(--line);background:#faf7f2;border-radius:14px;padding:12px 10px;font:600 15px var(--sans);color:var(--ink);-webkit-appearance:none;appearance:none}
+.tog{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
+.tog input{width:20px;height:20px;accent-color:#231c17}
 .col .round:nth-child(2) svg{width:21px;height:21px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
