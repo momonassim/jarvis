@@ -23,8 +23,9 @@ async function sha256(t: string) {
   return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 async function autorise(req: Request) {
-  const tok = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (!tok.startsWith("jv_")) return false;
+  // On accepte « Bearer jv_… », « jv_… » ou même « Bearer Bearer jv_… » : on prend juste la clé.
+  const tok = ((req.headers.get("Authorization") ?? "").match(/jv_[A-Za-z0-9_-]{20,}/) ?? [""])[0];
+  if (!tok) return false;
   const { data } = await admin.rpc("jarvis_get_secret", { p_name: "MCP_TOKEN_HASH" });
   if (typeof data !== "string" || !data) return false;
   const h = await sha256(tok);
