@@ -144,6 +144,21 @@ async function robot(body: Record<string, unknown>) {
   const r = await fetch(URL_SB + "/functions/v1/medinlyon", { method: "POST", headers: { Authorization: "Bearer " + SERVICE, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return await r.json().catch(() => ({ ok: false, message: "Le robot MédinLyon ne répond pas." }));
 }
+// ---------- l'écran : Claude pilote l'app Jarvis ouverte (iPhone ou Mac) ----------
+async function ecran(action: string, args: Record<string, unknown> = {}) {
+  await admin.from("jarvis_ecran").delete().lt("created_at", new Date(Date.now() - 864e5).toISOString());
+  const { error } = await admin.from("jarvis_ecran").insert({ action, args });
+  return !error;
+}
+async function montrer(a: Record<string, any>) {
+  const act = String(a.action ?? "");
+  if (act === "lieu" || act === "document") { if (!LIEUX[a.lieu]) return "Lieu inconnu. Choix : " + Object.keys(LIEUX).join(", "); }
+  if (act === "document" && !a.titre) return "Donne le titre du papier à ouvrir.";
+  const args: Record<string, unknown> = {};
+  for (const k of ["lieu", "titre", "tourner", "zoom", "vue", "mode", "texte"]) if (a[k] !== undefined) args[k] = a[k];
+  if (!["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message"].includes(act)) return "Action inconnue.";
+  return (await ecran(act, args)) ? "C'est affiché dans l'app Jarvis (si elle est ouverte sur l'iPhone ou le Mac)." : "Je n'ai pas pu envoyer l'ordre à l'écran.";
+}
 const CENTRES: Record<string, string> = { villeurbanne: "1", brotteaux: "2", "lyon 6": "2", lyon: "2", "1": "1", "2": "2" };
 const centreId = (c?: string) => { const k = (c ?? "").toLowerCase(); return Object.entries(CENTRES).find(([n]) => k.includes(n))?.[1] ?? null; };
 const dateDe = (d?: string) => !d || /aujourd/i.test(d) ? today() : /demain/i.test(d) ? today(1) : /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : today();
@@ -153,6 +168,7 @@ const TOOLS = [
   { name: "jarvis_resume", title: "Résumé de ma vie (Jarvis)", description: "Vue d'ensemble à jour de la vie de l'utilisateur : logement et loyer (Foncia), gaz et électricité (Plenitude), santé et rendez-vous médicaux de la famille (MédinLyon), travail et paies, impôts, voiture, papiers, banque, bébé, abonnements. À appeler en premier pour toute question sur sa situation, son argent, ses papiers ou ses rendez-vous.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
   { name: "jarvis_lieu", title: "Détail d'un domaine (Jarvis)", description: "Détail complet d'un domaine de Jarvis, avec l'historique et la liste des papiers rangés.", inputSchema: { type: "object", properties: { lieu: { type: "string", enum: Object.keys(LIEUX), description: "Le domaine à détailler." } }, required: ["lieu"] }, annotations: { readOnlyHint: true } },
   { name: "jarvis_pdf", title: "Retrouver un PDF (Jarvis)", description: "Cherche un PDF rangé dans Jarvis (quittances, avis d'échéance, régularisations Foncia, justificatifs MédinLyon, avis d'impôt, contrôle technique, assurance auto…) et donne un lien pour l'ouvrir. Exemple de recherche : « quittance octobre 2026 ».", inputSchema: { type: "object", properties: { recherche: { type: "string" } }, required: ["recherche"] }, annotations: { readOnlyHint: true } },
+  { name: "jarvis_ecran", title: "Piloter l'écran de Jarvis", description: "Pilote l'app Jarvis ouverte sur l'iPhone ou le Mac de l'utilisateur (une ville 3D où chaque bâtiment est un domaine de sa vie). Utilise-le pour MONTRER ce dont tu parles : aller à un lieu et ouvrir sa fiche (action lieu), ouvrir un papier précis (action document, avec lieu + titre, ex. « avis d'impôt 2026 », « contrôle technique »), revenir à la vue de toute la ville (ensemble), bouger la caméra (camera : tourner en degrés, + vers la droite / - vers la gauche ; zoom « avant » ou « arriere » ; vue « dessus » ou « rasante »), passer en jour ou nuit (ciel : mode « jour » / « nuit »), tout fermer (fermer), ou afficher une courte phrase à l'écran (message : texte). Quand tu parles d'un domaine, montre-le en même temps.", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message"] }, lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string", description: "Pour document : quelques mots du titre du papier" }, tourner: { type: "number", description: "Pour camera : degrés (ex. 90 ou -45)" }, zoom: { type: "string", enum: ["avant", "arriere"] }, vue: { type: "string", enum: ["dessus", "rasante"] }, mode: { type: "string", enum: ["jour", "nuit"] }, texte: { type: "string", description: "Pour message : une phrase courte" } }, required: ["action"] }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
   { name: "medinlyon_creneaux", title: "Créneaux libres MédinLyon", description: "Créneaux de consultation libres chez MédinLyon (centres Villeurbanne et Lyon 6 Brotteaux), seulement aujourd'hui ou demain. Les créneaux marqués supplément (soir, week-end) coûtent environ 23 € de dépassement : le dire à l'utilisateur.", inputSchema: { type: "object", properties: { centre: { type: "string", description: "« Villeurbanne » ou « Brotteaux »" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" } }, required: ["centre"] }, annotations: { readOnlyHint: true } },
   { name: "medinlyon_reserver", title: "Réserver un rendez-vous MédinLyon", description: "Réserve un rendez-vous MédinLyon pour une personne de la famille. Avant d'appeler cet outil, récapitule à l'utilisateur pour qui, où, quand et le tarif, et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { pour: { type: "string", description: "Nom ou prénom de la personne (famille sur le compte)" }, centre: { type: "string" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" }, heure: { type: "string", description: "HH:MM, un créneau libre" }, confirme: { type: "boolean", description: "true seulement après le oui explicite de l'utilisateur" } }, required: ["pour", "centre", "date", "heure", "confirme"] }, annotations: { destructiveHint: false, readOnlyHint: false } },
   { name: "medinlyon_annuler", title: "Annuler un rendez-vous MédinLyon", description: "Annule un rendez-vous MédinLyon à venir (numéro donné par jarvis_resume). Avant d'appeler, rappelle le rendez-vous à l'utilisateur et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { numero: { type: "string" }, confirme: { type: "boolean" } }, required: ["numero", "confirme"] }, annotations: { destructiveHint: true, readOnlyHint: false } },
@@ -162,7 +178,8 @@ const TOOLS = [
 async function appel(nom: string, a: Record<string, any>): Promise<string> {
   switch (nom) {
     case "jarvis_resume": return await resume();
-    case "jarvis_lieu": { if (!LIEUX[a.lieu]) return "Domaine inconnu. Choix : " + Object.keys(LIEUX).join(", "); const rows = await lignes(); return `${LIEUX[a.lieu].nom}\n${lieu(rows, a.lieu, true)}`; }
+    case "jarvis_lieu": { if (!LIEUX[a.lieu]) return "Domaine inconnu. Choix : " + Object.keys(LIEUX).join(", "); const rows = await lignes(); await ecran("lieu", { lieu: a.lieu }).catch(() => false); return `${LIEUX[a.lieu].nom} (affiché aussi dans l'app Jarvis)\n${lieu(rows, a.lieu, true)}`; }
+    case "jarvis_ecran": return await montrer(a);
     case "jarvis_pdf": return await documents(String(a.recherche ?? ""));
     case "medinlyon_creneaux": {
       const c = centreId(a.centre); if (!c) return "Centre inconnu : Villeurbanne ou Brotteaux.";
@@ -207,7 +224,7 @@ async function traiter(m: any) {
     case "initialize": {
       const v = VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : VERSIONS[0];
       return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jarvis", title: "Jarvis", version: "1.0.0" },
-        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). Réponds en français simple. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement." });
+        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Réponds en français simple. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement." });
     }
     case "ping": return ok({});
     case "tools/list": return ok({ tools: TOOLS });

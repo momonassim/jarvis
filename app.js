@@ -665,6 +665,44 @@ function goLive() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.loaded) loadAll(); });
 
+/* ---------- Télécommande : Claude (via le connecteur) pilote l'écran ----------
+   Le connecteur écrit un ordre dans jarvis_ecran ; l'app ouverte l'exécute tout de suite. */
+const LIEU_APP = { logement: "home", energie: "energie", sante: "clinique", travail: "usine", impots: "impots", voiture: "garage", papiers: "mairie", banque: "banque", bebe: "medecin", abonnements: "orange" };
+const sansAccent = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function fermerTout() { deselect(); closeTalk(); closeBook(); closeSettings(); $("paperwrap").classList.remove("open"); }
+function bougerCamera(a) {
+  fly = null; const s = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
+  let theta = s.theta, r = s.radius, phi = s.phi;
+  if (a.tourner) theta += (Number(a.tourner) || 0) * Math.PI / 180;
+  if (a.zoom === "avant") r *= .6; else if (a.zoom === "arriere") r *= 1.6;
+  if (a.vue === "dessus") phi = .35; else if (a.vue === "rasante") phi = 1.2;
+  r = Math.max(controls.minDistance, Math.min(controls.maxDistance, r));
+  flyTo(controls.target.clone(), r, theta, phi, 1.2);
+}
+async function ordreEcran(o) {
+  const a = o.args || {};
+  if (o.action === "lieu") { const p = byId[LIEU_APP[a.lieu] || a.lieu]; if (p) { $("paperwrap").classList.remove("open"); select(p); } }
+  else if (o.action === "document") {
+    const p = byId[LIEU_APP[a.lieu] || a.lieu]; if (!p) return;
+    select(p); const q = sansAccent(a.titre).split(/\s+/).filter(Boolean);
+    const d = (p.docs || []).find(x => q.every(m => sansAccent(x.t + " " + x.d).includes(m))) || (p.docs || []).find(x => q.some(m => sansAccent(x.t + " " + x.d).includes(m)));
+    if (d) setTimeout(() => openDoc(p, d), 700); else toast("Je ne trouve pas « " + a.titre + " » ici.");
+  }
+  else if (o.action === "ensemble") { fermerTout(); overview(); }
+  else if (o.action === "camera") bougerCamera(a);
+  else if (o.action === "ciel") applySky(a.mode === "nuit");
+  else if (o.action === "fermer") fermerTout();
+  else if (o.action === "message" && a.texte) toast(String(a.texte).slice(0, 160));
+}
+let ecranCh = null;
+function goTelecommande() {
+  if (ecranCh) return;
+  ecranCh = sb.channel("jarvis-ecran").on("postgres_changes", { event: "INSERT", schema: "public", table: "jarvis_ecran" }, ({ new: o }) => {
+    if (!o || Date.now() - new Date(o.created_at).getTime() > 60000) return; // ordre trop vieux : ignoré
+    ordreEcran(o).catch(() => {});
+  }).subscribe();
+}
+
 /* ---------- Appeler les robots du serveur ---------- */
 async function medin(body, quiet) {
   try {
@@ -1059,7 +1097,7 @@ async function enter(session) {
   const { data: ok } = await sb.rpc("jarvis_is_owner");
   if (ok !== true) { showGate(session.user && !session.user.email_confirmed_at ? "Confirme d’abord ton e-mail (lien reçu), puis reviens ici." : "Cette ville est privée."); return; }
   gate.hidden = true;
-  await loadAll(); goLive();
+  await loadAll(); goLive(); goTelecommande();
 }
 $("gform").addEventListener("submit", async e => {
   e.preventDefault(); const email = $("gmail").value.trim(), password = $("gpass").value;
