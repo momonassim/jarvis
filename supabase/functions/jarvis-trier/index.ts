@@ -89,7 +89,6 @@ Deno.serve(async (req) => {
       max_tokens: 400,
       system: CONSIGNE,
       tools: [OUTIL],
-      tool_choice: { type: "tool", name: "ranger" },
       messages: [{
         role: "user",
         content: [
@@ -101,12 +100,17 @@ Deno.serve(async (req) => {
   });
   if (!r.ok) {
     const t = await r.text().catch(() => "");
+    console.error("claude", r.status, t.slice(0, 500));
     await efface();
     return json({ error: "claude", status: r.status, detail: t.slice(0, 300) }, 502);
   }
   const rep = await r.json();
-  const choix = (rep.content ?? []).find((c: { type: string }) => c.type === "tool_use")?.input as
-    { refus: string | null; lieu: string; titre: string; sous_titre: string } | undefined;
+  type Choix = { refus: string | null; lieu: string; titre: string; sous_titre: string };
+  let choix = (rep.content ?? []).find((c: { type: string }) => c.type === "tool_use")?.input as Choix | undefined;
+  if (!choix) { // au cas où il répond en texte : on cherche le JSON dedans
+    const txt = (rep.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("");
+    try { const m = txt.match(/\{[\s\S]*\}/); if (m) choix = JSON.parse(m[0]); } catch { /* rien */ }
+  }
   if (!choix) { await efface(); return json({ error: "illisible" }, 502); }
 
   // 4. Refusé : on l'efface tout de suite
