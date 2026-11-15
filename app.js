@@ -919,6 +919,33 @@ async function openSettings() {
     o.append(c);
   });
   o.append(blocVoix());
+  o.append(blocConnecteur());
+}
+function blocConnecteur() {
+  const URL_MCP = SB_URL + "/functions/v1/jarvis-mcp";
+  const c = document.createElement("div"); c.className = "set";
+  c.innerHTML = '<div class="stop"><b>Connecteur Claude</b><span></span></div>'
+    + '<small>Pour parler à Jarvis avec la vraie voix de l’app Claude (iPhone, Mac). Adresse du connecteur :</small>'
+    + '<div class="row2"><input readonly class="url"><button class="btn soft" type="button">Copier</button></div>'
+    + '<div class="row2"><button class="btn main gen" type="button" style="flex:1">Créer ma clé</button></div>'
+    + '<div class="tok" hidden><small><b>Ta clé (affichée une seule fois) :</b></small><div class="row2"><input readonly class="tk"><button class="btn soft" type="button">Copier</button></div></div>'
+    + '<small>Dans Claude : Personnaliser › Connecteurs › + › Ajouter un connecteur personnalisé. Nom : Jarvis. Colle l’adresse. Authentification : « Pas de connexion ». En-têtes de requête : nom <b>Authorization</b>, valeur <b>Bearer</b> + espace + ta clé.</small>';
+  const st = c.querySelector(".stop span"), url = c.querySelector(".url"), gen = c.querySelector(".gen"), box = c.querySelector(".tok"), tk = c.querySelector(".tk");
+  url.value = URL_MCP;
+  const copier = (v, quoi) => { (navigator.clipboard?.writeText(v) || Promise.reject()).then(() => toast(quoi + " copiée ✓"), () => toast("Touche longtemps le champ pour copier")); };
+  c.querySelectorAll(".row2 .btn.soft")[0].addEventListener("click", () => copier(URL_MCP, "Adresse"));
+  c.querySelectorAll(".row2 .btn.soft")[1].addEventListener("click", () => copier("Bearer " + tk.value, "Valeur « Bearer + clé »"));
+  sb.rpc("jarvis_mcp_token_status").then(({ data }) => { if (data) { st.textContent = "Clé créée ✓"; st.className = "ok"; gen.textContent = "Remplacer ma clé"; } else st.textContent = "Pas encore de clé"; });
+  gen.addEventListener("click", async () => {
+    if (gen.textContent.startsWith("Remplacer") && gen.dataset.sure !== "1") { gen.dataset.sure = "1"; gen.textContent = "Touche encore : l’ancienne clé ne marchera plus"; return; }
+    gen.disabled = true;
+    const { data, error } = await sb.rpc("jarvis_new_mcp_token");
+    gen.disabled = false; gen.dataset.sure = "";
+    if (error || !data) { toast("Pas créée : " + (error ? error.message : "")); return; }
+    tk.value = data; box.hidden = false; st.textContent = "Clé créée ✓"; st.className = "ok"; gen.textContent = "Remplacer ma clé";
+    toast("Clé créée. Copie-la maintenant, elle ne sera plus affichée.");
+  });
+  return c;
 }
 function blocVoix() {
   const c = document.createElement("div"); c.className = "set";

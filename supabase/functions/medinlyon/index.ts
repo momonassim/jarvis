@@ -260,12 +260,14 @@ async function annuler(nav: Nav, id?: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "methode" }, 405);
-  // seul le propriétaire (la base le vérifie) peut lancer le robot
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
-  });
-  const { data: owner } = await sb.rpc("jarvis_is_owner");
-  if (owner !== true) return json({ error: "interdit" }, 403);
+  // seul le propriétaire (la base le vérifie) ou le connecteur Jarvis (appel interne du serveur) peut lancer le robot
+  const auth = req.headers.get("Authorization") ?? "";
+  const interne = auth === "Bearer " + Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!interne) {
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
+    const { data: owner } = await sb.rpc("jarvis_is_owner");
+    if (owner !== true) return json({ error: "interdit" }, 403);
+  }
 
   let b: Record<string, string> = {};
   try { b = await req.json(); } catch { /* vide */ }
