@@ -637,6 +637,37 @@ function applySante(rows) {
   if (nxt) { S.next = p.status; S.nextPlace = "clinique"; }
 }
 
+
+/* ---------- Ton travail : le planning 5x8 envoyé par Mon Planning ---------- */
+const POSTE_J = { M: "Matin · 4h–12h", A: "Après-midi · 12h–20h", N: "Nuit · 20h–4h", R: "Repos", J: "Poste à fixer par le chef" };
+const lc = t => t.charAt(0).toLowerCase() + t.slice(1);
+function ditJ(o) {
+  if (!o) return "—"; const f = o.ferie ? ` (${o.ferie})` : "";
+  if (o.g === "conge") return "Congé payé" + f; if (o.g === "rc") return "Récup" + f; if (o.g === "maladie") return "Maladie" + f;
+  if (o.sup) return "Jour sup · " + (POSTE_J[o.poste] || o.poste) + f;
+  if (o.poste === "R") return (o.rem ? "Repos · remonte" : "Repos") + f;
+  return (POSTE_J[o.poste] || o.poste) + f;
+}
+function applyPlanning(rows) {
+  S.planningTxt = "";
+  const r = rows.find(x => x.source === "planning" && x.kind === "etat"), P = r && r.data; if (!P || !(P.jours || []).length) return;
+  const p = byId.usine, m = (rows.find(x => x.source === "mac" && x.kind === "lieu" && x.label === "usine") || {}).data || {};
+  const J = Object.fromEntries(P.jours.map(o => [o.d, o])), td = parisDay(), fut = P.jours.filter(o => o.d > td), auj = J[td], dem = J[parisDay(1)];
+  let say = `Aujourd’hui : ${lc(ditJ(auj))}. Demain : ${lc(ditJ(dem))}.`;
+  const facts = [["Aujourd’hui", ditJ(auj)], ["Demain", ditJ(dem)]];
+  if (auj && auj.rem) { const fin = fut.find(o => !o.rem && o.poste !== "R" && !["conge", "rc", "maladie"].includes(o.g)); if (fin) { say += ` Tu es en remonte, reprise ${jour(fin.d)}.`; facts.push(["Reprise", jour(fin.d) + " · " + lc(ditJ(fin))]); } }
+  else { const rem = fut.find(o => o.rem); if (rem) facts.push(["Prochaine remonte", "à partir du " + jour(rem.d)]); }
+  const sup = fut.filter(o => o.sup); if (sup.length) facts.push(["Jours sup prévus", sup.slice(0, 4).map(o => frd(o.d).slice(0, 5)).join(", ")]);
+  const MO = ["janv.", "févr.", "mars", "avril", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+  const mois = td.slice(0, 7), pm = (P.payes || []).find(x => x.mois === mois), pn = (P.payes || []).find(x => x.mois > mois);
+  if (P.base_ok && pm) { facts.push(["Paye estimée fin " + MO[+mois.slice(5) - 1], eur(pm.net) + " net"]); if (pn) facts.push(["Paye estimée fin " + MO[+pn.mois.slice(5) - 1], eur(pn.net) + " net"]); }
+  const c = P.compteurs || {}; facts.push(["Compteurs", `${c.cp ?? "?"} CP · ${c.cor ?? "?"} COR`]);
+  p.status = "Aujourd’hui : " + lc(ditJ(auj).split(" · ")[0]);
+  p.say = say + (m.say ? " " + m.say : "");
+  p.facts = [...facts, ...(m.facts || [])];
+  p.live = "En direct · Mon Planning le " + quand(r.updated_at);
+  S.planningTxt = fut.slice(0, 21).map(o => `${jour(o.d)} : ${lc(ditJ(o))}`).join("\n");
+}
 let loading = null;
 async function loadAll() {
   if (loading) return loading;
@@ -646,6 +677,7 @@ async function loadAll() {
     const rows = data || [];
     S.next = ""; S.nextPlace = "";
     applyMac(rows.filter(r => r.source === "mac" || r.source === "jarvis"));
+    applyPlanning(rows.filter(r => r.source === "planning" || r.source === "mac"));
     applyEnergie(rows.filter(r => r.source === "plenitude"));
     applyFoncia(rows.filter(r => r.source === "foncia"));
     applySante(rows.filter(r => r.source === "medinlyon"));
@@ -824,13 +856,15 @@ function context() {
   return `Tu es Jarvis, l’assistant personnel de ${S.prenom || "ton propriétaire"}. ${S.profil}
 Tu vois ses comptes, ses papiers, sa santé et ses abonnements. Tu anticipes et tu proposes, mais tu n’agis jamais sans sa confirmation, et pour l’argent tu conseilles seulement.
 Réponds en français parlé (ta réponse peut être lue à voix haute), très simple, sans jargon, en 1 à 3 phrases courtes, sans listes ni titres, avec des chiffres concrets.
-Pour prendre ou annuler un rendez-vous médical, dis-lui de toucher « Ta santé » puis « Prendre rendez-vous » : c’est là que Jarvis réserve après sa confirmation.
+Avant de proposer un moment pour un rendez-vous ou une démarche, regarde son planning de travail et choisis un moment où il ne travaille pas. Pour prendre ou annuler un rendez-vous médical, dis-lui de toucher « Ta santé » puis « Prendre rendez-vous » : c’est là que Jarvis réserve après sa confirmation.
 Ce qui n’est pas encore branché (banque, mails, Ameli, Orange), dis-le simplement sans inventer de chiffre.
 Nous sommes le ${new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}, il est ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.
 Situation :
 ${lines}
 Papiers :
-${papiers}`;
+${papiers}${S.planningTxt ? `
+Son planning de travail des 3 prochaines semaines (Mon Planning ; une nuit compte pour le jour où elle commence) :
+${S.planningTxt}` : ""}`;
 }
 async function send() {
   const t = input.value.trim(); if (!t || busy) return; input.value = ""; bubble("me", t); history.push({ role: "user", content: t });

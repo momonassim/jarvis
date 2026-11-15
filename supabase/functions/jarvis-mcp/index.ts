@@ -116,7 +116,49 @@ function lieu(rows: Row[], id: string, detail: boolean) {
   if (id === "logement") return logement(rows, detail);
   if (id === "energie") return energie(rows, detail);
   if (id === "sante") return sante(rows, detail);
+  if (id === "travail") return travail(rows, detail);
   const l = LIEUX[id]; return (l?.mac && mac(rows, l.mac, detail)) || "Rien pour ce lieu pour l'instant.";
+}
+
+// ---------- le travail : planning 5x8 envoyé par Mon Planning ----------
+const POSTE: Record<string, string> = { M: "matin (4h-12h)", A: "après-midi (12h-20h)", N: "nuit (20h-4h)", R: "repos", J: "poste à fixer par le chef (jour travaillé de la remonte)" };
+function planning(rows: Row[]) { return rows.find((r) => r.source === "planning" && r.kind === "etat")?.data ?? null; }
+function dit(o: any) {
+  if (!o) return "inconnu";
+  const f = o.ferie ? ` (férié : ${o.ferie})` : "";
+  if (o.g === "conge") return "congé payé" + f;
+  if (o.g === "rc") return "récup" + f;
+  if (o.g === "maladie") return "maladie" + f;
+  if (o.sup) return `jour sup (heures sup), ${POSTE[o.poste] ?? o.poste}` + f;
+  if (o.poste === "R") return (o.rem ? "repos (remonte)" : "repos") + f;
+  return (POSTE[o.poste] ?? o.poste) + f;
+}
+function travail(rows: Row[], detail: boolean) {
+  const P = planning(rows); let t = "";
+  if (P?.jours?.length) {
+    const J: Record<string, any> = Object.fromEntries(P.jours.map((o: any) => [o.d, o]));
+    const td = today(), de = today(1);
+    t += `Aujourd'hui : ${dit(J[td])}. Demain : ${dit(J[de])}.`;
+    const fut = P.jours.filter((o: any) => o.d > td);
+    const enRem = J[td]?.rem;
+    if (enRem) { const fin = fut.find((o: any) => !o.rem && o.poste !== "R" && !["conge", "rc", "maladie"].includes(o.g)); if (fin) t += ` En remonte, reprise le ${jour(fin.d)} (${dit(fin)}).`; }
+    else { const rem = fut.find((o: any) => o.rem); if (rem) t += ` Prochaine remonte à partir du ${jour(rem.d)}.`; }
+    const sup = fut.filter((o: any) => o.sup).slice(0, 5); if (sup.length) t += ` Jours sup prévus : ${sup.map((o: any) => frd(o.d)).join(", ")}.`;
+    const mois = td.slice(0, 7), pm = (P.payes ?? []).find((x: any) => x.mois === mois), pn = (P.payes ?? []).find((x: any) => x.mois > mois);
+    if (P.base_ok && pm) t += ` Paye estimée fin ${MOIS[+mois.slice(5) - 1]} : ${eur(pm.net)} net (travail de ${MOIS[+pm.travail.slice(5) - 1]})` + (pn ? `, puis ${eur(pn.net)} fin ${MOIS[+pn.mois.slice(5) - 1]}` : "") + ".";
+    const c = P.compteurs ?? {}; t += ` Compteurs : ${c.cp ?? "?"} CP restants, ${c.cor ?? "?"} COR (estimation pour janvier : ${c.cor_estimes_janvier ?? "?"}).`;
+    t += ` (Mon Planning, envoyé le ${new Date(P.maj).toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "short", timeStyle: "short" })}.)`;
+    if (detail) t += "\nLes 14 prochains jours :\n" + fut.slice(0, 14).map((o: any) => `- ${jour(o.d)} : ${dit(o)}`).join("\n");
+  } else t += "Planning pas encore relié (dans Mon Planning, Profil › Relier à Jarvis).";
+  const ma = mac(rows, "usine", detail); if (ma) t += "\n" + ma;
+  return t;
+}
+function postes(rows: Row[], a: Record<string, any>) {
+  const P = planning(rows); if (!P?.jours?.length) return "Le planning n'est pas encore relié : dans Mon Planning, Profil › Relier à Jarvis.";
+  const d1 = dateDe(a.date), d2 = a.jusqu_au ? dateDe(a.jusqu_au) : d1;
+  const liste = P.jours.filter((o: any) => o.d >= d1 && o.d <= d2).slice(0, 62);
+  if (!liste.length) return `Pas de planning pour cette période (connu du ${frd(P.jours[0].d)} au ${frd(P.jours[P.jours.length - 1].d)}).`;
+  return liste.map((o: any) => `- ${jour(o.d)} : ${dit(o)}`).join("\n");
 }
 async function resume() {
   const rows = await lignes();
@@ -125,8 +167,8 @@ async function resume() {
   return `Jarvis — situation au ${now}.\n${prof}\n\n` + Object.entries(LIEUX).map(([id, l]) => `## ${l.nom}\n${lieu(rows, id, false)}`).join("\n\n");
 }
 async function documents(q: string) {
-  const rows = await lignes(); const mots = q.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/\s+/).filter(Boolean);
-  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const rows = await lignes(); const mots = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter(Boolean);
+  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const cands: { titre: string; chemin: string; date: string }[] = [];
   rows.filter((r) => r.source === "foncia" && r.kind === "document" && r.data?.path).forEach((r) => cands.push({ titre: "Foncia · " + r.label.replace(/\.pdf$/i, ""), chemin: "foncia/" + r.data.path, date: r.date ?? "" }));
   rows.filter((r) => r.source === "mac" && r.kind === "lieu").forEach((r) => (r.data?.docs ?? []).filter((x: any) => x.path).forEach((x: any) => cands.push({ titre: `${x.t} ${x.d ?? ""}`.trim(), chemin: x.path, date: "" })));
@@ -161,13 +203,14 @@ async function montrer(a: Record<string, any>) {
 }
 const CENTRES: Record<string, string> = { villeurbanne: "1", brotteaux: "2", "lyon 6": "2", lyon: "2", "1": "1", "2": "2" };
 const centreId = (c?: string) => { const k = (c ?? "").toLowerCase(); return Object.entries(CENTRES).find(([n]) => k.includes(n))?.[1] ?? null; };
-const dateDe = (d?: string) => !d || /aujourd/i.test(d) ? today() : /demain/i.test(d) ? today(1) : /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : today();
+const dateDe = (d?: string) => !d || /aujourd/i.test(d) ? today() : /apr[eè]s-demain/i.test(d) ? today(2) : /demain/i.test(d) ? today(1) : /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : today();
 
 // ---------- les outils proposés à Claude ----------
 const TOOLS = [
   { name: "jarvis_resume", title: "Résumé de ma vie (Jarvis)", description: "Vue d'ensemble à jour de la vie de l'utilisateur : logement et loyer (Foncia), gaz et électricité (Plenitude), santé et rendez-vous médicaux de la famille (MédinLyon), travail et paies, impôts, voiture, papiers, banque, bébé, abonnements. À appeler en premier pour toute question sur sa situation, son argent, ses papiers ou ses rendez-vous.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
   { name: "jarvis_lieu", title: "Détail d'un domaine (Jarvis)", description: "Détail complet d'un domaine de Jarvis, avec l'historique et la liste des papiers rangés.", inputSchema: { type: "object", properties: { lieu: { type: "string", enum: Object.keys(LIEUX), description: "Le domaine à détailler." } }, required: ["lieu"] }, annotations: { readOnlyHint: true } },
   { name: "jarvis_pdf", title: "Retrouver un PDF (Jarvis)", description: "Cherche un PDF rangé dans Jarvis (quittances, avis d'échéance, régularisations Foncia, justificatifs MédinLyon, avis d'impôt, contrôle technique, assurance auto…) et donne un lien pour l'ouvrir. Exemple de recherche : « quittance octobre 2026 ».", inputSchema: { type: "object", properties: { recherche: { type: "string" } }, required: ["recherche"] }, annotations: { readOnlyHint: true } },
+  { name: "jarvis_planning", title: "Mon planning de travail (5x8)", description: "Postes de travail de l'utilisateur jour par jour (matin 4h-12h, après-midi 12h-20h, nuit 20h-4h, repos, remonte, jours sup, congés), envoyés par son app Mon Planning. À utiliser dès qu'il demande s'il travaille ou s'il est libre à une date, et AVANT de lui proposer un rendez-vous (médecin, démarche) : ne propose que des moments où il ne travaille pas. Une nuit compte pour le jour où elle commence.", inputSchema: { type: "object", properties: { date: { type: "string", description: "« aujourd'hui », « demain », « après-demain » ou AAAA-MM-JJ (début)" }, jusqu_au: { type: "string", description: "Optionnel, AAAA-MM-JJ : fin de la période (62 jours max)" } } }, annotations: { readOnlyHint: true } },
   { name: "jarvis_ecran", title: "Piloter l'écran de Jarvis", description: "Pilote l'app Jarvis ouverte sur l'iPhone ou le Mac de l'utilisateur (une ville 3D où chaque bâtiment est un domaine de sa vie). Utilise-le pour MONTRER ce dont tu parles : aller à un lieu et ouvrir sa fiche (action lieu), ouvrir un papier précis (action document, avec lieu + titre, ex. « avis d'impôt 2026 », « contrôle technique »), revenir à la vue de toute la ville (ensemble), bouger la caméra (camera : tourner en degrés, + vers la droite / - vers la gauche ; zoom « avant » ou « arriere » ; vue « dessus » ou « rasante »), passer en jour ou nuit (ciel : mode « jour » / « nuit »), tout fermer (fermer), ou afficher une courte phrase à l'écran (message : texte). Quand tu parles d'un domaine, montre-le en même temps.", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message"] }, lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string", description: "Pour document : quelques mots du titre du papier" }, tourner: { type: "number", description: "Pour camera : degrés (ex. 90 ou -45)" }, zoom: { type: "string", enum: ["avant", "arriere"] }, vue: { type: "string", enum: ["dessus", "rasante"] }, mode: { type: "string", enum: ["jour", "nuit"] }, texte: { type: "string", description: "Pour message : une phrase courte" } }, required: ["action"] }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
   { name: "medinlyon_creneaux", title: "Créneaux libres MédinLyon", description: "Créneaux de consultation libres chez MédinLyon (centres Villeurbanne et Lyon 6 Brotteaux), seulement aujourd'hui ou demain. Les créneaux marqués supplément (soir, week-end) coûtent environ 23 € de dépassement : le dire à l'utilisateur.", inputSchema: { type: "object", properties: { centre: { type: "string", description: "« Villeurbanne » ou « Brotteaux »" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" } }, required: ["centre"] }, annotations: { readOnlyHint: true } },
   { name: "medinlyon_reserver", title: "Réserver un rendez-vous MédinLyon", description: "Réserve un rendez-vous MédinLyon pour une personne de la famille. Avant d'appeler cet outil, récapitule à l'utilisateur pour qui, où, quand et le tarif, et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { pour: { type: "string", description: "Nom ou prénom de la personne (famille sur le compte)" }, centre: { type: "string" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" }, heure: { type: "string", description: "HH:MM, un créneau libre" }, confirme: { type: "boolean", description: "true seulement après le oui explicite de l'utilisateur" } }, required: ["pour", "centre", "date", "heure", "confirme"] }, annotations: { destructiveHint: false, readOnlyHint: false } },
@@ -180,6 +223,7 @@ async function appel(nom: string, a: Record<string, any>): Promise<string> {
     case "jarvis_resume": return await resume();
     case "jarvis_lieu": { if (!LIEUX[a.lieu]) return "Domaine inconnu. Choix : " + Object.keys(LIEUX).join(", "); const rows = await lignes(); await ecran("lieu", { lieu: a.lieu }).catch(() => false); return `${LIEUX[a.lieu].nom} (affiché aussi dans l'app Jarvis)\n${lieu(rows, a.lieu, true)}`; }
     case "jarvis_ecran": return await montrer(a);
+    case "jarvis_planning": return postes(await lignes(), a);
     case "jarvis_pdf": return await documents(String(a.recherche ?? ""));
     case "medinlyon_creneaux": {
       const c = centreId(a.centre); if (!c) return "Centre inconnu : Villeurbanne ou Brotteaux.";
@@ -224,7 +268,7 @@ async function traiter(m: any) {
     case "initialize": {
       const v = VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : VERSIONS[0];
       return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jarvis", title: "Jarvis", version: "1.0.0" },
-        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Réponds en français simple. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement." });
+        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement." });
     }
     case "ping": return ok({});
     case "tools/list": return ok({ tools: TOOLS });
