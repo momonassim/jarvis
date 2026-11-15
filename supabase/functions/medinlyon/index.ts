@@ -56,7 +56,8 @@ const attr = (tag: string, name: string) => {
 const txt = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&#039;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 
 async function login(nav: Nav) {
-  const user = Deno.env.get("MEDINLYON_EMAIL"), pass = Deno.env.get("MEDINLYON_PASSWORD");
+  const lire = async (n: string) => { const { data } = await admin().rpc("jarvis_get_secret", { p_name: n }); return (typeof data === "string" && data) || Deno.env.get(n); };
+  const user = await lire("MEDINLYON_EMAIL"), pass = await lire("MEDINLYON_PASSWORD");
   if (!user || !pass) throw new Error("codes_absents");
   const page = await nav.go("/login");
   const form = page.text.match(/<form[\s\S]*?<\/form>/i)?.[0] ?? "";
@@ -282,8 +283,8 @@ Deno.serve(async (req) => {
     return json({ error: "action" }, 400);
   } catch (e) {
     const m = String((e as Error).message ?? e);
-    if (m === "codes_absents") return json({ ok: false, code: m, message: "Tes codes MédinLyon ne sont pas encore dans le coffre Supabase." });
-    if (m === "connexion_refusee") return json({ ok: false, code: m, message: "MédinLyon refuse la connexion : vérifie l'e-mail et le mot de passe dans le coffre Supabase." });
+    if (m === "codes_absents") return json({ ok: false, code: m, message: "Ajoute ton e-mail et ton mot de passe MédinLyon dans les Réglages de Jarvis (roue en haut)." });
+    if (m === "connexion_refusee") return json({ ok: false, code: m, message: "MédinLyon refuse la connexion : vérifie l'e-mail et le mot de passe dans les Réglages de Jarvis." });
     try { await trace("erreur", { message: m.slice(0, 300), action: b.action ?? "" }); } catch { /* rien */ }
     return json({ ok: false, code: "erreur", message: "Le robot MédinLyon a eu un souci : " + m.slice(0, 160) });
   }

@@ -22,8 +22,10 @@ Deno.serve(async (req) => {
   const { data: ok } = await sb.rpc("jarvis_is_owner");
   if (ok !== true) return json({ error: "interdit" }, 403);
 
-  // 2. La clé Claude
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  // 2. La clé Claude (rangée depuis les Réglages de l'app, sinon dans les secrets Supabase)
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const { data: coffre } = await admin.rpc("jarvis_get_secret", { p_name: "ANTHROPIC_API_KEY" });
+  const key = (typeof coffre === "string" && coffre) || Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) return json({ error: "cle_absente" }, 503);
 
   // 3. La demande

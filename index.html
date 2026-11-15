@@ -26,6 +26,7 @@
   <button class="brief" id="brief"><small id="hello">Bonjour</small><strong><i class="dot"></i><span id="briefTxt">…</span><span class="go">›</span></strong></button>
   <div class="col">
     <button class="round" id="home" aria-label="Revoir toute la ville"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg></button>
+    <button class="round" id="gear" aria-label="Réglages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     <button class="round" id="sky" aria-label="Jour ou nuit"><svg id="skyIc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></svg></button>
   </div>
 </div>
@@ -62,6 +63,17 @@
     <div class="head"><div class="ic" style="--c:#ffd0cb">🩺</div>
       <div class="nm"><small id="bSub"></small><b id="bQ">Pour qui ?</b></div><button class="x" id="bClose" aria-label="Fermer">✕</button></div>
     <div class="bbody" id="bBody"></div>
+  </div>
+</div>
+
+<div class="sheet" id="setsheet" role="dialog" aria-labelledby="sT">
+  <div class="card scroll">
+    <div class="grab"></div>
+    <div class="head"><div class="ic" style="--c:#e8e3da">⚙️</div>
+      <div class="nm"><small>Rangés dans ton coffre chiffré</small><b id="sT">Réglages</b></div><button class="x" id="sClose" aria-label="Fermer">✕</button></div>
+    <p class="hint">Une fois enregistré, un code n’est plus jamais affiché : seuls les robots de Jarvis s’en servent. Pour le changer, tape le nouveau.</p>
+    <div class="bbody" id="sBody"></div>
+    <button class="btn soft wide" id="sOut" type="button">Me déconnecter</button>
   </div>
 </div>
 

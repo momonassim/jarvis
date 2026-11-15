@@ -407,7 +407,7 @@ function placePins() {
       compact: dist > (small ? 78 : 95) && S.sel !== p && !p.urgent, prio: (S.sel === p ? 0 : (p.urgent ? 1 : 2)) * 1000 + dist });
   });
   items.sort((a, b) => a.prio - b.prio);
-  const taken = [], topLimit = 110, botLimit = H - (S.sel || talkOpen || bookOpen ? H * .46 : 84);
+  const taken = [], topLimit = 110, botLimit = H - (S.sel || talkOpen || bookOpen || setOpen ? H * .46 : 84);
   items.forEach(it => {
     const el = it.p.pin; el.classList.toggle("compact", it.compact); el.classList.toggle("sel", S.sel === it.p);
     const bub = el.firstChild, w = bub.offsetWidth || 42, h = (bub.offsetHeight || 42) + 22;
@@ -431,7 +431,7 @@ function placePins() {
    ========================================================= */
 const sheet = $("sheet");
 function select(p) {
-  S.sel = p; closeTalk(true); closeBook(true);
+  S.sel = p; closeTalk(true); closeBook(true); closeSettings(true);
   flyTo(p.focus, p.dist * distK(), p.azim, p.polar);
   viewShiftGoal = 1;
   $("card").style.setProperty("--c", p.color); $("pIc").style.setProperty("--c", p.color); $("pIc").textContent = p.emoji;
@@ -462,7 +462,7 @@ function renderSheet(p) {
 }
 function deselect() { if (!S.sel) return; S.sel = null; sheet.classList.remove("open"); $("ask").classList.remove("away"); viewShiftGoal = 0; }
 $("pClose").addEventListener("click", deselect);
-$("home").addEventListener("click", () => { deselect(); closeTalk(); closeBook(); overview(); });
+$("home").addEventListener("click", () => { deselect(); closeTalk(); closeBook(); closeSettings(); overview(); });
 function swipeClose(el, fn) { let y0 = null;
   el.addEventListener("pointerdown", e => { if (e.target.closest("button,input,a,.msgs,.chips,.slots")) return; y0 = e.clientY; });
   el.addEventListener("pointerup", e => { if (y0 !== null && e.clientY - y0 > 50 && !el.scrollTop) fn(); y0 = null; });
@@ -677,7 +677,7 @@ const B = {};
 const CENTRES = { "1": "Villeurbanne", "2": "Lyon 6 Brotteaux" };
 function openBook() {
   if (S.sel) { S.sel = null; sheet.classList.remove("open"); }
-  closeTalk(true);
+  closeTalk(true); closeSettings(true);
   bookOpen = true; viewShiftGoal = 1; $("book").classList.add("open"); $("ask").classList.add("away");
   Object.keys(B).forEach(k => delete B[k]); stepWho();
 }
@@ -759,7 +759,7 @@ const msgs = $("msgs"), input = $("input");
 function bubble(c, t) { const d = document.createElement("div"); d.className = "m " + c; d.textContent = t; msgs.append(d); msgs.scrollTop = msgs.scrollHeight; return d; }
 function openTalk(p) {
   if (S.sel) { S.sel = null; sheet.classList.remove("open"); }
-  closeBook(true);
+  closeBook(true); closeSettings(true);
   talkOpen = true; viewShiftGoal = 1; $("talk").classList.add("open"); $("ask").classList.add("away");
   if (!msgs.children.length) bubble("j", p ? "On parle de " + p.name.toLowerCase() + " ? Je t’écoute." : "Je t’écoute. Pose-moi une question sur ton argent, tes papiers, ta santé ou ton planning.");
   else if (p) bubble("j", "On parle de " + p.name.toLowerCase() + " ?");
@@ -794,7 +794,7 @@ async function send() {
       headers: { "Content-Type": "application/json", apikey: SB_KEY, Authorization: "Bearer " + (session ? session.access_token : "") },
       body: JSON.stringify({ system: context(), messages: history }) });
     if (!r.ok) { let j = {}; try { j = await r.json(); } catch (_) {}
-      throw new Error(j.error === "cle_absente" ? "Ma clé Claude n’est pas encore dans le coffre Supabase. Ajoute-la et je te réponds." : j.error === "interdit" ? "Reconnecte-toi, je ne te reconnais plus." : "Je n’arrive pas à joindre Claude (" + (j.status || r.status) + ")."); }
+      throw new Error(j.error === "cle_absente" ? "Il me manque ta clé Claude : touche la roue ⚙️ en haut, colle-la dans « Clé Claude » et je te réponds." : j.error === "interdit" ? "Reconnecte-toi, je ne te reconnais plus." : "Je n’arrive pas à joindre Claude (" + (j.status || r.status) + ")."); }
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { value, done } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
       let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
@@ -833,6 +833,50 @@ micBtn.addEventListener("click", () => {
   rec.onend = () => { listening = false; micBtn.classList.remove("on"); vhint.textContent = "Touche le micro et parle"; if (heard.trim()) send(); };
   try { rec.start(); } catch (_) { vhint.textContent = "Le micro n’a pas démarré, réessaie"; }
 });
+
+/* =========================================================
+   Réglages : tes codes, rangés dans le coffre chiffré de Supabase.
+   L'app peut les écrire, jamais les relire.
+   ========================================================= */
+const REGLAGES = [
+  { name: "ANTHROPIC_API_KEY", label: "Clé Claude", help: "Pour parler avec Jarvis. Elle commence par « sk-ant- » (platform.claude.com › API keys).", type: "password", ph: "sk-ant-…" },
+  { name: "MEDINLYON_EMAIL", label: "MédinLyon · e-mail", help: "Pour prendre et annuler les rendez-vous de la famille.", type: "email", ph: "ton e-mail MédinLyon" },
+  { name: "MEDINLYON_PASSWORD", label: "MédinLyon · mot de passe", help: "", type: "password", ph: "ton mot de passe MédinLyon" },
+];
+let setOpen = false;
+async function openSettings() {
+  deselect(); closeTalk(true); closeBook(true);
+  setOpen = true; viewShiftGoal = 1; $("setsheet").classList.add("open"); $("ask").classList.add("away");
+  const o = $("sBody"); o.innerHTML = '<p class="empty">Je regarde ce qui est déjà rangé…</p>';
+  const { data, error } = await sb.rpc("jarvis_secret_status");
+  const etat = Object.fromEntries((data || []).map(r => [r.name, r]));
+  o.innerHTML = "";
+  if (error) { o.innerHTML = '<p class="empty">Je n’arrive pas à ouvrir le coffre. Reconnecte-toi.</p>'; return; }
+  REGLAGES.forEach(r => {
+    const c = document.createElement("div"); c.className = "set";
+    c.innerHTML = '<div class="stop"><b></b><span></span></div><div class="row2"><input autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn main" type="button">Enregistrer</button></div><small></small>';
+    const st = c.querySelector(".stop span"), inp = c.querySelector("input"), b = c.querySelector("button");
+    c.querySelector(".stop b").textContent = r.label; c.querySelector("small").textContent = r.help;
+    inp.type = r.type; inp.placeholder = etat[r.name]?.rempli ? "•••••••• déjà rangé" : r.ph;
+    const show = ok => { st.textContent = ok ? "Enregistré ✓" : "À ajouter"; st.className = ok ? "ok" : ""; };
+    show(!!etat[r.name]?.rempli);
+    b.addEventListener("click", async () => {
+      const v = inp.value.trim(); if (!v) { inp.focus(); return; }
+      b.disabled = true; b.textContent = "…";
+      const { error: e } = await sb.rpc("jarvis_set_secret", { p_name: r.name, p_value: v });
+      b.disabled = false; b.textContent = "Enregistrer";
+      if (e) { toast("Pas enregistré : " + e.message); return; }
+      inp.value = ""; inp.placeholder = "•••••••• déjà rangé"; show(true); toast(r.label + " enregistré ✓");
+    });
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") b.click(); });
+    o.append(c);
+  });
+}
+function closeSettings(keep) { if (!setOpen) return; setOpen = false; $("setsheet").classList.remove("open"); document.activeElement?.blur?.(); if (!keep) { viewShiftGoal = 0; $("ask").classList.remove("away"); } }
+$("gear").addEventListener("click", () => setOpen ? closeSettings() : openSettings());
+$("sClose").addEventListener("click", () => closeSettings());
+swipeClose($("setsheet").querySelector(".card"), () => closeSettings());
+$("sOut").addEventListener("click", async () => { closeSettings(); await sb.auth.signOut(); });
 
 /* =========================================================
    La porte d'entrée
