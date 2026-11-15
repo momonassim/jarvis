@@ -1031,25 +1031,27 @@ function blocPapiers() {
     const files = [...inp.files]; inp.value = ""; out.textContent = ""; if (!files.length) return;
     let ok = 0; st.textContent = "Je lis…"; st.className = "";
     const { data: { session } } = await sb.auth.getSession();
-    for (const f of files) {
+    const un = async (f) => {
       const n = f.name, ban = INTERDITS.find(([re]) => re.test(n));
-      if (ban) { ligne("✕ " + n + " — pas rangé (" + ban[1] + ")"); continue; }
-      if (f.size > 20e6) { ligne("✕ " + n + " — trop lourd"); continue; }
+      if (ban) { ligne("✕ " + n + " — pas rangé (" + ban[1] + ")"); return; }
+      if (f.size > 20e6) { ligne("✕ " + n + " — trop lourd"); return; }
       const slug = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.]+/g, "-").toLowerCase();
       const path = "mac/a-trier/" + slug;
       const l = ligne("… " + n + " — je le lis");
       const { error } = await sb.storage.from("papiers").upload(path, f, { upsert: true, contentType: "application/pdf" });
-      if (error) { l.textContent = "✕ " + n + " — envoi raté : " + error.message; continue; }
+      if (error) { l.textContent = "✕ " + n + " — envoi raté : " + error.message; return; }
       try {
         const r = await fetch(SB_URL + "/functions/v1/jarvis-trier", { method: "POST",
           headers: { "Content-Type": "application/json", apikey: SB_KEY, Authorization: "Bearer " + (session ? session.access_token : "") },
           body: JSON.stringify({ path }) });
         const j = await r.json().catch(() => ({}));
-        if (j.refus) { l.textContent = "✕ " + n + " — pas rangé (" + j.refus + ")"; continue; }
-        if (!r.ok) { l.textContent = "✕ " + n + " — " + (j.error === "cle_absente" ? "il me manque ta clé Claude (Réglages ⚙️)" : "je n’ai pas réussi à le lire"); continue; }
+        if (j.refus) { l.textContent = "✕ " + n + " — pas rangé (" + j.refus + ")"; return; }
+        if (!r.ok) { l.textContent = "✕ " + n + " — " + (j.error === "cle_absente" ? "il me manque ta clé Claude (Réglages ⚙️)" : "je n’ai pas réussi à le lire"); return; }
         l.textContent = "✓ " + j.titre + (j.sous ? " (" + j.sous + ")" : "") + " → " + (LIEUX_PAPIERS[j.lieu] || j.lieu); ok++;
       } catch (_) { l.textContent = "✕ " + n + " — pas de connexion"; }
-    }
+    };
+    // 4 papiers lus en même temps
+    const file = [...files]; await Promise.all(Array.from({ length: Math.min(4, file.length) }, async () => { while (file.length) await un(file.shift()); }));
     st.textContent = ok ? ok + " rangé" + (ok > 1 ? "s" : "") + " ✓" : ""; st.className = ok ? "ok" : "";
     if (ok) loadAll();
   });

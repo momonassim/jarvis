@@ -4,6 +4,7 @@
 // Il refuse (et efface) les papiers qui portent un n° de sécu, un IBAN, une pièce d'identité…
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+import { PDFDocument } from "npm:pdf-lib@1.17.1";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -80,19 +81,30 @@ Deno.serve(async (req) => {
   if (eDl || !fichier) return json({ error: "introuvable" }, 404);
   const efface = () => admin.storage.from("papiers").remove([path]);
 
-  // 3. Jarvis lit et décide
+  // 3. Pour ranger, les 2 premières pages suffisent (beaucoup plus rapide qu'un papier entier)
+  let octets = new Uint8Array(await fichier.arrayBuffer());
+  try {
+    const src = await PDFDocument.load(octets, { ignoreEncryption: true });
+    if (src.getPageCount() > 2) {
+      const court = await PDFDocument.create();
+      (await court.copyPages(src, [0, 1])).forEach((pg) => court.addPage(pg));
+      octets = await court.save();
+    }
+  } catch { /* PDF spécial : on l'envoie tel quel */ }
+
+  // 4. Jarvis lit et décide
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
-      model: Deno.env.get("JARVIS_MODEL") ?? "claude-sonnet-5-5",
-      max_tokens: 400,
+      model: Deno.env.get("JARVIS_TRI_MODEL") ?? "claude-haiku-5-5",
+      max_tokens: 1200,
       system: CONSIGNE,
       tools: [OUTIL],
       messages: [{
         role: "user",
         content: [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: encodeBase64(new Uint8Array(await fichier.arrayBuffer())) } },
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: encodeBase64(octets) } },
           { type: "text", text: `Nom du fichier : ${nom}. Range ce papier.` },
         ],
       }],
@@ -113,10 +125,10 @@ Deno.serve(async (req) => {
   }
   if (!choix) { await efface(); return json({ error: "illisible" }, 502); }
 
-  // 4. Refusé : on l'efface tout de suite
+  // 5. Refusé : on l'efface tout de suite
   if (choix.refus) { await efface(); return json({ refus: choix.refus }); }
 
-  // 5. Rangé : on le déplace au bon lieu et on le relie
+  // 6. Rangé : on le déplace au bon lieu et on le relie
   const lieu = LIEUX[choix.lieu] ? choix.lieu : "mairie";
   const dest = `mac/${lieu}/${nom}`;
   await admin.storage.from("papiers").remove([dest]);
