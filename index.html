@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f1dcc4">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<meta name="robots" content="noindex,nofollow">
+<title>Jarvis</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="c" aria-label="Ta ville. Un doigt pour tourner, deux doigts pour zoomer et te déplacer, touche un lieu pour l’ouvrir."></canvas>
+<div id="pins"></div>
+
+<div class="top">
+  <button class="brief" id="brief"><small id="hello">Bonjour</small><strong><i class="dot"></i><span id="briefTxt">…</span><span class="go">›</span></strong></button>
+  <div class="col">
+    <button class="round" id="home" aria-label="Revoir toute la ville"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg></button>
+    <button class="round" id="sky" aria-label="Jour ou nuit"><svg id="skyIc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></svg></button>
+  </div>
+</div>
+
+<div class="bottom"><button class="ask" id="ask"><span class="orb"></span>Demande à Jarvis</button></div>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="false" aria-labelledby="pName">
+  <div class="card scroll" id="card">
+    <div class="grab"></div>
+    <div class="head"><div class="ic" id="pIc"></div><div class="nm"><small id="pPlace"></small><b id="pName"></b></div><button class="x" id="pClose" aria-label="Fermer">✕</button></div>
+    <p class="say" id="pSay"></p>
+    <div class="facts" id="pFacts"></div>
+    <div class="acts" id="pActs"></div>
+    <div id="pDocs"></div>
+    <p class="note" id="pNote"></p>
+  </div>
+</div>
+
+<div class="sheet talk" id="talk" role="dialog" aria-label="Parler à Jarvis">
+  <div class="card">
+    <div class="grab"></div>
+    <div class="head"><div class="ic" style="--c:transparent"><span class="orb big"></span></div>
+      <div class="nm"><small>Ton assistant</small><b>Jarvis</b></div><button class="x" id="tClose" aria-label="Fermer">✕</button></div>
+    <div class="msgs" id="msgs"></div>
+    <div class="chips" id="chips"></div>
+    <div class="compose"><input id="input" type="text" placeholder="Écris ta question" autocomplete="off" enterkeyhint="send"><button class="mic" id="mic" aria-label="Parler à Jarvis" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><button class="send" id="send" aria-label="Envoyer">↑</button></div>
+    <p class="vhint" id="vhint"></p>
+  </div>
+</div>
+
+<div class="sheet book" id="book" role="dialog" aria-labelledby="bQ">
+  <div class="card scroll">
+    <div class="grab"></div>
+    <div class="head"><div class="ic" style="--c:#ffd0cb">🩺</div>
+      <div class="nm"><small id="bSub"></small><b id="bQ">Pour qui ?</b></div><button class="x" id="bClose" aria-label="Fermer">✕</button></div>
+    <div class="bbody" id="bBody"></div>
+  </div>
+</div>
+
+<div class="paperwrap" id="paperwrap" role="dialog" aria-modal="true" aria-labelledby="dT">
+  <div class="paper" id="paper"><small id="dD"></small><h3 id="dT"></h3><div class="big" id="dV"></div><div id="dL"></div>
+    <div class="where">🗂️ <span id="dW"></span></div>
+    <a class="btn main pdf" id="dPdf" href="#" target="_blank" rel="noopener" hidden>Ouvrir le PDF</a>
+    <button class="btn soft wide pdf" id="dX" type="button" hidden>Annuler ce rendez-vous</button>
+    <button class="btn soft wide" id="dClose">Fermer</button></div>
+</div>
+
+<div class="gate" id="gate" hidden>
+  <form class="gcard" id="gform" autocomplete="on">
+    <span class="orb huge"></span>
+    <h1>Jarvis</h1>
+    <p id="gmsg">Connecte-toi pour ouvrir ta ville.</p>
+    <input id="gmail" type="email" inputmode="email" autocomplete="username" placeholder="Ton e-mail" required>
+    <input id="gpass" type="password" autocomplete="current-password" placeholder="Ton mot de passe" required minlength="8">
+    <button class="btn main" id="gin" type="submit">Entrer</button>
+    <button class="btn soft wide" id="gnew" type="button">Première fois : créer mon accès</button>
+  </form>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.45.4"
+}}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
