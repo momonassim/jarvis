@@ -531,6 +531,7 @@ function applyMac(rows) {
   rows.filter(r => r.kind === "lieu").forEach(r => {
     const p = byId[r.label]; if (!p) return; const d = r.data || {};
     if (r.label === "clinique") { p.macDocs = d.docs || []; return; }
+    if (r.label === "home" || r.label === "energie") { p.macDocs = d.docs || []; p.docs = [...p.macDocs]; return; }
     Object.assign(p, { place: d.place || p.place, status: d.status || p.status, say: d.say || p.say, facts: d.facts || [], docs: d.docs || [],
       live: (d.docs || []).length ? "D’après tes papiers trouvés sur ton Mac" : "Pas encore branché" });
   });
@@ -570,7 +571,7 @@ function applyEnergie(rows) {
   const el = conso["Électricité"], gz = conso["Gaz"];
   if (el) d.push({ t: "Consommation électricité", d: (el.mois || []).join(" et "), v: nb(el.kwh.slice(-1)[0] + " kWh"), where: "Espace client Plenitude", lines: (el.mois || []).map((m, i) => [m, nb(el.kwh[i] + " kWh")]) });
   if (gz) d.push({ t: "Consommation gaz", d: (gz.mois || []).join(" et "), v: nb(gz.kwh.slice(-1)[0] + " kWh"), where: "Espace client Plenitude", lines: (gz.mois || []).map((m, i) => [m, nb(gz.kwh[i] + " kWh")]) });
-  e.docs = d; e.live = stamp(rows, "relu chez Plenitude");
+  e.docs = [...d, ...(e.macDocs || [])]; e.live = stamp(rows, "relu chez Plenitude");
 }
 
 function applyFoncia(rows) {
@@ -609,7 +610,7 @@ function applyFoncia(rows) {
   by("intervention").forEach(r => d.push({ t: "Intervention", d: frd(r.date), v: r.data?.statut || "", where: "MyFoncia", lines: [["Objet", r.label.toLowerCase().replace(/^./, c => c.toUpperCase())], ["Statut", r.data?.statut || "—"]] }));
   docs.forEach(r => d.push({ t: nice(r.label, r.data?.categorie).slice(0, 60), d: "Ajouté le " + (r.data?.ajoute_le || "—"), v: "PDF", where: "Jarvis › papiers › Foncia",
     lines: [["Catégorie", r.data?.categorie || "—"], ["Ajouté le", r.data?.ajoute_le || "—"]], path: r.data?.path ? "foncia/" + r.data.path : null }));
-  h.docs = d; h.live = stamp(rows, "relu par ton iPhone");
+  h.docs = [...d, ...(h.macDocs || [])]; h.live = stamp(rows, "relu par ton iPhone");
 }
 
 function applySante(rows) {
@@ -1005,7 +1006,7 @@ async function openSettings() {
 }
 
 /* ---------- Ajouter mes papiers (depuis le Mac ou l'iPhone) ----------
-   Jarvis reconnaît le papier à son nom et le range au bon lieu.
+   Jarvis lit le papier (fonction jarvis-trier) et le range tout seul au bon lieu.
    Papiers jamais acceptés : ceux qui portent un numéro de sécu, un IBAN, une pièce d'identité,
    un papier de préfecture ou le papier d'une autre personne. */
 const INTERDITS = [
@@ -1017,22 +1018,11 @@ const INTERDITS = [
   [/billet|tunisair/i, "papier d’une autre personne"],
   [/\brib\b|iban/i, "relevé bancaire (IBAN)"],
 ];
-const CONNUS = [
-  [/avis_d_impot_2026/i, "impots", "Avis d’impôt 2026", "Revenus 2025"],
-  [/avis_d_impot_2025/i, "impots", "Avis d’impôt 2025", "Revenus 2024"],
-  [/page de confirmation/i, "impots", "Amende de stationnement", null],
-  [/contr[ôo]le technique/i, "garage", "Contrôle technique", null],
-  [/^assurance/i, "garage", "Assurance auto", null],
-  [/^facture\.pdf$/i, "garage", "Facture carte grise", null],
-  [/^VF7K/i, "garage", "Rapport d’historique du véhicule", "DS5 · vol et prêt vérifiés"],
-  [/hopital|h[ôo]pital/i, "clinique", "Paiement clinique", null],
-  [/justificatif de rendez-vous/i, "clinique", "Justificatif MédinLyon", "05/12/2025 à 09:45"],
-];
-const LIEUX_PAPIERS = { garage: "Voiture", impots: "Impôts et amendes", clinique: "Santé", usine: "Travail", mairie: "Papiers", banque: "Banque", orange: "Abonnements", medecin: "Bébé" };
+const LIEUX_PAPIERS = { home: "Chez toi", energie: "Gaz et électricité", garage: "Voiture", impots: "Impôts et amendes", clinique: "Santé", usine: "Travail", mairie: "Papiers", banque: "Banque", orange: "Abonnements", medecin: "Bébé" };
 function blocPapiers() {
   const c = document.createElement("div"); c.className = "set";
   c.innerHTML = '<div class="stop"><b>Ajouter mes papiers</b><span></span></div>'
-    + '<small>Choisis tes PDF (par exemple dans Téléchargements). Jarvis les reconnaît et les range au bon lieu. Il refuse ceux qui portent ton n° de sécu, ton IBAN ou une pièce d’identité.</small>'
+    + '<small>Choisis tes PDF (par exemple dans Téléchargements), autant que tu veux. Jarvis les lit, les range tout seul au bon lieu et leur donne un nom clair. Il refuse ceux qui portent ton n° de sécu, ton IBAN ou une pièce d’identité.</small>'
     + '<div class="row2"><button class="btn main" type="button" style="flex:1">Choisir des PDF…</button></div>'
     + '<input type="file" accept="application/pdf,.pdf" multiple hidden><div class="dep"></div>';
   const btn = c.querySelector(".btn"), inp = c.querySelector("input"), out = c.querySelector(".dep"), st = c.querySelector(".stop span");
@@ -1040,29 +1030,26 @@ function blocPapiers() {
   const ligne = (t, cls) => { const e = document.createElement("small"); e.textContent = t; if (cls) e.className = cls; out.append(e); return e; };
   inp.addEventListener("change", async () => {
     const files = [...inp.files]; inp.value = ""; out.textContent = ""; if (!files.length) return;
-    let ok = 0;
+    let ok = 0; st.textContent = "Je lis…"; st.className = "";
+    const { data: { session } } = await sb.auth.getSession();
     for (const f of files) {
       const n = f.name, ban = INTERDITS.find(([re]) => re.test(n));
       if (ban) { ligne("✕ " + n + " — pas rangé (" + ban[1] + ")"); continue; }
-      let k = CONNUS.find(([re]) => re.test(n)), lieu, titre, sous;
-      if (k) { [, lieu, titre, sous] = k; }
-      else {
-        const e = ligne("? " + n + " — où le ranger ? ");
-        const sel = document.createElement("select"); sel.innerHTML = '<option value="">Ne pas ranger</option>' + Object.entries(LIEUX_PAPIERS).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
-        e.append(sel);
-        lieu = await new Promise(res => sel.addEventListener("change", () => res(sel.value), { once: true }));
-        if (!lieu) { e.textContent = "✕ " + n + " — pas rangé"; continue; }
-        titre = n.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").trim(); sous = null; e.remove();
-      }
       if (f.size > 20e6) { ligne("✕ " + n + " — trop lourd"); continue; }
       const slug = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.]+/g, "-").toLowerCase();
-      const path = "mac/" + lieu + "/" + slug;
-      const l = ligne("… " + n);
+      const path = "mac/a-trier/" + slug;
+      const l = ligne("… " + n + " — je le lis");
       const { error } = await sb.storage.from("papiers").upload(path, f, { upsert: true, contentType: "application/pdf" });
       if (error) { l.textContent = "✕ " + n + " — envoi raté : " + error.message; continue; }
-      const { error: e2 } = await sb.rpc("jarvis_attach_doc", { p_lieu: lieu, p_t: titre, p_d: sous, p_path: path });
-      if (e2) { l.textContent = "✕ " + n + " — pas relié : " + e2.message; continue; }
-      l.textContent = "✓ " + titre + " → " + (LIEUX_PAPIERS[lieu] || lieu); ok++;
+      try {
+        const r = await fetch(SB_URL + "/functions/v1/jarvis-trier", { method: "POST",
+          headers: { "Content-Type": "application/json", apikey: SB_KEY, Authorization: "Bearer " + (session ? session.access_token : "") },
+          body: JSON.stringify({ path }) });
+        const j = await r.json().catch(() => ({}));
+        if (j.refus) { l.textContent = "✕ " + n + " — pas rangé (" + j.refus + ")"; continue; }
+        if (!r.ok) { l.textContent = "✕ " + n + " — " + (j.error === "cle_absente" ? "il me manque ta clé Claude (Réglages ⚙️)" : "je n’ai pas réussi à le lire"); continue; }
+        l.textContent = "✓ " + j.titre + (j.sous ? " (" + j.sous + ")" : "") + " → " + (LIEUX_PAPIERS[j.lieu] || j.lieu); ok++;
+      } catch (_) { l.textContent = "✕ " + n + " — pas de connexion"; }
     }
     st.textContent = ok ? ok + " rangé" + (ok > 1 ? "s" : "") + " ✓" : ""; st.className = ok ? "ok" : "";
     if (ok) loadAll();
