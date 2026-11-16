@@ -182,3 +182,14 @@ p.empty{margin:0}
 .col .round:nth-child(2) svg{width:21px;height:21px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 .set .dep small{display:block;margin-top:7px;line-height:1.35}.set .dep select{margin-top:6px;width:100%;flex:none}
+
+/* Liste « choses à regarder » */
+.paper.alerts::before{background:#d9483b}
+#alertList{margin:12px 0 14px;display:flex;flex-direction:column;gap:8px}
+.alertItem{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 12px;border:0;border-radius:16px;background:#fff;box-shadow:inset 0 0 0 1px rgba(35,28,23,.08);font:inherit;color:inherit;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.alertItem:active{transform:scale(.98)}
+.alertItem .aic{flex:none;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:19px;background:color-mix(in srgb,var(--c) 18%,#fff);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 35%,transparent)}
+.alertItem .atx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.alertItem .atx small{font-size:12px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alertItem .atx b{font-size:15px;font-weight:700;line-height:1.25}
+.alertItem .ago{flex:none;font-size:22px;color:#d9483b;font-weight:700}

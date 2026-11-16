@@ -513,11 +513,45 @@ $("paperwrap").addEventListener("click", e => { if (e.target.id === "paperwrap")
 function updateBrief() {
   const h = new Date().getHours(), n = PLACES.reduce((a, p) => a + (p.docs || []).length, 0);
   $("hello").textContent = (h >= 5 && h < 18 ? "Bonjour" : "Bonsoir") + (S.prenom ? " " + S.prenom : "") + (n ? " · " + n + " papiers rangés" : "");
-  const u = PLACES.filter(p => p.urgent);
+  const u = aRegarder();
   $("brief").classList.toggle("calm", !u.length);
-  $("briefTxt").textContent = !S.loaded ? "Je charge ta ville…" : u.length ? (u.length === 1 ? u[0].name + " : " + u[0].status : u.length + " choses à regarder") : (S.next || "Tout est en ordre");
+  $("briefTxt").textContent = !S.loaded ? "Je charge ta ville…" : u.length ? (u.length === 1 ? u[0].p.name + " : " + u[0].titre : u.length + " choses à regarder") : (S.next || "Tout est en ordre");
 }
-$("brief").addEventListener("click", () => { const u = PLACES.find(p => p.urgent); select(u || (S.nextPlace && byId[S.nextPlace]) || byId.home); });
+/* Tout ce qui est à regarder : chaque alerte (mails) + les lieux en rouge sans alerte précise */
+function aRegarder() {
+  const out = [];
+  PLACES.filter(p => p.urgent).forEach(p => {
+    const al = (p.docs || []).filter(d => d.alerteId);
+    if (al.length) al.forEach(d => out.push({ p, d, titre: d.t.replace(/^⚠︎\s*/, ""), quand: d.d }));
+    else out.push({ p, d: null, titre: p.status, quand: "" });
+  });
+  return out;
+}
+function allerA(x) {
+  $("alertwrap").classList.remove("open");
+  select(x.p);
+  if (x.d) setTimeout(() => openDoc(x.p, x.d), 750);
+}
+function ouvrirListe() {
+  const u = aRegarder();
+  if (!u.length) { select((S.nextPlace && byId[S.nextPlace]) || byId.home); return; }
+  if (u.length === 1) { allerA(u[0]); return; }
+  const L = $("alertList"); L.innerHTML = "";
+  $("alertT").textContent = u.length + " choses à regarder";
+  u.forEach(x => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "alertItem"; b.style.setProperty("--c", x.p.color);
+    const ic = document.createElement("span"); ic.className = "aic"; ic.textContent = x.p.emoji;
+    const t = document.createElement("span"); t.className = "atx";
+    const n = document.createElement("small"); n.textContent = x.p.name + (x.quand ? " · " + x.quand : "");
+    const h = document.createElement("b"); h.textContent = x.titre;
+    const go = document.createElement("span"); go.className = "ago"; go.textContent = "›";
+    t.append(n, h); b.append(ic, t, go);
+    b.addEventListener("click", () => allerA(x));
+    L.append(b);
+  });
+  $("alertwrap").classList.add("open");
+}
+$("brief").addEventListener("click", ouvrirListe);
 
 /* ---------- Toucher un bâtiment ---------- */
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let down = null, touches = 0;
@@ -746,7 +780,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && S.
    Le connecteur écrit un ordre dans jarvis_ecran ; l'app ouverte l'exécute tout de suite. */
 const LIEU_APP = { logement: "home", energie: "energie", sante: "clinique", travail: "usine", impots: "impots", voiture: "garage", papiers: "mairie", banque: "banque", bebe: "medecin", abonnements: "orange" };
 const sansAccent = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-function fermerTout() { deselect(); closeTalk(); closeBook(); closeSettings(); $("paperwrap").classList.remove("open"); }
+function fermerTout() { deselect(); closeTalk(); closeBook(); closeSettings(); $("paperwrap").classList.remove("open"); $("alertwrap").classList.remove("open"); }
 function bougerCamera(a) {
   fly = null; const s = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
   let theta = s.theta, r = s.radius, phi = s.phi;
@@ -1208,3 +1242,6 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+$("alertClose").addEventListener("click", () => $("alertwrap").classList.remove("open"));
+$("alertwrap").addEventListener("click", e => { if (e.target.id === "alertwrap") $("alertwrap").classList.remove("open"); });
