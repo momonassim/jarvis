@@ -1,5 +1,6 @@
-// Jarvis — robot Orange v5 (tourne sur ton iPhone, avec ta connexion)
-// Fait le tour COMPLET de ton espace client Orange, pour TOUS tes contrats (box + mobile, 2e box…) : toutes les pages (offre, options,
+// Jarvis — robot Orange v6 (tourne sur ton iPhone, avec ta connexion)
+// Fait le tour COMPLET de ton espace client Orange, pour TOUS tes contrats : il touche chaque contrat
+// l'un après l'autre (comme toi à la main), puis lit toutes ses pages (offre, options,
 // lignes, box, matériel, conso, factures, paiements, contrats, compte…), les données
 // cachées derrière les pages, et tous les PDF qu'il trouve (factures, contrats…).
 // Tout part dans Supabase, pour le bâtiment « Abonnements » de Jarvis.
@@ -11,7 +12,7 @@ const SB = "https://uaprtibscyepsabyqcyl.supabase.co";
 const HOTE = "espace-client.orange.fr";
 const START = "https://" + HOTE + "/accueil";
 const KEYS = { id: "jarvis.orange.id", pw: "jarvis.orange.password", sb: "jarvis.supabase.secret" };
-const MAX_PAGES = 100, MAX_CLICS = 60, MAX_PDF = 80;
+const MAX_PAGES = 130, MAX_CLICS = 60, MAX_PDF = 80;
 // Liens jamais suivis (actions, sortie, boutique…)
 const EVITER = /d[ée]connex|logout|r[ée]sili|supprim|annul|souscri|command|panier|boutique|acheter|achat|mailto:|tel:|javascript:|chat|messenger|forum|communaute|assistance\.orange|aide\.orange|recrutement|paiement-en-ligne|payer/i;
 
@@ -105,13 +106,16 @@ const ECOUTE = `(function(){if(window.__ec)return true;window.__ec=1;window.__ap
   XMLHttpRequest.prototype.send=function(){this.addEventListener('load',()=>{try{if(this.response instanceof Blob&&/pdf/i.test(this.responseURL||this.__u||'')){const x=this,fr=new FileReader();fr.onload=()=>{window.__pdfs.push({u:String(x.responseURL||x.__u),d:String(fr.result).split(',')[1]||''});};fr.readAsDataURL(x.response);return;}}catch(e){}try{garde(this.responseURL||this.__u,this.status,this.getResponseHeader('content-type'),(this.responseType===''||this.responseType==='text')?this.responseText:'');}catch(e){}});return os.apply(this,arguments);};
   return true;})()`;
 const donnees = new Map();
+let courant = "", premier = "";
 async function recolter() {
   try {
     const x = await js(`JSON.stringify((window.__api||[]).splice(0))`);
     for (const r of JSON.parse(x || "[]")) {
       if (!r.u || r.s >= 300 || !/orange\.fr$/.test(hote(r.u)) || /analytics|tag|track|log|beacon|consent|didomi|datadome|captcha|iban|pushms|statbi|env\.json/i.test(r.u)) continue;
       const [base, q] = String(r.u).split("?");
-      donnees.set(base + (q ? "?" + q.slice(0, 200) : ""), { url: base, q: (q || "").slice(0, 200), json: masquer(r.t) });
+      // un même appel peut répondre différemment selon le contrat choisi : on les garde séparés
+      const tag = courant && courant !== premier && !String(r.u).includes(courant) ? " #" + courant : "";
+      donnees.set(base + (q ? "?" + q.slice(0, 200) : "") + tag, { url: base, q: (q || "").slice(0, 200) + tag, contrat: courant, json: masquer(r.t) });
     }
   } catch (_) {}
 }
@@ -121,6 +125,23 @@ async function charger(u) {
   await js(ECOUTE);
   await until(`(document.body&&document.body.innerText||'').length>500`, 12);
   await wait(2500);
+}
+
+// Choisir un contrat, comme quand tu le touches dans le carrousel en haut de l'accueil
+const b64 = (t) => Data.fromString(String(t)).toBase64String();
+async function choisir(c) {
+  courant = c.cid;
+  await charger("https://" + HOTE + "/accueil?carrousel=" + encodeURIComponent(b64(c.cid)));
+  await js(`try{sessionStorage.setItem('carrousel',${JSON.stringify(b64(c.cid))})}catch(e){};true`);
+  // et on touche aussi sa vignette, si elle est là
+  if (c.nom) {
+    await js(`(()=>{const N=${JSON.stringify(c.nom.toLowerCase())};const x=[...document.querySelectorAll('a,button,[role=tab],[role=button],li,[class*=carrousel] *,[class*=carousel] *')]
+      .filter(e=>(e.innerText||'').toLowerCase().includes(N)&&(e.innerText||'').length<200).sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length)[0];if(x){x.click();return true;}return false;})()`);
+    await wait(3000);
+  }
+  await recolter();
+  const ok = await js(`(document.body.innerText||'').includes(${JSON.stringify(c.cid)}) || [...document.querySelectorAll('a[href]')].some(a=>a.href.includes(${JSON.stringify(c.cid)}))`);
+  debug.push({ step: "choix-" + c.cid, ok, url: (await path()).slice(0, 140) });
 }
 
 // Récupère un fichier (url ou blob) en base64 dans window.__p
@@ -166,10 +187,33 @@ async function run() {
   const ex = await sb(`/rest/v1/jarvis_items?source=eq.orange&kind=eq.document&select=data`);
   try { for (const r of JSON.parse(ex.body)) if (r.data && r.data.path) pdfConnus.add(r.data.path.replace(/^orange\//, "")); } catch (_) {}
 
-  const vus = new Set(), file = [START], pages = [], liensPdf = new Map(), clicsFaits = new Set();
+  const vus = new Set(), pages = [], liensPdf = new Map(), clicsFaits = new Set();
+  let file = [];
   const norm = (u) => u.split("#")[0].replace(/\/$/, "");
   let clics = 0;
-  while (file.length && pages.length < MAX_PAGES) {
+
+  // la liste de tous tes contrats
+  await charger(START); await wait(2000); await recolter();
+  let contrats = [];
+  for (const [cle, d] of donnees) {
+    if (!/portfoliomanager\/portfolio/.test(cle)) continue;
+    try { contrats = (JSON.parse(d.json).contracts || []).filter((c) => c.cid).map((c) => ({ cid: String(c.cid), nom: c.offerName || "", etat: c.telco && c.telco.state })); } catch (_) {}
+    if (contrats.length) break;
+  }
+  if (!contrats.length) {
+    const ids = JSON.parse(await js(`JSON.stringify([...new Set([...document.querySelectorAll('a[href]')].map(a=>(a.href.match(/\\/(\\d{8,12})(?:\\/|$|\\?)/)||[])[1]).filter(Boolean))])`) || "[]");
+    contrats = ids.map((cid) => ({ cid, nom: "" }));
+  }
+  debug.push({ step: "contrats", contrats });
+  premier = contrats.length ? contrats[0].cid : "";
+
+  for (const c of contrats) {
+  await choisir(c);
+  file = [await path(), ...["/facture-paiement/", "/offre-options/", "/equipements/", "/conso/"].map((r) => "https://" + HOTE + r + c.cid),
+    "https://" + HOTE + "/equipements/" + c.cid + "/tv", "https://" + HOTE + "/conso/" + c.cid + "/equipement/equipement-principal"];
+  vus.delete(norm(file[0]));
+  const limite = pages.length + Math.ceil(MAX_PAGES / contrats.length);
+  while (file.length && pages.length < limite) {
     const u = file.shift(), k = norm(u); if (vus.has(k)) continue; vus.add(k);
     try {
       await charger(u);
@@ -185,7 +229,8 @@ async function run() {
         liens:[...document.querySelectorAll('a[href]')].map(a=>[a.href,((a.innerText||a.getAttribute('aria-label')||'').trim()).slice(0,100)]),
         clic:[...document.querySelectorAll('a,button,[role=link],[role=button],[onclick],[tabindex="0"],[class*=tile],[class*=Tile],[class*=card],[class*=Card]')]
           .map(x=>((x.innerText||x.getAttribute('aria-label')||'').trim().split('\\n')[0]).slice(0,80)).filter(t=>t.length>2)})`));
-      pages.push({ url: info.url.split("?")[0], titre: info.titre, texte: masquer(info.texte) });
+      const pu = info.url.split("?")[0];
+      pages.push({ url: /\/accueil$|\.fr\/?$/.test(pu) && courant !== premier ? pu + "#" + courant : pu, contrat: courant, titre: info.titre, texte: masquer(info.texte) });
       if (pages.length === 1) debug.push({ step: "elements-accueil", liens: info.liens.slice(0, 120), clic: [...new Set(info.clic)].slice(0, 150) });
       for (const [h, t] of info.liens) {
         if (!/^https?:/i.test(h)) continue;
@@ -193,18 +238,6 @@ async function run() {
         if (hote(h) === HOTE && !EVITER.test(h + " " + t)) file.push(sansAncre(h));
       }
       await recolter();
-      if (pages.length === 1) {
-        for (const [cle, d] of donnees) {
-          if (!/portfoliomanager\/portfolio/.test(cle)) continue;
-          let pf; try { pf = JSON.parse(d.json); } catch (_) { continue; }
-          const cids = (pf.contracts || []).map((c) => c.cid).filter(Boolean);
-          debug.push({ step: "contrats", cids, etats: (pf.contracts || []).map((c) => [c.cid, c.offerName, c.telco && c.telco.state]) });
-          for (const cid of cids.reverse())
-            for (const r of ["/facture-paiement/" + cid, "/offre-options/" + cid, "/equipements/" + cid + "/tv", "/conso/" + cid + "/equipement/equipement-principal", "/accueil?contrat=" + cid])
-              file.unshift("https://" + HOTE + r);
-        }
-      }
-
       // explorer les tuiles et boutons qui mènent ailleurs sans être de vrais liens
       const cibles = [...new Set(info.clic)].filter((t) => !EVITER.test(t) && !NE_PAS_CLIQUER.test(t) && !clicsFaits.has(t)).slice(0, 6);
       for (const t of cibles) {
@@ -242,6 +275,7 @@ async function run() {
       }
     } catch (e) { debug.push({ step: "page-" + slug(u).slice(-50), erreur: String(e && e.message || e) }); }
   }
+  }
   await recolter();
   // liens de PDF cachés dans les données
   for (const d of donnees.values())
@@ -252,6 +286,18 @@ async function run() {
   await charger(START);
   await js(`(()=>{const a=[...document.querySelectorAll('a')].find(x=>/facture-paiement/.test(x.href));if(a)a.click();return true;})()`);
   await wait(4000); await recolter();
+  // la page factures de chaque contrat (après l'avoir choisi), pour avoir sa liste de factures
+  for (const c of contrats) {
+    try {
+      await choisir(c);
+      await charger("https://" + HOTE + "/facture-paiement/" + c.cid); await wait(1500);
+      for (let i = 0; i < 3; i++) {
+        const more = await js(`(()=>{const b=[...document.querySelectorAll('button,a')].find(x=>/historique|anciennes factures|voir (plus|toutes)/i.test((x.innerText||'').trim())&&!x.dataset.jf&&!/t[ée]l[ée]charger|pdf/i.test(x.innerText||''));if(!b)return false;b.dataset.jf=1;b.click();return true;})()`);
+        if (!more) break; await wait(2500);
+      }
+      await recolter();
+    } catch (e) { debug.push({ step: "factures-" + c.cid, erreur: String(e && e.message || e) }); }
+  }
   debug.push({ step: "entetes", noms: JSON.parse(await js(`JSON.stringify(Object.keys(window.__hdr||{}))`) || "[]") });
   const lireJson = async (u) => {
     await js(`(function(){window.__r=null;fetch(${JSON.stringify(u)},{credentials:'include',headers:{accept:'application/json'}})
@@ -289,7 +335,7 @@ async function run() {
   // anciennes factures : la liste que la page « historique » a reçue
   for (const [cle, d] of donnees) {
     if (!/historicBills/.test(cle)) continue;
-    const cid = (cle.match(/cid=(\d+)/) || [])[1] || (factures[0] && factures[0].contrat) || "";
+    const cid = (cle.match(/cid=(\d+)/) || [])[1] || d.contrat || (factures[0] && factures[0].contrat) || "";
     let h; try { h = JSON.parse(d.json); } catch (_) { continue; }
     for (const ob of (h.oldBills || []).slice(0, 60)) {
       if (pdfsEnvoyes >= MAX_PDF) break;
