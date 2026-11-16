@@ -1279,16 +1279,6 @@ $("gform").addEventListener("submit", async e => {
   if (error) { gmsg.textContent = /confirm/i.test(error.message) ? "Confirme d’abord ton e-mail : touche le lien que tu as reçu." : "E-mail ou mot de passe incorrect."; return; }
   enter(data.session);
 });
-$("gnew").addEventListener("click", async () => {
-  const email = $("gmail").value.trim(), password = $("gpass").value;
-  if (!email || password.length < 8) { gmsg.textContent = "Écris ton e-mail et choisis un mot de passe d’au moins 8 caractères, puis touche ce bouton."; return; }
-  $("gnew").disabled = true;
-  const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
-  $("gnew").disabled = false;
-  if (error) { gmsg.textContent = /registered|exists/i.test(error.message) ? "Ce compte existe déjà : touche « Entrer »." : "Ça n’a pas marché : " + error.message; return; }
-  if (data.session) enter(data.session);
-  else gmsg.textContent = "C’est fait. Je t’ai envoyé un e-mail : touche le lien pour confirmer, puis reviens ici et touche « Entrer ».";
-});
 sb.auth.onAuthStateChange((ev, session) => { if (ev === "SIGNED_OUT") { showGate("Connecte-toi pour ouvrir ta ville."); } });
 sb.auth.getSession().then(({ data }) => enter(data.session));
 
