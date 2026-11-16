@@ -527,6 +527,22 @@ canvas.addEventListener("pointerup", e => {
 /* =========================================================
    Les données (Supabase, en direct)
    ========================================================= */
+/* Salaires et soldes : jamais affichés à l'écran. Ils restent dans Supabase,
+   et Jarvis ne les donne dans le chat que si on les lui demande. */
+const ARGENT = /pai[ew]|paye|salaire|moyenne|solde|touch[ée]|net à payer/i;
+const garde = (p, t) => { p.prive = p.prive || []; if (t && !p.prive.includes(t)) p.prive.push(t); };
+function cacheArgent(p) {
+  p.facts = (p.facts || []).filter(f => { if (ARGENT.test(f[0])) { garde(p, f[0] + " : " + f[1]); return false; } return true; });
+  if (p.say && /€/.test(p.say) && ARGENT.test(p.say)) { garde(p, p.say); p.say = "Tes montants restent cachés : demande-les-moi dans le chat."; }
+  if (p.status && /€/.test(p.status) && ARGENT.test(p.status)) { garde(p, p.status); p.status = "Montants cachés"; }
+  p.docs = (p.docs || []).map(d => {
+    if (!/bulletin|paie|salaire/i.test(d.t || "")) return d;
+    const sous = [d.v, ...(d.lines || []).filter(l => /€/.test(l[1] || "")).map(l => l.join(" "))].filter(x => x && /€/.test(x));
+    if (sous.length) garde(p, `${d.t} ${d.d || ""} : ${sous.join(", ")}`);
+    return { ...d, v: /€/.test(d.v || "") ? "PDF" : d.v, lines: (d.lines || []).filter(l => !/€/.test(l[1] || "")) };
+  });
+  if (p.macDocs) p.macDocs = p.macDocs.map(d => /bulletin|paie|salaire/i.test(d.t || "") ? { ...d, v: /€/.test(d.v || "") ? "PDF" : d.v, lines: (d.lines || []).filter(l => !/€/.test(l[1] || "")) } : d);
+}
 function applyMac(rows) {
   rows.filter(r => r.kind === "lieu").forEach(r => {
     const p = byId[r.label]; if (!p) return; const d = r.data || {};
@@ -534,6 +550,7 @@ function applyMac(rows) {
     if (r.label === "home" || r.label === "energie") { p.macDocs = d.docs || []; p.docs = [...p.macDocs]; return; }
     Object.assign(p, { place: d.place || p.place, status: d.status || p.status, say: d.say || p.say, facts: d.facts || [], docs: d.docs || [],
       live: (d.docs || []).length ? "D’après tes papiers trouvés sur ton Mac" : "Pas encore branché" });
+    cacheArgent(p);
   });
   const prof = rows.find(r => r.source === "jarvis" && r.kind === "profil");
   if (prof) { S.prenom = prof.data?.prenom || ""; S.profil = prof.data?.texte || ""; }
@@ -601,7 +618,7 @@ function applyFoncia(rows) {
   const res = ((by("logement")[0] || {}).data || {}).residence;
   h.place = "Foncia" + (res ? " · " + res.toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase()) : "");
   h.status = loyer ? `Loyer ${eur(loyer)} · ${sold === 0 ? "à jour" : sold < 0 ? "à régler" : "en avance"}` : "À jour";
-  h.say = nb(`Ton loyer est de ${eur(loyer || 0)} par mois${prel[0] ? `, le dernier prélèvement est passé le ${frd(prel[0].date)}` : ""}. ${sold === 0 ? "Tu es à jour." : sold < 0 ? `Il reste ${eur(-sold)} à payer.` : ""} J’ai rangé tes ${docs.length} papiers Foncia${quitt[0] ? `, dont la quittance de ${per(quitt[0].label)}` : ""}.`.replace(/\s+/g, " ").trim());
+  h.say = nb(`Ton loyer est de ${eur(loyer || 0)} par mois${prel[0] ? `, le dernier prélèvement est passé le ${frd(prel[0].date)}` : ""}. ${sold === 0 ? "Tu es à jour." : sold < 0 ? "Il reste un montant à régler." : ""} J’ai rangé tes ${docs.length} papiers Foncia${quitt[0] ? `, dont la quittance de ${per(quitt[0].label)}` : ""}.`.replace(/\s+/g, " ").trim());
   h.facts = [["Loyer + charges", loyer ? eur(loyer) + " par mois" : "—"], ["Solde du compte", sold != null ? eur(sold) + (sold === 0 ? ", à jour" : "") : "—"]];
   const d = [];
   if (gest.nom) d.push({ t: "Ton gestionnaire", d: gest.agence || "Foncia", v: gest.nom, where: "MyFoncia", lines: [["Nom", gest.nom], ["Agence", gest.agence || "—"], ["Adresse", gest.adresse || "—"], ["Téléphone", gest.telephone || "—"]], tel: gest.telephone });
@@ -611,6 +628,7 @@ function applyFoncia(rows) {
   docs.forEach(r => d.push({ t: nice(r.label, r.data?.categorie).slice(0, 60), d: "Ajouté le " + (r.data?.ajoute_le || "—"), v: "PDF", where: "Jarvis › papiers › Foncia",
     lines: [["Catégorie", r.data?.categorie || "—"], ["Ajouté le", r.data?.ajoute_le || "—"]], path: r.data?.path ? "foncia/" + r.data.path : null }));
   h.docs = [...d, ...(h.macDocs || [])]; h.live = stamp(rows, "relu par ton iPhone");
+  cacheArgent(h);
 }
 
 function applySante(rows) {
@@ -664,8 +682,9 @@ function applyPlanning(rows) {
   if (P.base_ok && pm) { facts.push(["Paye estimée fin " + MO[+mois.slice(5) - 1], eur(pm.net) + " net"]); if (pn) facts.push(["Paye estimée fin " + MO[+pn.mois.slice(5) - 1], eur(pn.net) + " net"]); }
   const c = P.compteurs || {}; facts.push(["Compteurs", `${c.cp ?? "?"} CP · ${c.cor ?? "?"} COR`]);
   p.status = "Aujourd’hui : " + lc(ditJ(auj).split(" · ")[0]);
-  p.say = say + (m.say ? " " + m.say : "");
-  p.facts = [...facts, ...(m.facts || [])];
+  const mc = { say: m.say, facts: m.facts || [] }; cacheArgent(mc); (mc.prive || []).forEach(t => garde(p, t));
+  p.say = say + (mc.say ? " " + mc.say : "");
+  p.facts = [...facts, ...mc.facts]; cacheArgent(p);
   p.live = "En direct · Mon Planning le " + quand(r.updated_at);
   S.planningTxt = fut.slice(0, 21).map(o => `${jour(o.d)} : ${lc(ditJ(o))}`).join("\n");
 }
@@ -676,7 +695,7 @@ async function loadAll() {
     const { data, error } = await sb.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage)").limit(5000);
     if (error) { toast("Je n’arrive pas à lire tes données : " + error.message); return; }
     const rows = data || [];
-    S.next = ""; S.nextPlace = "";
+    S.next = ""; S.nextPlace = ""; PLACES.forEach(p => p.prive = []);
     applyMac(rows.filter(r => r.source === "mac" || r.source === "jarvis"));
     applyPlanning(rows.filter(r => r.source === "planning" || r.source === "mac"));
     applyEnergie(rows.filter(r => r.source === "plenitude"));
@@ -852,12 +871,13 @@ $("ask").addEventListener("click", () => openTalk(null));
 $("tClose").addEventListener("click", () => closeTalk());
 swipeClose($("talk").querySelector(".card"), () => closeTalk());
 function context() {
-  const lines = PLACES.map(p => `${p.name} (${p.place}) : ${p.say} ${p.facts.map(f => f[0] + " : " + f[1]).join(" ; ")}${p.urgent ? " [à regarder]" : ""}`).join("\n");
+  const lines = PLACES.map(p => `${p.name} (${p.place}) : ${p.say} ${p.facts.map(f => f[0] + " : " + f[1]).join(" ; ")}${p.prive && p.prive.length ? " [Caché à l’écran : " + p.prive.join(" ; ") + "]" : ""}${p.urgent ? " [à regarder]" : ""}`).join("\n");
   const papiers = PLACES.map(p => (p.docs || []).slice(0, 25).map(d => `${p.name} : ${d.t} ${d.d} ${d.v || ""} (${(d.lines || []).map(l => l.join(" ")).join(", ")})`).join("\n")).filter(Boolean).join("\n");
   return `Tu es Jarvis, l’assistant personnel de ${S.prenom || "ton propriétaire"}. ${S.profil}
 Tu vois ses comptes, ses papiers, sa santé et ses abonnements. Tu anticipes et tu proposes, mais tu n’agis jamais sans sa confirmation, et pour l’argent tu conseilles seulement.
 Réponds en français parlé (ta réponse peut être lue à voix haute), très simple, sans jargon, en 1 à 3 phrases courtes, sans listes ni titres, avec des chiffres concrets.
 Avant de proposer un moment pour un rendez-vous ou une démarche, regarde son planning de travail et choisis un moment où il ne travaille pas. Pour prendre ou annuler un rendez-vous médical, dis-lui de toucher « Ta santé » puis « Prendre rendez-vous » : c’est là que Jarvis réserve après sa confirmation.
+Ses salaires, ses paies et ses soldes sont cachés à l’écran (notés « Caché à l’écran ») : ne les donne que s’il te les demande clairement, jamais de toi-même.
 Ce qui n’est pas encore branché (banque, mails, Ameli, Orange), dis-le simplement sans inventer de chiffre.
 Nous sommes le ${new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}, il est ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.
 Situation :
