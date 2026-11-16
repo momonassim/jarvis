@@ -6,14 +6,16 @@ const slug = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCa
 const masquer = (s: string) => s.replace(/\bFR\s?\d{2}(?:[\s.\-]?[0-9A-Z]{2,4}){4,8}/gi, "[IBAN masqué]")
   .replace(/\b[12]\s?\d{2}\s?(?:0[1-9]|1[0-2]|[2-9]\d)\s?(?:\d{2}|2[AB])\s?\d{3}\s?\d{3}\s?\d{2}\b/g, "[n° sécu masqué]");
 
+// Juste le passage autour du mot cherché
+const court = (t: string, mot: string) => { const i = Math.max(0, t.toLowerCase().indexOf(mot.toLowerCase()) - 120); return (i ? "…" : "") + t.slice(i, i + 280) + (t.length > i + 280 ? "…" : ""); };
 export async function chercher(admin: any, a: Record<string, any>) {
   const mots = String(a.recherche ?? "").split(/[,;]|\s+/).map((m) => m.trim()).filter((m) => m.length > 1).slice(0, 6);
   if (!mots.length) return "Donne un ou plusieurs mots à chercher.";
-  const { data, error } = await admin.rpc("jarvis_chercher", { p_mots: mots, p_limite: 12 });
+  const { data, error } = await admin.rpc("jarvis_chercher", { p_mots: mots, p_limite: 5 });
   if (error) return "Recherche impossible : " + error.message;
   if (!data?.length) return `Rien trouvé pour « ${mots.join(" ")} » dans ce que les robots ont ramené. Essaie d'autres mots (ou un seul mot).`;
   return `Trouvé dans les données de Jarvis (${data.length} endroits) :\n` + data.map((r: any) =>
-    `- [${r.source} · ${r.kind} · ${r.label}${r.contrat ? " · contrat " + r.contrat : ""}]\n  ${masquer(String(r.extrait ?? "")).replace(/\s+/g, " ").trim()}`).join("\n")
+    `- [${r.source} · ${r.kind} · ${r.label}${r.contrat ? " · contrat " + r.contrat : ""}]\n  ${court(masquer(String(r.extrait ?? "")).replace(/\s+/g, " ").trim(), mots[0])}`).join("\n")
     + "\n\nSi c'est une info utile à garder (code, numéro, date…), range-la avec jarvis_noter.";
 }
 

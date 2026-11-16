@@ -39,21 +39,37 @@ async function autorise(req: Request) {
   if (enTete) essais.push([enTete, "MCP_TOKEN_HASH"]);
   if (dansLien) essais.push([dansLien, "MCP_TOKEN_HASH_CHATGPT"]);
   for (const [tok, nom] of essais) {
-    const { data } = await admin.rpc("jarvis_get_secret", { p_name: nom });
-    if (typeof data === "string" && data && await egal(await sha256(tok), data)) return true;
+    const data = await empreinte(nom);
+    if (data && await egal(await sha256(tok), data)) return true;
   }
   return false;
+}
+// Les empreintes des clés restent 5 minutes en mémoire : pas de lecture du coffre à chaque question
+const EMPREINTES: Record<string, { v: string; t: number }> = {};
+async function empreinte(nom: string) {
+  const c = EMPREINTES[nom]; if (c && Date.now() - c.t < 300_000) return c.v;
+  const { data } = await admin.rpc("jarvis_get_secret", { p_name: nom });
+  const v = typeof data === "string" ? data : ""; EMPREINTES[nom] = { v, t: Date.now() }; return v;
 }
 
 // ---------- les données ----------
 type Row = { source: string; kind: string; label: string; date: string | null; amount: number | null; data: any; updated_at: string };
+// Les données restent 20 secondes en mémoire : plusieurs questions d'affilée répondent tout de suite
+let CACHE: { rows: Row[]; t: number } | null = null;
+const oublier = () => { CACHE = null; };
 async function lignes(): Promise<Row[]> {
-  const { data, error } = await admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage,page,api)").limit(5000);
-  if (error) throw new Error(error.message);
-  // Orange : seulement les blocs de données utiles (offre, options, factures, conso)
-  const { data: oApi } = await admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").eq("source", "orange").eq("kind", "api")
-    .or("label.ilike.*offer/contracts/*/details*,label.ilike.*installedOptions*,label.ilike.*billsAndPaymentInfos*,label.ilike.*suiviconso/contracts/conso*,label.ilike.*portfoliomanager/portfolio*");
-  return [...(data ?? []), ...(oApi ?? [])] as Row[];
+  if (CACHE && Date.now() - CACHE.t < 20_000) return CACHE.rows;
+  const [r1, r2, r3] = await Promise.all([
+    admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage,page,api,document)").limit(5000),
+    // Orange : seulement les blocs de données utiles (offre, options, factures, conso)
+    admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").eq("source", "orange").eq("kind", "api")
+      .or("label.ilike.*offer/contracts/*/details*,label.ilike.*installedOptions*,label.ilike.*billsAndPaymentInfos*,label.ilike.*suiviconso/contracts/conso*,label.ilike.*portfoliomanager/portfolio*"),
+    // les PDF de Foncia (seuls « document » utiles ici)
+    admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").eq("source", "foncia").eq("kind", "document"),
+  ]);
+  if (r1.error) throw new Error(r1.error.message);
+  const rows = [...(r1.data ?? []), ...(r2.data ?? []), ...(r3.data ?? [])] as Row[];
+  CACHE = { rows, t: Date.now() }; return rows;
 }
 const LIEUX: Record<string, { mac?: string; nom: string }> = {
   logement: { nom: "Chez toi (logement, loyer Foncia)" },
@@ -163,7 +179,7 @@ function abonnements(rows: Row[], detail: boolean) {
     const hf = conso?.equipments?.[0]?.synthesis; if (hf?.displayHF) t += ` Hors forfait en cours : ${hf.mainText}.`;
     if (opts.length) t += " Options : " + opts.map((x: any) => x.name + (x.infos?.length ? ` (${x.infos[0]})` : "")).join(", ") + ".";
     if (detail && bp?.lastBill?.aggregationLevel2) t += "\nDétail de la dernière facture : " + bp.lastBill.aggregationLevel2.map((g: any) => `${g.title} ${eur(g.includingTaxesAmount / 100)}`).join(" ; ") + ".";
-    if (detail && fac.length) t += "\nFactures :\n" + fac.slice(0, 24).map((r) => `- ${frd(r.date)} : ${eur(r.amount)}`).join("\n");
+    if (detail && fac.length) t += "\nDernières factures :\n" + fac.slice(0, 6).map((r) => `- ${frd(r.date)} : ${eur(r.amount)}`).join("\n");
     parts.push(t);
   }
   let t = (cids.size > 1 ? `${cids.size} contrats Orange${total ? ", " + eur(total) + " par mois au total" : ""}.\n` : "") + parts.join("\n");
@@ -212,10 +228,9 @@ function postes(rows: Row[], a: Record<string, any>) {
   return liste.map((o: any) => `- ${jour(o.d)} : ${dit(o)}`).join("\n");
 }
 async function resume() {
-  const rows = await lignes();
+  const [rows, al] = await Promise.all([lignes(), alertesOuvertes(admin)]);
   const prof = rows.find((r) => r.source === "jarvis" && r.kind === "profil")?.data?.texte ?? "";
   const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "full", timeStyle: "short" });
-  const al = await alertesOuvertes(admin);
   const alertes = al.length ? "## Alertes en cours (lieux en rouge dans l'app)\n" + al.map((x: any) => `- n° ${x.id} · ${x.data.lieu} · ${x.data.titre}${x.data.date_mail ? " (mail du " + frd(x.data.date_mail) + ")" : ""}${x.data.texte ? " : " + x.data.texte : ""}`).join("\n") + "\n\n" : "";
   return `Jarvis — situation au ${now}.\n${prof}\n\n` + alertes + Object.entries(LIEUX).map(([id, l]) => `## ${l.nom}\n${lieu(rows, id, false)}`).join("\n\n");
 }
@@ -284,11 +299,11 @@ async function appel(nom: string, a: Record<string, any>): Promise<string> {
     case "jarvis_ecran": return await montrer(a);
     case "jarvis_planning": return postes(await lignes(), a);
     case "jarvis_pdf": return await documents(String(a.recherche ?? ""));
-    case "jarvis_ranger_papier": return await rangerPapier(admin, a, Object.keys(LIEUX));
-    case "jarvis_alerte": return await poserAlerte(admin, a, Object.keys(LIEUX));
-    case "jarvis_alerte_vue": return await alerteVue(admin, a.numero);
+    case "jarvis_ranger_papier": oublier(); return await rangerPapier(admin, a, Object.keys(LIEUX));
+    case "jarvis_alerte": oublier(); return await poserAlerte(admin, a, Object.keys(LIEUX));
+    case "jarvis_alerte_vue": oublier(); return await alerteVue(admin, a.numero);
     case "jarvis_chercher": return await chercher(admin, a);
-    case "jarvis_noter": { const r = await noter(admin, a, Object.keys(LIEUX)); if (r.startsWith("Rangé")) await ecran("lieu", { lieu: a.lieu }).catch(() => false); return r; }
+    case "jarvis_noter": { oublier(); const r = await noter(admin, a, Object.keys(LIEUX)); if (r.startsWith("Rangé")) await ecran("lieu", { lieu: a.lieu }).catch(() => false); return r; }
     case "medinlyon_creneaux": {
       const c = centreId(a.centre); if (!c) return "Centre inconnu : Villeurbanne ou Brotteaux.";
       const d = dateDe(a.date); if (d !== today() && d !== today(1)) return "MédinLyon ne propose que le jour même et le lendemain.";
@@ -332,7 +347,7 @@ async function traiter(m: any) {
     case "initialize": {
       const v = VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : VERSIONS[0];
       return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jarvis", title: "Jarvis", version: "1.0.0" },
-        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement. Pour un détail précis (un code RIO, une option, une date…), fouille avec jarvis_chercher, et range ce qui est utile avec jarvis_noter. Si tu as accès à ses mails (Outlook), tu peux ranger les papiers qu'ils contiennent avec jarvis_ranger_papier et signaler ce qui est important avec jarvis_alerte." });
+        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple et COURT (une ou deux phrases, surtout à l'oral) : donne juste l'info demandée, sans tout réciter. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement. Pour un détail précis (un code RIO, une option, une date…), fouille avec jarvis_chercher, et range ce qui est utile avec jarvis_noter. Si tu as accès à ses mails (Outlook), tu peux ranger les papiers qu'ils contiennent avec jarvis_ranger_papier et signaler ce qui est important avec jarvis_alerte." });
     }
     case "ping": return ok({});
     case "tools/list": return ok({ tools: TOOLS });

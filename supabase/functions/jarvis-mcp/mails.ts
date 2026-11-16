@@ -1,6 +1,5 @@
 // Jarvis — ce que ChatGPT (ou Claude) rapporte des mails Outlook :
 // des papiers (PDF joints) rangés au bon lieu, et des alertes rouges sur la ville 3D.
-import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 import { decodeBase64 } from "jsr:@std/encoding@1/base64";
 
 // Domaine du connecteur → bâtiment de l'app
@@ -21,6 +20,8 @@ const INTERDIT = [
 
 // Texte → PDF propre (quand ChatGPT ne peut pas envoyer le fichier lui-même)
 async function texteEnPdf(titre: string, entete: string[], texte: string) {
+  // chargé seulement quand il sert (démarrage plus rapide)
+  const { PDFDocument, StandardFonts, rgb } = await import("npm:pdf-lib@1.17.1");
   const doc = await PDFDocument.create();
   const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
   // Helvetica ne connaît que l'alphabet occidental : on remplace le reste
