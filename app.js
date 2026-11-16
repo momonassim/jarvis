@@ -804,6 +804,14 @@ function applyMails(rows) {
       lines: [["Ce qu’il faut savoir", r.data.texte || "—"], ["De", r.data.de || "—"], ["Reçu le", r.data.date_mail ? frd(r.data.date_mail) : "—"]], alerteId: r.id })), ...(p.docs || [])];
   });
 }
+/* ---------- Notes rangées par Jarvis (code RIO, numéros…) ---------- */
+function applyNotes(rows) {
+  rows.filter(r => r.kind === "note" && r.data && byId[r.data.lieu])
+    .sort((a, b) => (a.data.titre || "").localeCompare(b.data.titre || ""))
+    .forEach(r => { const p = byId[r.data.lieu]; p.facts = [[r.data.titre, r.data.texte], ...(p.facts || [])];
+      // une note qui parle de salaire ou de solde reste cachée, comme le reste
+      if (ARGENT.test(r.data.titre) && /€/.test(r.data.texte || "")) cacheArgent(p); });
+}
 let loading = null;
 async function loadAll() {
   if (loading) return loading;
@@ -822,6 +830,7 @@ async function loadAll() {
     applySante(rows.filter(r => r.source === "medinlyon"));
     applyOrange(rows.filter(r => r.source === "orange"), oApi || []);
     applyMails(rows.filter(r => r.source === "mails"));
+    applyNotes(rows.filter(r => r.source === "jarvis"));
     PLACES.forEach(p => {
       if (p.status === "…") { p.status = "À brancher"; p.say = "Je n’ai encore rien pour ce lieu. Dès qu’une source est branchée, je le remplis."; p.live = "Pas encore branché"; }
       p.say = nb(p.say); p.status = nb(p.status); });

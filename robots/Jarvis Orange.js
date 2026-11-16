@@ -1,8 +1,9 @@
-// Jarvis — robot Orange v6 (tourne sur ton iPhone, avec ta connexion)
+// Jarvis — robot Orange v7 (tourne sur ton iPhone, avec ta connexion)
 // Fait le tour COMPLET de ton espace client Orange, pour TOUS tes contrats : il touche chaque contrat
 // l'un après l'autre (comme toi à la main), puis lit toutes ses pages (offre, options,
 // lignes, box, matériel, conso, factures, paiements, contrats, compte…), les données
-// cachées derrière les pages, et tous les PDF qu'il trouve (factures, contrats…).
+// cachées derrière les pages, tous les PDF qu'il trouve (factures, contrats…),
+// et le code RIO de chaque ligne (rangé dans le bâtiment Abonnements).
 // Tout part dans Supabase, pour le bâtiment « Abonnements » de Jarvis.
 // 1re fois : il te demande ton identifiant et ton mot de passe Orange (rangés dans le Trousseau).
 // Si Orange demande une vérification (code, appareil de confiance), la page s'ouvre :
@@ -157,6 +158,7 @@ async function attendreP(secs = 30) {
 }
 
 let pdfsEnvoyes = 0;
+const pages = [];
 const pdfConnus = new Set(), docs = [];
 async function rangerPdf(res, titre, source) {
   if (!res || res.err || !res.d) { if (res && res.err) debug.push({ step: "pdf-" + slug(titre).slice(0, 40), erreur: res.err }); return false; }
@@ -187,7 +189,7 @@ async function run() {
   const ex = await sb(`/rest/v1/jarvis_items?source=eq.orange&kind=eq.document&select=data`);
   try { for (const r of JSON.parse(ex.body)) if (r.data && r.data.path) pdfConnus.add(r.data.path.replace(/^orange\//, "")); } catch (_) {}
 
-  const vus = new Set(), pages = [], liensPdf = new Map(), clicsFaits = new Set();
+  const vus = new Set(), liensPdf = new Map(), clicsFaits = new Set();
   let file = [];
   const norm = (u) => u.split("#")[0].replace(/\/$/, "");
   let clics = 0;
@@ -197,7 +199,8 @@ async function run() {
   let contrats = [];
   for (const [cle, d] of donnees) {
     if (!/portfoliomanager\/portfolio/.test(cle)) continue;
-    try { contrats = (JSON.parse(d.json).contracts || []).filter((c) => c.cid).map((c) => ({ cid: String(c.cid), nom: c.offerName || "", etat: c.telco && c.telco.state })); } catch (_) {}
+    try { contrats = (JSON.parse(d.json).contracts || []).filter((c) => c.cid).map((c) => ({ cid: String(c.cid), nom: c.offerName || "", etat: c.telco && c.telco.state,
+      lignes: (c.usages || []).filter((u) => u.usageCode).map((u) => ({ code: String(u.usageCode), num: u.usageLine || "", type: u.displayName || u.service || "" })) })); } catch (_) {}
     if (contrats.length) break;
   }
   if (!contrats.length) {
@@ -206,6 +209,37 @@ async function run() {
   }
   debug.push({ step: "contrats", contrats });
   premier = contrats.length ? contrats[0].cid : "";
+
+  // ---------- les codes RIO (pour changer d'opérateur en gardant son numéro) ----------
+  const rios = [];
+  for (const c of contrats) {
+    for (const l of (c.lignes || [])) {
+      try {
+        await choisir(c);
+        await charger(`https://${HOTE}/equipements/${c.cid}/${l.code}/obtenir-rio`);
+        let t = await js(`(document.body.innerText||'')`);
+        let m = String(t).match(new RegExp("\\b(\\d{2}\\s?[EP]\\s?[A-Z0-9]{3}\\s?[A-Z0-9]{3}\\s?[A-Z0-9]{3})\\b"));
+        if (!m) {
+          // parfois il faut toucher « Afficher / Obtenir mon RIO » (ça ne change rien au contrat)
+          await js(`(()=>{const b=[...document.querySelectorAll('button,a[role=button]')].find(x=>/(afficher|obtenir|voir).*rio|rio.*(afficher|obtenir|voir)/i.test(x.innerText||'')&&!/envoy|sms|r[ée]sili/i.test(x.innerText||''));if(b)b.click();return true;})()`);
+          await wait(3000); await recolter();
+          t = await js(`(document.body.innerText||'')`);
+          m = String(t).match(new RegExp("\\b(\\d{2}\\s?[EP]\\s?[A-Z0-9]{3}\\s?[A-Z0-9]{3}\\s?[A-Z0-9]{3})\\b"));
+        }
+        const quoi = (/^31/.test(l.code) ? "mobile" : /^54/.test(l.code) ? "box / fixe" : l.type || "ligne") + (l.num ? " " + l.num : "");
+        if (m) rios.push({ contrat: c.cid, ligne: quoi, rio: m[1].replace(/\s/g, "") });
+        else debug.push({ step: "rio-" + c.cid + "-" + l.code, erreur: "RIO pas trouvé", debut: String(t).slice(0, 400) });
+        pages.push({ url: `https://${HOTE}/equipements/${c.cid}/${l.code}/obtenir-rio`, contrat: c.cid, titre: "Code RIO " + quoi, texte: masquer(String(t).slice(0, 4000)) });
+      } catch (e) { debug.push({ step: "rio-" + c.cid + "-" + l.code, erreur: String(e && e.message || e) }); }
+    }
+  }
+  // rangés tout de suite dans Jarvis (bâtiment Abonnements)
+  if (rios.length) {
+    const notes = rios.map((r) => ({ source: "jarvis", kind: "note", label: "orange:code-rio-" + r.ligne.replace(/[^\w]+/g, "-").toLowerCase().slice(0, 30), date: null, amount: null,
+      data: { lieu: "orange", titre: "Code RIO " + r.ligne, texte: r.rio, contrat: r.contrat, ajoute_le: new Date().toISOString() } }));
+    await sb(`/rest/v1/jarvis_items?on_conflict=source,kind,label,date_key`, "POST", JSON.stringify(notes),
+      { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" });
+  }
 
   for (const c of contrats) {
   await choisir(c);
@@ -379,7 +413,7 @@ async function run() {
       { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" });
     if (res.status >= 300) throw new Error(`Supabase a refusé (${res.status}) ${res.body.slice(0, 120)}`);
   }
-  return `${pages.length} pages lues, ${donnees.size} blocs de données, ${factures.length} factures, ${pdfsEnvoyes} PDF rangés.`;
+  return `${pages.length} pages lues, ${donnees.size} blocs de données, ${factures.length} factures, ${pdfsEnvoyes} PDF rangés, ${rios.length} codes RIO.`;
 }
 
 try {
