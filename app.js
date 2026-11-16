@@ -486,11 +486,20 @@ async function openDoc(p, d) {
     if (error || !data) pdf.textContent = "PDF introuvable";
     else { pdf.href = data.signedUrl; pdf.textContent = "Ouvrir le PDF"; }
   }
+  x.dataset.mode = "";
   if (d.cancelId) { x.hidden = false; x.dataset.id = d.cancelId; }
+  if (d.alerteId) { x.hidden = false; x.dataset.id = d.alerteId; x.dataset.mode = "alerte"; x.textContent = "C’est vu, enlever l’alerte"; }
   $("paperwrap").classList.add("open");
 }
 $("dX").addEventListener("click", async e => {
   e.preventDefault(); const x = $("dX");
+  if (x.dataset.mode === "alerte") {
+    if (x.dataset.step === "busy") return; x.dataset.step = "busy"; x.textContent = "J’enlève l’alerte…";
+    const { error } = await sb.rpc("jarvis_alerte_vue", { p_id: Number(x.dataset.id) });
+    x.textContent = error ? "Pas enlevée : " + error.message : "Alerte enlevée ✓";
+    if (!error) { setTimeout(() => $("paperwrap").classList.remove("open"), 900); loadAll(); }
+    return;
+  }
   if (x.dataset.step !== "sure") { x.dataset.step = "sure"; x.textContent = "Touche encore pour confirmer l’annulation"; x.classList.add("danger"); return; }
   x.dataset.step = "busy"; x.textContent = "J’annule sur MédinLyon…"; x.classList.remove("danger");
   const r = await medin({ action: "annuler", id: x.dataset.id });
@@ -688,19 +697,35 @@ function applyPlanning(rows) {
   p.live = "En direct · Mon Planning le " + quand(r.updated_at);
   S.planningTxt = fut.slice(0, 21).map(o => `${jour(o.d)} : ${lc(ditJ(o))}`).join("\n");
 }
+/* ---------- Alertes venues des mails (posées par ChatGPT ou Claude via le connecteur) ---------- */
+function applyMails(rows) {
+  const ouvertes = rows.filter(r => r.kind === "alerte" && r.data && !r.data.vu)
+    .sort((a, b) => (b.data.date_mail || "").localeCompare(a.data.date_mail || ""));
+  const parLieu = {};
+  ouvertes.forEach(r => (parLieu[r.data.lieu] = parLieu[r.data.lieu] || []).push(r));
+  Object.entries(parLieu).forEach(([id, liste]) => {
+    const p = byId[id]; if (!p) return;
+    p.urgent = true;
+    p.status = liste.length > 1 ? liste.length + " choses à regarder" : liste[0].data.titre;
+    p.say = liste.map(r => r.data.titre + (r.data.texte ? " : " + r.data.texte : "")).join(" ") + " " + (p.say || "");
+    p.docs = [...liste.map(r => ({ t: "⚠︎ " + r.data.titre, d: r.data.date_mail ? "Mail du " + frd(r.data.date_mail) : "Nouveau", v: "Nouveau", future: true, where: "Tes mails (Outlook)",
+      lines: [["Ce qu’il faut savoir", r.data.texte || "—"], ["De", r.data.de || "—"], ["Reçu le", r.data.date_mail ? frd(r.data.date_mail) : "—"]], alerteId: r.id })), ...(p.docs || [])];
+  });
+}
 let loading = null;
 async function loadAll() {
   if (loading) return loading;
   loading = (async () => {
-    const { data, error } = await sb.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage)").limit(5000);
+    const { data, error } = await sb.from("jarvis_items").select("id,source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage)").limit(5000);
     if (error) { toast("Je n’arrive pas à lire tes données : " + error.message); return; }
     const rows = data || [];
-    S.next = ""; S.nextPlace = ""; PLACES.forEach(p => p.prive = []);
+    S.next = ""; S.nextPlace = ""; PLACES.forEach(p => Object.assign(p, { place: "", status: "…", say: "Je regarde…", facts: [], docs: [], live: "", macDocs: undefined, prive: [], urgent: false }));
     applyMac(rows.filter(r => r.source === "mac" || r.source === "jarvis"));
     applyPlanning(rows.filter(r => r.source === "planning" || r.source === "mac"));
     applyEnergie(rows.filter(r => r.source === "plenitude"));
     applyFoncia(rows.filter(r => r.source === "foncia"));
     applySante(rows.filter(r => r.source === "medinlyon"));
+    applyMails(rows.filter(r => r.source === "mails"));
     PLACES.forEach(p => {
       if (p.status === "…") { p.status = "À brancher"; p.say = "Je n’ai encore rien pour ce lieu. Dès qu’une source est branchée, je le remplis."; p.live = "Pas encore branché"; }
       p.say = nb(p.say); p.status = nb(p.status); });
