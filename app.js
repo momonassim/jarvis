@@ -731,6 +731,46 @@ function applyPlanning(rows) {
   p.live = "En direct · Mon Planning le " + quand(r.updated_at);
   S.planningTxt = fut.slice(0, 21).map(o => `${jour(o.d)} : ${lc(ditJ(o))}`).join("\n");
 }
+/* ---------- Orange (robot Scriptable « Jarvis Orange ») ---------- */
+function applyOrange(rows, apis) {
+  const o = byId.orange; if (!rows.length && !apis.length) return;
+  const J = re => { const r = apis.find(a => re.test(a.label)); try { return r ? JSON.parse(r.data.json) : null; } catch { return null; } };
+  const offre = J(/offer\/contracts\/\d+\/details/), opts = J(/installedOptions/) || [], bp = J(/billsAndPaymentInfos/), conso = J(/suiviconso\/contracts\/conso/);
+  const fac = rows.filter(r => r.kind === "facture" && r.date).sort((a, b) => b.date.localeCompare(a.date));
+  const der = fac[0], lb = bp && bp.lastBill;
+  const hf = conso && (conso.equipments || [])[0] && conso.equipments[0].synthesis;
+  const impaye = fac.filter(r => Number(r.data && r.data.reste) > 0);
+  o.place = "Orange";
+  o.status = der ? "Facture " + eur(der.amount) : "Orange";
+  let say = offre ? `Ton offre ${offre.name} coûte ${eur(offre.totalPriceAmount / 100)} par mois. ` : "";
+  if (der) say += `Dernière facture : ${eur(der.amount)} le ${frd(der.date)}${lb && lb.debitDate ? ", prélevée le " + frd(lb.debitDate) : ""}. `;
+  if (hf && hf.displayHF && hf.mainText) say += `Hors forfait en cours : ${hf.mainText}. `;
+  const finOpt = opts.filter(x => x.infos && x.infos.length);
+  finOpt.forEach(x => say += `${x.name} : ${x.infos[0].toLowerCase()}. `);
+  if (impaye.length) { o.urgent = true; say = `Il reste ${eur(impaye.reduce((a, r) => a + Number(r.data.reste), 0))} à payer chez Orange. ` + say; }
+  o.say = say.trim() || "Orange relu.";
+  o.facts = [
+    ["Offre", offre ? offre.name : "—"],
+    ["Prix de l’offre", offre ? eur(offre.totalPriceAmount / 100) + " par mois" : "—"],
+    ["Engagement", offre && offre.engagementLabel ? offre.engagementLabel.replace(/^Vous n’êtes plus engagé$/, "Plus engagé") : "—"],
+    ["Factures rangées", fac.length + (fac.length ? " depuis " + MOIS[Number(fac.slice(-1)[0].date.slice(5, 7)) - 1] + " " + fac.slice(-1)[0].date.slice(0, 4) : "")],
+  ];
+  const d = [];
+  if (lb && lb.aggregationLevel2) {
+    const l = [];
+    lb.aggregationLevel2.forEach(g => { l.push([g.title, eur(g.includingTaxesAmount / 100)]);
+      (g.aggregationLevel3 || []).forEach(a3 => (a3.aggregationLevel4 || []).forEach(a4 => (a4.aggregationLevel5 || []).forEach(a5 =>
+        l.push(["· " + a5.invoiced, a5.amount != null ? eur(a5.amount / 100) : (a5.amountDetail || "")])))); });
+    d.push({ t: "Détail de la dernière facture", d: frd(lb.date), v: eur(lb.amount / 100), where: "Espace client Orange", lines: l });
+  }
+  if (opts.length) d.push({ t: "Options", d: opts.length + " options", v: "", where: "Espace client Orange",
+    lines: opts.map(x => [x.name, (x.substitutesPriceInfo || "") + (x.infos && x.infos.length ? " · " + x.infos[0] : "")]) });
+  fac.forEach(r => d.push({ t: "Facture Orange", d: MOIS[Number(r.date.slice(5, 7)) - 1] + " " + r.date.slice(0, 4), v: eur(r.amount), where: "Espace client Orange",
+    lines: [["Date", frd(r.date)], ["Montant", eur(r.amount)], ["Reste à payer", eur(r.data.reste || 0)]], path: r.data.path }));
+  o.docs = [...d, ...(o.docs || [])];
+  o.live = stamp(rows, "relu chez Orange");
+}
+
 /* ---------- Alertes venues des mails (posées par ChatGPT ou Claude via le connecteur) ---------- */
 function applyMails(rows) {
   const ouvertes = rows.filter(r => r.kind === "alerte" && r.data && !r.data.vu)
@@ -750,7 +790,10 @@ let loading = null;
 async function loadAll() {
   if (loading) return loading;
   loading = (async () => {
-    const { data, error } = await sb.from("jarvis_items").select("id,source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage)").limit(5000);
+    const { data, error } = await sb.from("jarvis_items").select("id,source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage,page,api)").limit(5000);
+    // Orange : seulement les quelques blocs de données utiles (offre, options, factures, conso)
+    const { data: oApi } = await sb.from("jarvis_items").select("label,data,updated_at").eq("source", "orange").eq("kind", "api")
+      .or("label.ilike.*offer/contracts/*/details*,label.ilike.*installedOptions*,label.ilike.*billsAndPaymentInfos*,label.ilike.*suiviconso/contracts/conso*");
     if (error) { toast("Je n’arrive pas à lire tes données : " + error.message); return; }
     const rows = data || [];
     S.next = ""; S.nextPlace = ""; PLACES.forEach(p => Object.assign(p, { place: "", status: "…", say: "Je regarde…", facts: [], docs: [], live: "", macDocs: undefined, prive: [], urgent: false }));
@@ -759,6 +802,7 @@ async function loadAll() {
     applyEnergie(rows.filter(r => r.source === "plenitude"));
     applyFoncia(rows.filter(r => r.source === "foncia"));
     applySante(rows.filter(r => r.source === "medinlyon"));
+    applyOrange(rows.filter(r => r.source === "orange"), oApi || []);
     applyMails(rows.filter(r => r.source === "mails"));
     PLACES.forEach(p => {
       if (p.status === "…") { p.status = "À brancher"; p.say = "Je n’ai encore rien pour ce lieu. Dès qu’une source est branchée, je le remplis."; p.live = "Pas encore branché"; }

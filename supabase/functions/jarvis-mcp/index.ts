@@ -47,9 +47,12 @@ async function autorise(req: Request) {
 // ---------- les données ----------
 type Row = { source: string; kind: string; label: string; date: string | null; amount: number | null; data: any; updated_at: string };
 async function lignes(): Promise<Row[]> {
-  const { data, error } = await admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage)").limit(5000);
+  const { data, error } = await admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage,page,api)").limit(5000);
   if (error) throw new Error(error.message);
-  return (data ?? []) as Row[];
+  // Orange : seulement les blocs de données utiles (offre, options, factures, conso)
+  const { data: oApi } = await admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").eq("source", "orange").eq("kind", "api")
+    .or("label.ilike.*offer/contracts/*/details*,label.ilike.*installedOptions*,label.ilike.*billsAndPaymentInfos*,label.ilike.*suiviconso/contracts/conso*");
+  return [...(data ?? []), ...(oApi ?? [])] as Row[];
 }
 const LIEUX: Record<string, { mac?: string; nom: string }> = {
   logement: { nom: "Chez toi (logement, loyer Foncia)" },
@@ -61,7 +64,7 @@ const LIEUX: Record<string, { mac?: string; nom: string }> = {
   papiers: { mac: "mairie", nom: "Papiers d'identité" },
   banque: { mac: "banque", nom: "Argent et banque" },
   bebe: { mac: "medecin", nom: "Le bébé" },
-  abonnements: { mac: "orange", nom: "Abonnements" },
+  abonnements: { mac: "orange", nom: "Abonnements (Orange : box, mobile, TV)" },
 };
 function mac(rows: Row[], id: string, detail: boolean) {
   const r = rows.find((x) => x.source === "mac" && x.kind === "lieu" && x.label === id); if (!r) return "";
@@ -127,7 +130,25 @@ function lieu(rows: Row[], id: string, detail: boolean) {
   if (id === "energie") return energie(rows, detail);
   if (id === "sante") return sante(rows, detail);
   if (id === "travail") return travail(rows, detail);
+  if (id === "abonnements") return abonnements(rows, detail);
   const l = LIEUX[id]; return (l?.mac && mac(rows, l.mac, detail)) || "Rien pour ce lieu pour l'instant.";
+}
+
+// ---------- abonnements : Orange (robot Scriptable) ----------
+function abonnements(rows: Row[], detail: boolean) {
+  const o = rows.filter((r) => r.source === "orange");
+  const J = (re: RegExp) => { const r = o.find((x) => x.kind === "api" && re.test(x.label)); try { return r ? JSON.parse(r.data.json) : null; } catch { return null; } };
+  const offre = J(/offer\/contracts\/\d+\/details/), opts = J(/installedOptions/) ?? [], bp = J(/billsAndPaymentInfos/), conso = J(/suiviconso\/contracts\/conso/);
+  const fac = o.filter((r) => r.kind === "facture" && r.date).sort((a, b) => b.date!.localeCompare(a.date!));
+  let t = "";
+  if (offre) t += `Orange : offre ${offre.name}, ${eur(offre.totalPriceAmount / 100)} par mois (${offre.engagementLabel ?? ""}).`;
+  if (fac[0]) t += ` Dernière facture : ${eur(fac[0].amount)} le ${frd(fac[0].date)}${bp?.lastBill?.debitDate ? ", prélevée le " + frd(bp.lastBill.debitDate) : ""}. ${fac.length} factures rangées en PDF (depuis ${frd(fac[fac.length - 1].date)}).`;
+  const hf = conso?.equipments?.[0]?.synthesis; if (hf?.displayHF) t += ` Hors forfait en cours : ${hf.mainText}.`;
+  if (opts.length) t += " Options : " + opts.map((x: any) => x.name + (x.infos?.length ? ` (${x.infos[0]})` : "")).join(", ") + ".";
+  if (detail && bp?.lastBill?.aggregationLevel2) t += "\nDétail de la dernière facture : " + bp.lastBill.aggregationLevel2.map((g: any) => `${g.title} ${eur(g.includingTaxesAmount / 100)}`).join(" ; ") + ".";
+  if (detail && fac.length) t += "\nFactures :\n" + fac.slice(0, 24).map((r) => `- ${frd(r.date)} : ${eur(r.amount)}`).join("\n");
+  const ma = mac(rows, "orange", detail); if (ma) t += (t ? "\n" : "") + ma;
+  return t || "Rien pour ce lieu pour l'instant.";
 }
 
 // ---------- le travail : planning 5x8 envoyé par Mon Planning ----------
@@ -184,6 +205,7 @@ async function documents(q: string) {
   const cands: { titre: string; chemin: string; date: string }[] = [];
   rows.filter((r) => r.source === "foncia" && r.kind === "document" && r.data?.path).forEach((r) => cands.push({ titre: "Foncia · " + r.label.replace(/\.pdf$/i, ""), chemin: "foncia/" + r.data.path, date: r.date ?? "" }));
   rows.filter((r) => r.source === "mac" && r.kind === "lieu").forEach((r) => (r.data?.docs ?? []).filter((x: any) => x.path).forEach((x: any) => cands.push({ titre: `${x.t} ${x.d ?? ""}`.trim(), chemin: x.path, date: "" })));
+  rows.filter((r) => r.source === "orange" && r.kind === "facture" && r.data?.path).forEach((r) => cands.push({ titre: `Facture Orange ${MOIS[+r.date!.slice(5, 7) - 1]} ${r.date!.slice(0, 4)}`, chemin: r.data.path, date: r.date ?? "" }));
   rows.filter((r) => r.source === "medinlyon" && r.kind === "rdv" && r.data?.chemin).forEach((r) => cands.push({ titre: `MédinLyon · justificatif ${r.data.patient} du ${frd(r.data.date)}`, chemin: r.data.chemin, date: r.data.date }));
   const hits = cands.filter((c) => mots.every((m) => norm(c.titre + " " + c.date).includes(m))).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   if (!hits.length) return `Aucun PDF trouvé pour « ${q} ». ${cands.length} PDF rangés au total (Foncia, MédinLyon, papiers du Mac).`;
