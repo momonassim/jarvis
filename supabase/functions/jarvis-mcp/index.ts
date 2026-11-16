@@ -22,16 +22,25 @@ async function sha256(t: string) {
   const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
   return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
-async function autorise(req: Request) {
-  // On accepte « Bearer jv_… », « jv_… » ou même « Bearer Bearer jv_… » : on prend juste la clé.
-  const tok = ((req.headers.get("Authorization") ?? "").match(/jv_[A-Za-z0-9_-]{20,}/) ?? [""])[0];
-  if (!tok) return false;
-  const { data } = await admin.rpc("jarvis_get_secret", { p_name: "MCP_TOKEN_HASH" });
-  if (typeof data !== "string" || !data) return false;
-  const h = await sha256(tok);
-  let diff = h.length ^ data.length;
-  for (let i = 0; i < Math.min(h.length, data.length); i++) diff |= h.charCodeAt(i) ^ data.charCodeAt(i);
+async function egal(a: string, b: string) {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+async function autorise(req: Request) {
+  // Claude : clé dans l'en-tête (« Bearer jv_… », « jv_… »…).
+  // ChatGPT ne sait pas envoyer d'en-tête : sa clé à lui est dans l'adresse (?cle=jv_…).
+  // Deux clés séparées : on peut couper ChatGPT sans toucher à Claude.
+  const enTete = ((req.headers.get("Authorization") ?? "").match(/jv_[A-Za-z0-9_-]{20,}/) ?? [""])[0];
+  const dansLien = ((new URL(req.url).searchParams.get("cle") ?? "").match(/^jv_[A-Za-z0-9_-]{20,}$/) ?? [""])[0];
+  const essais: [string, string][] = [];
+  if (enTete) essais.push([enTete, "MCP_TOKEN_HASH"]);
+  if (dansLien) essais.push([dansLien, "MCP_TOKEN_HASH_CHATGPT"]);
+  for (const [tok, nom] of essais) {
+    const { data } = await admin.rpc("jarvis_get_secret", { p_name: nom });
+    if (typeof data === "string" && data && await egal(await sha256(tok), data)) return true;
+  }
+  return false;
 }
 
 // ---------- les données ----------
