@@ -734,39 +734,57 @@ function applyPlanning(rows) {
 /* ---------- Orange (robot Scriptable « Jarvis Orange ») ---------- */
 function applyOrange(rows, apis) {
   const o = byId.orange; if (!rows.length && !apis.length) return;
-  const J = re => { const r = apis.find(a => re.test(a.label)); try { return r ? JSON.parse(r.data.json) : null; } catch { return null; } };
-  const offre = J(/offer\/contracts\/\d+\/details/), opts = J(/installedOptions/) || [], bp = J(/billsAndPaymentInfos/), conso = J(/suiviconso\/contracts\/conso/);
-  const fac = rows.filter(r => r.kind === "facture" && r.date).sort((a, b) => b.date.localeCompare(a.date));
-  const der = fac[0], lb = bp && bp.lastBill;
-  const hf = conso && (conso.equipments || [])[0] && conso.equipments[0].synthesis;
-  const impaye = fac.filter(r => Number(r.data && r.data.reste) > 0);
+  const P = t => { try { return JSON.parse(t); } catch { return null; } };
+  const A = re => { const r = apis.find(x => re.test(x.label)); return r ? P(r.data && r.data.json) : null; };
+  const pf = A(/portfoliomanager\/portfolio/);
+  const fac = rows.filter(r => r.kind === "facture" && r.date).sort((x, y) => y.date.localeCompare(x.date));
+  const cids = (pf && pf.contracts || []).map(c => c.cid);
+  fac.forEach(r => { const c = r.data && r.data.contrat; if (c && !cids.includes(c)) cids.push(c); });
+  const ville = v => v ? v.charAt(0) + v.slice(1).toLowerCase() : "";
+  const C = cids.map(cid => {
+    const info = (pf && pf.contracts || []).find(c => c.cid === cid) || {};
+    const offre = A(new RegExp("contracts/" + cid + "/details")), opts = A(new RegExp("contracts/" + cid + "/installedOptions")) || [];
+    const bp = A(new RegExp("billsAndPaymentInfos/users/current/contracts/" + cid)), conso = A(new RegExp("suiviconso/contracts/conso/" + cid));
+    const f = fac.filter(r => r.data && r.data.contrat === cid);
+    const nom = (offre && offre.name) || info.offerName || "Contrat " + cid;
+    return { cid, nom, court: nom + (info.contractInstallationArea && info.contractInstallationArea.city ? " · " + ville(info.contractInstallationArea.city) : ""),
+      prix: offre ? offre.totalPriceAmount / 100 : null, engagement: offre && offre.engagementLabel, opts, bp, f,
+      hf: conso && (conso.equipments || [])[0] && conso.equipments[0].synthesis };
+  }).filter(c => c.f.length || c.prix != null || c.nom);
   o.place = "Orange";
-  o.status = der ? "Facture " + eur(der.amount) : "Orange";
-  let say = offre ? `Ton offre ${offre.name} coûte ${eur(offre.totalPriceAmount / 100)} par mois. ` : "";
-  if (der) say += `Dernière facture : ${eur(der.amount)} le ${frd(der.date)}${lb && lb.debitDate ? ", prélevée le " + frd(lb.debitDate) : ""}. `;
-  if (hf && hf.displayHF && hf.mainText) say += `Hors forfait en cours : ${hf.mainText}. `;
-  const finOpt = opts.filter(x => x.infos && x.infos.length);
-  finOpt.forEach(x => say += `${x.name} : ${x.infos[0].toLowerCase()}. `);
-  if (impaye.length) { o.urgent = true; say = `Il reste ${eur(impaye.reduce((a, r) => a + Number(r.data.reste), 0))} à payer chez Orange. ` + say; }
+  const total = C.reduce((t, c) => t + (c.prix || 0), 0);
+  o.status = C.length > 1 ? C.length + " contrats" + (total ? " · " + eur(total) + "/mois" : "") : (fac[0] ? "Facture " + eur(fac[0].amount) : "Orange");
+  let say = C.length > 1 ? `Tu as ${C.length} contrats Orange. ` : "";
+  C.forEach(c => {
+    const der = c.f[0], lb = c.bp && c.bp.lastBill;
+    say += `${c.court}${c.prix != null ? " : " + eur(c.prix) + " par mois" : ""}`;
+    say += der ? `, dernière facture ${eur(der.amount)} le ${frd(der.date)}${lb && lb.debitDate ? " (prélevée le " + frd(lb.debitDate) + ")" : ""}. ` : (c.prix != null ? ". " : ", factures pas encore relues. ");
+    if (c.hf && c.hf.displayHF && c.hf.mainText) say += `Hors forfait en cours : ${c.hf.mainText}. `;
+    c.opts.filter(x => x.infos && x.infos.length).forEach(x => say += `${x.name} : ${x.infos[0].toLowerCase()}. `);
+  });
+  const impaye = fac.filter(r => Number(r.data && r.data.reste) > 0);
+  if (impaye.length) { o.urgent = true; say = `Il reste ${eur(impaye.reduce((t, r) => t + Number(r.data.reste), 0))} à payer chez Orange. ` + say; }
   o.say = say.trim() || "Orange relu.";
-  o.facts = [
-    ["Offre", offre ? offre.name : "—"],
-    ["Prix de l’offre", offre ? eur(offre.totalPriceAmount / 100) + " par mois" : "—"],
-    ["Engagement", offre && offre.engagementLabel ? offre.engagementLabel.replace(/^Vous n’êtes plus engagé$/, "Plus engagé") : "—"],
-    ["Factures rangées", fac.length + (fac.length ? " depuis " + MOIS[Number(fac.slice(-1)[0].date.slice(5, 7)) - 1] + " " + fac.slice(-1)[0].date.slice(0, 4) : "")],
-  ];
+  o.facts = C.map(c => [c.court, c.prix != null ? eur(c.prix) + " par mois" : "—"]);
+  if (C.length > 1 && total) o.facts.push(["Total des offres", eur(total) + " par mois"]);
+  if (C.length === 1 && C[0].engagement) o.facts.push(["Engagement", C[0].engagement.replace(/^Vous n’êtes plus engagé$/, "Plus engagé")]);
+  o.facts.push(["Factures rangées", String(fac.length) + (fac.length ? " depuis " + MOIS[Number(fac[fac.length - 1].date.slice(5, 7)) - 1] + " " + fac[fac.length - 1].date.slice(0, 4) : "")]);
   const d = [];
-  if (lb && lb.aggregationLevel2) {
-    const l = [];
-    lb.aggregationLevel2.forEach(g => { l.push([g.title, eur(g.includingTaxesAmount / 100)]);
-      (g.aggregationLevel3 || []).forEach(a3 => (a3.aggregationLevel4 || []).forEach(a4 => (a4.aggregationLevel5 || []).forEach(a5 =>
-        l.push(["· " + a5.invoiced, a5.amount != null ? eur(a5.amount / 100) : (a5.amountDetail || "")])))); });
-    d.push({ t: "Détail de la dernière facture", d: frd(lb.date), v: eur(lb.amount / 100), where: "Espace client Orange", lines: l });
-  }
-  if (opts.length) d.push({ t: "Options", d: opts.length + " options", v: "", where: "Espace client Orange",
-    lines: opts.map(x => [x.name, (x.substitutesPriceInfo || "") + (x.infos && x.infos.length ? " · " + x.infos[0] : "")]) });
-  fac.forEach(r => d.push({ t: "Facture Orange", d: MOIS[Number(r.date.slice(5, 7)) - 1] + " " + r.date.slice(0, 4), v: eur(r.amount), where: "Espace client Orange",
-    lines: [["Date", frd(r.date)], ["Montant", eur(r.amount)], ["Reste à payer", eur(r.data.reste || 0)]], path: r.data.path }));
+  C.forEach(c => {
+    const lb = c.bp && c.bp.lastBill, suf = C.length > 1 ? " · " + c.court : "";
+    if (lb && lb.aggregationLevel2) {
+      const l = [];
+      lb.aggregationLevel2.forEach(g => { l.push([g.title, eur(g.includingTaxesAmount / 100)]);
+        (g.aggregationLevel3 || []).forEach(a3 => (a3.aggregationLevel4 || []).forEach(a4 => (a4.aggregationLevel5 || []).forEach(a5 =>
+          l.push(["· " + a5.invoiced, a5.amount != null ? eur(a5.amount / 100) : (a5.amountDetail || "")])))); });
+      d.push({ t: "Détail de la dernière facture", d: frd(lb.date) + suf, v: eur(lb.amount / 100), where: "Espace client Orange", lines: l });
+    }
+    if (c.opts.length) d.push({ t: "Options", d: c.opts.length + " options" + suf, v: "", where: "Espace client Orange",
+      lines: c.opts.map(x => [x.name, (x.substitutesPriceInfo || "") + (x.infos && x.infos.length ? " · " + x.infos[0] : "")]) });
+  });
+  fac.forEach(r => { const c = C.find(x => x.cid === (r.data && r.data.contrat));
+    d.push({ t: "Facture Orange", d: MOIS[Number(r.date.slice(5, 7)) - 1] + " " + r.date.slice(0, 4) + (C.length > 1 && c ? " · " + c.court : ""), v: eur(r.amount), where: "Espace client Orange",
+      lines: [["Contrat", c ? c.court : (r.data && r.data.contrat) || "—"], ["Date", frd(r.date)], ["Montant", eur(r.amount)], ["Reste à payer", eur(r.data.reste || 0)]], path: r.data.path }); });
   o.docs = [...d, ...(o.docs || [])];
   o.live = stamp(rows, "relu chez Orange");
 }
@@ -793,7 +811,7 @@ async function loadAll() {
     const { data, error } = await sb.from("jarvis_items").select("id,source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage,page,api)").limit(5000);
     // Orange : seulement les quelques blocs de données utiles (offre, options, factures, conso)
     const { data: oApi } = await sb.from("jarvis_items").select("label,data,updated_at").eq("source", "orange").eq("kind", "api")
-      .or("label.ilike.*offer/contracts/*/details*,label.ilike.*installedOptions*,label.ilike.*billsAndPaymentInfos*,label.ilike.*suiviconso/contracts/conso*");
+      .or("label.ilike.*offer/contracts/*/details*,label.ilike.*installedOptions*,label.ilike.*billsAndPaymentInfos*,label.ilike.*suiviconso/contracts/conso*,label.ilike.*portfoliomanager/portfolio*");
     if (error) { toast("Je n’arrive pas à lire tes données : " + error.message); return; }
     const rows = data || [];
     S.next = ""; S.nextPlace = ""; PLACES.forEach(p => Object.assign(p, { place: "", status: "…", say: "Je regarde…", facts: [], docs: [], live: "", macDocs: undefined, prive: [], urgent: false }));

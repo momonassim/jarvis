@@ -1,5 +1,5 @@
-// Jarvis — robot Orange v4 (tourne sur ton iPhone, avec ta connexion)
-// Fait le tour COMPLET de ton espace client Orange : toutes les pages (offre, options,
+// Jarvis — robot Orange v5 (tourne sur ton iPhone, avec ta connexion)
+// Fait le tour COMPLET de ton espace client Orange, pour TOUS tes contrats (box + mobile, 2e box…) : toutes les pages (offre, options,
 // lignes, box, matériel, conso, factures, paiements, contrats, compte…), les données
 // cachées derrière les pages, et tous les PDF qu'il trouve (factures, contrats…).
 // Tout part dans Supabase, pour le bâtiment « Abonnements » de Jarvis.
@@ -11,7 +11,7 @@ const SB = "https://uaprtibscyepsabyqcyl.supabase.co";
 const HOTE = "espace-client.orange.fr";
 const START = "https://" + HOTE + "/accueil";
 const KEYS = { id: "jarvis.orange.id", pw: "jarvis.orange.password", sb: "jarvis.supabase.secret" };
-const MAX_PAGES = 60, MAX_CLICS = 50, MAX_PDF = 60;
+const MAX_PAGES = 100, MAX_CLICS = 60, MAX_PDF = 80;
 // Liens jamais suivis (actions, sortie, boutique…)
 const EVITER = /d[ée]connex|logout|r[ée]sili|supprim|annul|souscri|command|panier|boutique|acheter|achat|mailto:|tel:|javascript:|chat|messenger|forum|communaute|assistance\.orange|aide\.orange|recrutement|paiement-en-ligne|payer/i;
 
@@ -159,6 +159,9 @@ async function run() {
   sbKey = await secret(KEYS.sb, "Supabase", "Colle ta clé secrète Supabase (sb_secret_…)", true);
   await login(id, pw);
 
+  // factures déjà rangées, par contrat et par date
+  const dejaFact = new Map();
+  try { for (const r of JSON.parse((await sb(`/rest/v1/jarvis_items?source=eq.orange&kind=eq.facture&select=date,data`)).body)) if (r.data && r.data.path) dejaFact.set(`${r.data.contrat}|${r.date}`, r.data.path); } catch (_) {}
   // PDF déjà rangés (pour ne pas les renvoyer)
   const ex = await sb(`/rest/v1/jarvis_items?source=eq.orange&kind=eq.document&select=data`);
   try { for (const r of JSON.parse(ex.body)) if (r.data && r.data.path) pdfConnus.add(r.data.path.replace(/^orange\//, "")); } catch (_) {}
@@ -190,6 +193,17 @@ async function run() {
         if (hote(h) === HOTE && !EVITER.test(h + " " + t)) file.push(sansAncre(h));
       }
       await recolter();
+      if (pages.length === 1) {
+        for (const [cle, d] of donnees) {
+          if (!/portfoliomanager\/portfolio/.test(cle)) continue;
+          let pf; try { pf = JSON.parse(d.json); } catch (_) { continue; }
+          const cids = (pf.contracts || []).map((c) => c.cid).filter(Boolean);
+          debug.push({ step: "contrats", cids, etats: (pf.contracts || []).map((c) => [c.cid, c.offerName, c.telco && c.telco.state]) });
+          for (const cid of cids.reverse())
+            for (const r of ["/facture-paiement/" + cid, "/offre-options/" + cid, "/equipements/" + cid + "/tv", "/conso/" + cid + "/equipement/equipement-principal", "/accueil?contrat=" + cid])
+              file.unshift("https://" + HOTE + r);
+        }
+      }
 
       // explorer les tuiles et boutons qui mènent ailleurs sans être de vrais liens
       const cibles = [...new Set(info.clic)].filter((t) => !EVITER.test(t) && !NE_PAS_CLIQUER.test(t) && !clicsFaits.has(t)).slice(0, 6);
@@ -263,9 +277,9 @@ async function run() {
     for (const b of liste) {
       if (pdfsEnvoyes >= MAX_PDF) break;
       const euros = (Number(b.amount || 0) / 100).toFixed(2).replace(".", ",");
-      const nom = `Facture Orange ${b.date}.pdf`, titre = `Facture Orange du ${b.date.split("-").reverse().join("/")} · ${euros} €`;
-      let chemin = [...pdfConnus].find((x) => x.startsWith(slug(`Facture Orange ${b.date}`) + "_"));
-      chemin = chemin ? "orange/" + chemin : (b.hrefPdf ? await prendrePdf([
+      const nom = `Facture Orange ${cid} ${b.date}.pdf`, titre = `Facture Orange du ${b.date.split("-").reverse().join("/")} · ${euros} €`;
+      let chemin = dejaFact.get(`${cid}|${b.date}`);
+      chemin = chemin ? chemin : (b.hrefPdf ? await prendrePdf([
         `https://${HOTE}/ecd_wp/facture/v1.0/pdf${b.hrefPdf}`,
         `https://${HOTE}/ecd_wp/facture/v1.0/pdf/users/current/contracts/${cid}${b.hrefPdf}`,
         `https://${HOTE}/ecd_wp/facture/v1.0/pdf/contracts/${cid}${b.hrefPdf}`], nom, titre) : null);
@@ -280,10 +294,10 @@ async function run() {
     for (const ob of (h.oldBills || []).slice(0, 60)) {
       if (pdfsEnvoyes >= MAX_PDF) break;
       const dt = ob.date;
-      if (factures.some((f) => f.date === dt)) continue;
-      const deja = [...pdfConnus].find((x) => x.startsWith(slug(`Facture Orange ${dt}`) + "_"));
+      if (factures.some((f) => f.date === dt && f.contrat === cid)) continue;
+      const deja0 = dejaFact.get(`${cid}|${dt}`), deja = deja0 ? deja0.replace(/^orange\//, "") : null;
       const q = `?entityName=${ob.entityName}&partitionKeyName=${ob.partitionKeyName}&partitionKeyValue=${ob.partitionKeyValue}&tecId=${ob.tecId}&cid=${cid}`;
-      const p = deja ? "orange/" + deja : await prendrePdf([`https://${HOTE}/ecd_wp/facture/historicPDF${q}`], `Facture Orange ${dt}.pdf`,
+      const p = deja ? "orange/" + deja : await prendrePdf([`https://${HOTE}/ecd_wp/facture/historicPDF${q}`], `Facture Orange ${cid} ${dt}.pdf`,
         `Facture Orange du ${dt.split("-").reverse().join("/")} · ${(Number(ob.amount || 0) / 100).toFixed(2).replace(".", ",")} €`);
       factures.push({ contrat: cid, date: dt, montant: Number(ob.amount || 0) / 100, ancienne: true, path: p });
     }
@@ -292,7 +306,7 @@ async function run() {
   try {
     for (const x of JSON.parse(await js(`JSON.stringify((window.__pdfs||[]).splice(0))`) || "[]")) {
       const dt = (x.u.match(/billDate=(\d{4}-\d{2}-\d{2})/) || [])[1];
-      if (dt) await rangerPdf({ d: x.d, n: `Facture Orange ${dt}.pdf` }, `Facture Orange du ${dt.split("-").reverse().join("/")}`, x.u);
+      if (dt && ![...dejaFact.keys()].some((k) => k.endsWith("|" + dt))) await rangerPdf({ d: x.d, n: `Facture Orange ${dt}.pdf` }, `Facture Orange du ${dt.split("-").reverse().join("/")}`, x.u);
     }
   } catch (_) {}
   if (echecs.length) debug.push({ step: "pdf-echecs", echecs });
@@ -308,7 +322,7 @@ async function run() {
   const items = [
     ...pages.map((p) => ({ source: "orange", kind: "page", label: p.url.replace("https://" + HOTE, "").slice(0, 200) || "/", date: null, amount: null, data: p })),
     ...[...donnees.values()].map((d) => ({ source: "orange", kind: "api", label: (d.url.replace(/^https?:\/\//, "") + (d.q ? "?" + d.q : "")).slice(0, 250), date: null, amount: null, data: d })),
-    ...factures.filter((f) => f.date && f.date !== "ancienne").map((f) => ({ source: "orange", kind: "facture", label: "Facture " + f.date, date: f.date, amount: f.montant ?? null, data: f })),
+    ...factures.filter((f) => f.date && f.date !== "ancienne").map((f) => ({ source: "orange", kind: "facture", label: "Facture " + f.contrat + " " + f.date, date: f.date, amount: f.montant ?? null, data: f })),
     ...docs.map((d) => ({ source: "orange", kind: "document", label: d.path, date: null, amount: null, data: d })),
     ...debug.map((d) => ({ source: "orange", kind: "debug", label: String(d.step).slice(0, 120), date: null, amount: null, data: d })),
   ];
