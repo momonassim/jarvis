@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=usine1";
+import { creerVille } from "./ville.js?v=sante1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -106,7 +106,7 @@ function etatMaison(p) { const now = new Date(), c = coupureDe(p); let etat = p.
 function refreshPins() {
   V.setDonnees(PLACES.map(p => ({ id: p.id, n: p.name, c: p.color, place: p.place, status: p.status, say: p.say, facts: p.facts || [],
     alerts: (p.docs || []).filter(d => d.alerteId).map(d => ({ t: d.t.replace(/^⚠︎\s*/, ""), d: d.d })),
-    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}), ...(p.id === "usine" ? { enPoste: !!p.enPoste, aujTxt: p.aujTxt || "", demTxt: p.demTxt || "" } : {}), ...(p.id === "orange" ? { hf: !!p.hf, nextBill: p.nextBill || null, lastBill: p.lastBill || null } : {}) })));
+    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}), ...(p.id === "usine" ? { enPoste: !!p.enPoste, aujTxt: p.aujTxt || "", demTxt: p.demTxt || "" } : {}), ...(p.id === "orange" ? { hf: !!p.hf, nextBill: p.nextBill || null, lastBill: p.lastBill || null } : {}), ...(p.id === "clinique" ? { prochain: p.prochain || null, liste: p.liste || [] } : {}) })));
 }
 
 /* =========================================================
@@ -382,6 +382,11 @@ function applySante(rows) {
   p.docs = [...d, ...(p.macDocs || [])];
   p.live = stamp(rows.filter(r => r.kind === "rdv"), "MédinLyon relu") || "MédinLyon pas encore relu";
   if (nxt) { S.next = p.status; S.nextPlace = "clinique"; }
+  // pour la ville : le prochain rendez-vous et la liste de la salle d'attente
+  const jc = d => new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+  p.prochain = nxt ? { qui: prenomDe(nxt.patient), quand: jc(nxt.date) + " · " + hh(nxt.heure), centre: ctr(nxt.centre) } : null;
+  p.liste = [...fut.slice(0, 3).map(r => ({ qui: prenomDe(r.patient), quand: jc(r.date) + " · " + hh(r.heure), futur: true })),
+             ...rdv.filter(r => r.statut === "passe").slice(0, 4).map(r => ({ qui: prenomDe(r.patient), quand: jc(r.date), futur: false }))].slice(0, 5);
 }
 
 

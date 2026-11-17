@@ -1346,6 +1346,45 @@ function updateUsine(dt){ if(!USN.root) return; const D=DATA.usine||{}, t=perfor
       L.push({t:(j===0?"AUJOURD'HUI":j===1?'DEMAIN':'J−'+j)+'  ·  '+nm,s:44,y:180+i*112,w:800,c:j<=3?'#c9483a':'#2f343c'}); });
     c.draw(L); }
 }
+
+/* ---------- TA SANTÉ : la croix verte, la porte d'entrée, le tableau de la salle d'attente ---------- */
+const CLN={};
+function buildClinic(L){ const P=PLACES.find(q=>q.id==='clinique'); const root=new THREE.Group(); root.matrixAutoUpdate=false; root.matrix.copy(L.mat); scene.add(root);
+  const act=(m,a)=>{ m.userData.place=P; m.userData.act=a; pickables.push(m); return m; };
+  // croix de pharmacie en points LED, entre les fenêtres du 1er étage, avec son bandeau qui défile
+  const cc=document.createElement('canvas'); cc.width=cc.height=256; const ct=new THREE.CanvasTexture(cc); ct.colorSpace=THREE.SRGBColorSpace;
+  const cross=new THREE.Mesh(new THREE.PlaneGeometry(1.15,1.15),new THREE.MeshBasicMaterial({map:ct,transparent:true,toneMapped:false})); cross.position.set(3.55,5.75,.14); root.add(act(cross,'details'));
+  const back=new THREE.Mesh(new THREE.BoxGeometry(1.25,1.25,.08),new THREE.MeshStandardMaterial({color:0x2b2f36,roughness:.4,metalness:.4})); back.position.set(3.55,5.75,.09); root.add(back);
+  const tc=document.createElement('canvas'); tc.width=1024; tc.height=128; const tt=new THREE.CanvasTexture(tc); tt.colorSpace=THREE.SRGBColorSpace;
+  const tick=new THREE.Mesh(new THREE.PlaneGeometry(1.7,.26),new THREE.MeshBasicMaterial({map:tt,toneMapped:false})); tick.position.set(3.55,4.95,.14); root.add(act(tick,'details'));
+  const tb=new THREE.Mesh(new THREE.BoxGeometry(1.8,.34,.08),new THREE.MeshStandardMaterial({color:0x2b2f36,roughness:.4,metalness:.4})); tb.position.set(3.55,4.95,.09); root.add(tb);
+  CLN.cross={c:cc,t:ct}; CLN.tick={c:tc,t:tt};
+  // la porte vitrée : un adhésif « Prendre rendez-vous » sur la vitre
+  const dc=document.createElement('canvas'); dc.width=512; dc.height=256; const dx=dc.getContext('2d'); dx.fillStyle='rgba(95,174,140,.92)'; dx.beginPath(); dx.roundRect(16,40,480,176,40); dx.fill();
+  dx.fillStyle='#fff'; dx.textAlign='center'; dx.font="800 64px 'Plus Jakarta Sans',Helvetica,Arial"; dx.fillText('Prendre',256,118); dx.fillText('rendez-vous',256,190);
+  const dt=new THREE.CanvasTexture(dc); dt.colorSpace=THREE.SRGBColorSpace;
+  const door=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.55),new THREE.MeshBasicMaterial({map:dt,transparent:true,toneMapped:false})); door.position.set(5.0,1.45,.06); root.add(act(door,'rdv'));
+  const dz=new THREE.Mesh(new THREE.PlaneGeometry(2.0,3.2),new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false})); dz.position.set(5.0,1.6,.04); root.add(act(dz,'rdv'));
+  // le tableau de la salle d'attente, vu à travers la vitrine de gauche
+  const wb=labelPlane([{t:'—',s:30,y:40}],1.75,2.1,{bg:'#fbfaf7',edge:'#5FAE8C',ppu:300}); wb.position.set(2.1,1.75,-.1); root.add(act(wb,'details')); CLN.board=wb;
+}
+function updateClinic(dt){ if(!CLN.cross) return; const D=DATA.clinique||{}, t=performance.now()/1000, nx=D.prochain;
+  // croix : verte fixe s'il y a un rendez-vous, éteinte sinon (le cœur pulse doucement)
+  const x=CLN.cross.c.getContext('2d'); x.clearRect(0,0,256,256); const on=!!nx, n=11, st=256/n;
+  for(let i=0;i<n;i++) for(let j=0;j<n;j++){ const inC=(i>=4&&i<=6)||(j>=4&&j<=6); if(!inC) continue; const lit=on?(.75+.25*Math.sin(t*2.2-(Math.abs(i-5)+Math.abs(j-5))*.5)):.12;
+    x.fillStyle=on?`rgba(60,220,120,${lit})`:`rgba(160,170,165,${lit+.15})`; x.beginPath(); x.arc(i*st+st/2,j*st+st/2,st*.36,0,7); x.fill(); }
+  CLN.cross.t.needsUpdate=true;
+  // bandeau : le jour et l'heure défilent
+  const msg=nx?`  PROCHAIN RENDEZ-VOUS · ${nx.qui} · ${nx.quand} · ${nx.centre}  ✚  `:'  AUCUN RENDEZ-VOUS PRÉVU · touche la porte pour en prendre un  ✚  ';
+  const y=CLN.tick.c.getContext('2d'); y.fillStyle='#0d1210'; y.fillRect(0,0,1024,128); y.font="800 70px 'Plus Jakarta Sans',Helvetica,Arial"; y.fillStyle=on?'#4be38a':'#e8b04a';
+  const w=y.measureText(msg).width, off=(t*140)%w; y.fillText(msg,-off,92); y.fillText(msg,w-off,92); CLN.tick.t.needsUpdate=true;
+  // tableau de la salle d'attente
+  const L=D.liste||[], k=JSON.stringify(L);
+  if(CLN.board.userData.k!==k){ CLN.board.userData.k=k; const R=[{t:"SALLE D'ATTENTE",s:40,y:70,ls:6,c:'#2f8a57'}];
+    if(!L.length) R.push({t:'Aucun rendez-vous',s:40,y:200,w:600,c:'#6b7079'});
+    L.forEach((r,i)=>{ R.push({t:(r.futur?'● ':'')+r.qui,s:44,y:150+i*104,c:r.futur?'#2f8a57':'#2f343c'}); R.push({t:r.quand,s:32,y:190+i*104,w:600,c:'#6b7079'}); });
+    CLN.board.userData.draw(R); }
+}
 function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(id); const wide=H<900; const T0=o.top||0; const z=o.scale||(H>1400?1.55:1);
   x.globalAlpha=A(t,0); x.fillStyle=D.c; x.beginPath(); x.arc(78,74*z+T0,24*z,0,7); x.fill();
   const title=(o.title||D.n).toUpperCase(); const ft=fitFont(x,title,wide?560:820,40*z,700,24); txt(x,title,78+44*z,88*z+T0,ft,700,PAL.ink,'left',5);
@@ -1385,7 +1424,7 @@ function buildOpenings(){
   // ---------- IMPÔTS : l'avis sort de la façade entre les drapeaux ----------
   const I=PL.impots; if(I) newPanel('impots',I.mat,{x:I.W/2,y:6.75,z0:-.5,z1:.42,w:5.0,h:3.0,kind:'slide',d:0,frame:true,thick:.22,draw:boardReal('impots')});
   // ---------- TA SANTÉ ----------
-  const C=PL.clinique; if(C) newPanel('clinique',C.mat,{x:C.W/2,y:6.95,z0:-.5,z1:.42,w:5.2,h:3.5,kind:'slide',d:0,frame:true,thick:.22,hit:{x0:610,y0:46,x1:940,y1:104,act:'rdv'},draw:boardReal('clinique',{button:'Prendre rendez-vous'})});
+  const C=PL.clinique; if(C){ buildClinic(C); C.tX=3.55; C.tY=3.0; C.camY=1.7; C.far=9.2; C.camDX=0; }
   // ---------- TES PAPIERS : trois papiers encadrés dans les fenêtres de la mairie ----------
   const Mr=PL.mairie; if(Mr) [5.1,8.0,10.9].forEach((cx,i)=>newPanel('mairie',Mr.mat,{x:cx,y:5.3+1.16,z0:-.5,z1:.08,w:1.25,h:1.95,kind:'slide',d:i*.12,thick:.08,draw:docReal('mairie',i)}));
   // ---------- LE BÉBÉ : deux affiches dans les vitrines du cabinet ----------
@@ -1405,6 +1444,7 @@ for(const p of PLACES){ const L=PL[p.id]; if(p.id!=='garage'&&L&&L.mat){ const f
 { const Hm=PLACES.find(q=>q.id==='home'); if(Hm) Hm.fov=55; }
 { const Og=PLACES.find(q=>q.id==='orange'); if(Og) Og.fov=78; }
 { const Us=PLACES.find(q=>q.id==='usine'); if(Us) Us.fov=55; }
+{ const Cl=PLACES.find(q=>q.id==='clinique'); if(Cl) Cl.fov=70; }
 function updateOpenings(dt){
   for(const id in PANELS){ const want=(SEL&&SEL.id===id&&!anim)?1:0; const k0=openK[id]; openK[id]=cl(k0+(want?1:-1)*dt/2.4); const K=openK[id];
     if(K===k0&&K!==1&&K!==0) continue;
@@ -1432,7 +1472,7 @@ let lastT=performance.now();
 function update3D(){
   const now=performance.now(), dt=Math.min(.05,(now-lastT)/1000); lastT=now; selT+=dt;
   for(const m of flagMats) m.userData.U.uT.value=now/1000;
-  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt); updateUsine(dt);
+  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt); updateUsine(dt); updateClinic(dt);
   // mâts : face à la caméra (autour de l'axe vertical), nom qui s'ouvre de près ; trop près, ils se replient
   for(const p of masts){ const M2=p.mast, hp=M2.head.position; M2.spin.rotation.y=Math.atan2(camera.position.x-hp.x,camera.position.z-hp.z);
     const d=camera.position.distanceTo(hp), sel=p===SEL; const want=(sel||d<150)?1:0; M2.open+=(want-M2.open)*Math.min(1,dt*6);
