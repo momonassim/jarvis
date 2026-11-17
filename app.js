@@ -133,33 +133,49 @@ cyl(.25, .35, 1.4, mat(0xf3ece0), 0, 1.2, 0, root, 16);
 /* ---------- Arbres et fenêtres (en série) ---------- */
 const TREES = [], WINS = [];
 function tree(x, z, s = 1) { TREES.push([x, z, s * (.85 + Math.random() * .35)]); }
-function windows(cx, cz, w, d, floors, fh, y0 = 0, opts = {}) {
-  const ww = opts.ww || .9, wh = opts.wh || 1.2, gap = opts.gap || 2;
+/* Une fenêtre posée sur une façade, en coordonnées du bâtiment (g) : elle suit sa rotation.
+   side 0 = façade avant/arrière (axe z du bâtiment), 1 = façade de côté (axe x). */
+const _wp = new THREE.Vector3();
+function winAt(g, x, y, z, side, w, h) {
+  g.updateMatrixWorld(true); _wp.set(x, y, z); g.localToWorld(_wp);
+  const quarter = Math.round(g.rotation.y / (Math.PI / 2)) & 1;
+  WINS.push([_wp.x, _wp.y, _wp.z, side ^ quarter, w, h]);
+}
+function windows(g, w, d, floors, fh, y0 = 0, opts = {}) {
+  const ww = opts.ww || .9, wh = opts.wh || 1.2, gap = opts.gap || 2, cx = opts.cx || 0, cz = opts.cz || 0;
   for (let f = 0; f < floors; f++) { const y = y0 + f * fh + fh * .55;
     const nx = Math.max(1, Math.floor((w - .6) / gap)), nz = Math.max(1, Math.floor((d - .6) / gap));
-    for (let i = 0; i < nx; i++) { const x = cx - w / 2 + (i + .5) * w / nx; if (!opts.skipFront) WINS.push([x, y, cz + d / 2 + .03, 0, ww, wh]); if (!opts.skipBack) WINS.push([x, y, cz - d / 2 - .03, 0, ww, wh]); }
-    for (let i = 0; i < nz; i++) { const z = cz - d / 2 + (i + .5) * d / nz; WINS.push([cx + w / 2 + .03, y, z, 1, ww, wh]); WINS.push([cx - w / 2 - .03, y, z, 1, ww, wh]); }
+    for (let i = 0; i < nx; i++) { const x = cx - w / 2 + (i + .5) * w / nx; if (!opts.skipFront) winAt(g, x, y, cz + d / 2 + .03, 0, ww, wh); if (!opts.skipBack) winAt(g, x, y, cz - d / 2 - .03, 0, ww, wh); }
+    for (let i = 0; i < nz; i++) { const z = cz - d / 2 + (i + .5) * d / nz; winAt(g, cx + w / 2 + .03, y, z, 1, ww, wh); winAt(g, cx - w / 2 - .03, y, z, 1, ww, wh); }
   }
+}
+/* Les rues : deux bandes nord-sud et deux bandes est-ouest. Un bâtiment regarde la rue la plus proche. */
+function faceRoad(x, z) {
+  const near = v => { const a = Math.abs(v); return a > 14 ? [a - 14, -Math.sign(v)] : [10 - a, Math.sign(v)]; };
+  const [dx, sx] = near(x), [dz, sz] = near(z);
+  return dx < dz ? Math.atan2(sx, 0) : Math.atan2(0, sz);
 }
 
 /* ---------- Les lieux ---------- */
 const pickables = [];
 function placeGroup(id, x, z, top, opts = {}) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); root.add(g);
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = opts.rot || 0; g.userData.fp = true; root.add(g);
   const p = byId[id]; p.group = g; p.anchor = new THREE.Vector3(x + (opts.ax || 0), top, z + (opts.az || 0)); p.focus = new THREE.Vector3(x + (opts.fx || 0), opts.fy ?? top * .4, z + (opts.fz || 0));
   p.dist = opts.dist || Math.max(26, top * 2.6); p.azim = opts.azim; p.polar = opts.polar;
   return g;
 }
 function tagPick(g, id) { g.traverse(o => { if (o.isMesh) { o.userData.place = id; pickables.push(o); } }); }
 
-{ const g = placeGroup("home", 23.5, 0, 17.6, { fy: 7, dist: 44, azim: 1.05, polar: 1.05 });
+/* Chaque lieu a sa façade (l'avant du bâtiment, côté +z avant rotation) tournée vers une rue ou vers la place.
+   Plan des pâtés : rues à 10–14 du centre, place au milieu, huit pâtés autour. */
+{ const g = placeGroup("home", 23.5, 0, 17.6, { rot: -Math.PI / 2, fy: 8, dist: 48, azim: -.8, polar: 1.02 });
   const facade = mat(0xf2ae8a), white = mat(0xfaf4ea);
   box(9, 16, 8, facade, 0, 8, 0, g, .25);
   box(9.6, .5, 8.6, white, 0, 16.2, 0, g, .15);
   for (let f = 1; f < 5; f++) { box(9.4, .18, 1.1, white, 0, f * 3.2, 4.5, g, .05); box(9.4, .6, .08, white, 0, f * 3.2 + .4, 5.02, g); }
   box(2.2, 2.6, .3, mat(0x7a5b48), 0, 1.3, 4.05, g, .05);
   box(3.4, .2, 1.4, white, 0, 2.8, 4.6, g, .05);
-  windows(g.position.x, g.position.z, 9, 8, 5, 3.2, 0, { gap: 2.2 });
+  windows(g, 9, 8, 5, 3.2, 0, { gap: 2.2 });
   box(1.3, 1.6, .12, glow(0x3fd39a, .9, 2.2), -2.2, 3 * 3.2 + 1.7, 4.08, g);
   box(1.5, 1.2, 1.2, mat(0xe9ddcb), 2.5, 16.9, -1.5, g, .1);
   tagPick(g, "home");
@@ -172,9 +188,9 @@ function tagPick(g, id) { g.traverse(o => { if (o.isMesh) { o.userData.place = i
   [[-1.5, .95], [1.5, .95], [-1.5, -.95], [1.5, -.95]].forEach(([a, b]) => { const w = cyl(.42, .42, .3, mat(0x2a2624), a, .42, b, car, 18); w.rotation.x = Math.PI / 2; });
   const hl = glow(0xfff4d6, .6, 1.8); box(.1, .18, .5, hl, 2.31, .95, .6, car); box(.1, .18, .5, hl, 2.31, .95, -.6, car);
   car.rotation.y = Math.PI / 2; car.position.z = -1.4;
-  tagPick(car, "garage"); ga.add(new THREE.Object3D());
+  tagPick(car, "garage"); ga.userData.fp = false; ga.add(new THREE.Object3D());
   box(.15, 1.8, .15, mat(0x5d5752), 14.6, .9, -9.6); box(1.2, .7, .08, mat(0x3e74c9), 14.6, 2, -9.6, root, .05);
-  tree(17, 8.5); tree(29, 8); tree(17, -12.4, .8);
+  tree(28.6, -7.6, .8); tree(29, -4, .75);
 }
 { const g = placeGroup("banque", 22, -22, 9.2, { fy: 3 });
   const c = mat(0xf7e2a3), w = mat(0xfbf5e8);
@@ -182,55 +198,61 @@ function tagPick(g, id) { g.traverse(o => { if (o.isMesh) { o.userData.place = i
   for (let i = 0; i < 6; i++) cyl(.32, .36, 5.4, w, -4.2 + i * 1.68, 3.7, 3.4, g, 16);
   box(11, .6, 8.2, w, 0, 7.4, 0, g, .1); prism(11, 1.9, 1.4, w, 0, 7.7, 3.4, g); box(10, 1.6, 5, c, 0, 8.4, -1, g, .1);
   box(1.6, 2.6, .2, mat(0x7a5b48), 0, 2.3, 2.9, g);
-  windows(g.position.x, g.position.z - .4, 10, 6.6, 2, 2.8, 1.4, { skipFront: true, gap: 2.4 });
-  tagPick(g, "banque"); tree(16.5, -17); tree(27.5, -17.2); tree(28, -27.5, .9);
+  windows(g, 10, 6.6, 2, 2.8, 1.4, { cz: -.4, skipFront: true, gap: 2.4 });
+  tagPick(g, "banque"); tree(15.4, -16); tree(28.8, -16); tree(28.6, -28.4, .8); tree(15.6, -28.4, .8);
 }
-{ const g = placeGroup("impots", 22.5, 22, 14, { fy: 4 });
+{ const g = placeGroup("impots", 22.5, 22, 14, { rot: Math.PI, fy: 4, azim: Math.PI - .5 });
   const c = mat(0xe8e3da), roof = mat(0x6c7a84);
-  box(12, 7, 8, c, 0, 3.5, 0, g, .15); prism(12.6, 2.6, 8.6, roof, 0, 7, 0, g, Math.PI / 2);
+  box(12, 7, 8, c, 0, 3.5, 0, g, .15); prism(8.6, 2.6, 12.6, roof, 0, 7, 0, g, Math.PI / 2);
   box(12.4, .4, .5, mat(0xfaf6ee), 0, 7, 4.1, g); box(2.4, 3, .25, mat(0x55606a), 0, 1.5, 4.05, g, .05); box(4.4, .25, 1.6, mat(0xfaf6ee), 0, 3.2, 4.7, g, .05);
-  windows(g.position.x, g.position.z, 12, 8, 2, 3.2, 0, { gap: 2.3 });
+  windows(g, 12, 8, 2, 3.2, 0, { gap: 2.3 });
   cyl(.08, .08, 5, mat(0xdcd6cc), 5.3, 9.5, 4, g, 8);
   [0x2f55a4, 0xf6f3ee, 0xe0453a].forEach((col, i) => box(.7, 1.4, .06, mat(col), 5.3 + .35 + i * .7, 11.2, 4, g));
-  tagPick(g, "impots"); tree(16.6, 27.6); tree(28, 17); tree(28.2, 27.8, .9);
+  tagPick(g, "impots"); tree(16.2, 28.2); tree(29.2, 15.2, .8); tree(28.6, 28.2, .9);
 }
-{ const g = placeGroup("mairie", 0, 22.5, 16.4, { fy: 5 });
-  const c = mat(0xefdcc0), w = mat(0xfaf3e7), roof = mat(0xbd6b52);
-  box(14, 6, 7, c, 0, 3, 0, g, .15); prism(14.4, 2.4, 7.4, roof, 0, 6, 0, g, Math.PI / 2);
+{ const g = placeGroup("mairie", 0, 22.5, 16.4, { rot: Math.PI, fy: 5, azim: Math.PI + .25 });
+  const c = mat(0xefdcc0), w = mat(0xfaf3e7), roof = mat(0xbd6b52), ink = mat(0x3a302a);
+  box(14, 6, 7, c, 0, 3, 0, g, .15); prism(7.4, 2.4, 14.4, roof, 0, 6, 0, g, Math.PI / 2);
   box(3.6, 10.5, 3.6, w, 0, 5.25, 1.2, g, .15);
   const face = cyl(1.2, 1.2, .15, mat(0xfffbf2), 0, 8.6, 3.06, g, 32); face.rotation.x = Math.PI / 2;
-  box(.12, .9, .06, mat(0x3a302a), 0, 8.95, 3.16, g); box(.6, .1, .06, mat(0x3a302a), .25, 8.6, 3.16, g);
+  // Aiguilles à 10 h 10, pivot au centre du cadran
+  [[.62, .09, Math.PI / 3], [.88, .07, -Math.PI / 3]].forEach(([L, t, a]) => { const piv = new THREE.Group(); piv.position.set(0, 8.6, 3.16); piv.rotation.z = a; g.add(piv); box(t, L, .05, ink, 0, L / 2, 0, piv); });
+  cyl(.09, .09, .07, ink, 0, 8.6, 3.18, g, 12).rotation.x = Math.PI / 2;
   prism(4.2, 3, 4.2, roof, 0, 10.5, 1.2, g); box(1.8, 2.6, .2, mat(0x7a5b48), 0, 1.3, 3.05, g);
-  windows(g.position.x, g.position.z, 14, 7, 2, 2.8, 0, { gap: 2.6 });
-  tagPick(g, "mairie"); tree(-6, 27.8); tree(6.5, 27.8); tree(-8.5, 17, .9); tree(8.5, 17, .9);
+  windows(g, 14, 7, 2, 2.8, 0, { gap: 2.6 });
+  tagPick(g, "mairie");
+  // Le parvis : la mairie donne sur la place
+  box(13, .1, 4.2, walkM, 0, .05, 5.6, g);
+  tree(-8.4, 16.6, .9); tree(8.4, 16.6, .9); tree(-6, 28.2); tree(6.5, 28.2);
 }
-{ const g = placeGroup("orange", -21.5, -2.5, 10.6, { fy: 2.5, dist: 30 });
+{ const g = placeGroup("orange", -21.5, -2.5, 10.6, { rot: Math.PI / 2, fy: 2.5, dist: 30, azim: Math.PI / 2 - .45 });
   const c = mat(0xf7efe5), o = mat(0xff7a1a, { roughness: .6 });
   box(8, 4.6, 6, c, 0, 2.3, 0, g, .2); box(8.4, .5, 6.4, mat(0x3b322d), 0, 4.75, 0, g, .1);
   const aw = box(7.6, .15, 1.8, o, 0, 3.2, 3.7, g); aw.rotation.x = .32;
   box(6.4, 2, .12, mat(0x2c3a40, { roughness: .15 }), 0, 1.5, 3.02, g); box(2.4, .9, .15, o, 2.4, 4.2, 3.1, g, .05);
   cyl(.1, .16, 5.4, mat(0xdcd3c8), -2.4, 7.7, -1.2, g, 8);
   for (let k = 0; k < 3; k++) { const a = k * 2.1; box(.3, 1.1, .12, mat(0xf6f2ea), -2.4 + Math.cos(a) * .35, 9.4, -1.2 + Math.sin(a) * .35, g).rotation.y = -a; }
-  tagPick(g, "orange"); tree(-16.8, 3.5); tree(-28, -8.6); tree(-16.6, -8.4, .9);
+  tagPick(g, "orange"); tree(-16, 3.6); tree(-16, -8.4, .9); tree(-29, 1.5, .8);
 }
 { const g = placeGroup("clinique", -22, -22.5, 13.4, { fy: 5 });
-  const w = mat(0xf7f4ee);
+  const w = mat(0xf7f4ee), pad = mat(0xf6f2ea);
   box(12, 9, 8, w, 0, 4.5, 0, g, .2); box(6, 4, 5, w, -3, 11, -.5, g, .2); box(12.4, .35, 8.4, mat(0xd9e4e6), 0, 9.1, 0, g, .1);
   cyl(2.2, 2.2, .12, mat(0x5e6a70), 2.6, 9.35, -1, g, 32);
-  box(2.2, .04, .4, mat(0xf6f2ea), 2.6, 9.43, -1, g); box(.4, .04, 1.6, mat(0xf6f2ea), 1.7, 9.43, -1, g); box(.4, .04, 1.6, mat(0xf6f2ea), 3.5, 9.43, -1, g);
+  // Un vrai « H » : deux montants et une barre entre eux
+  box(.42, .04, 2.1, pad, 1.8, 9.43, -1, g); box(.42, .04, 2.1, pad, 3.4, 9.43, -1, g); box(1.2, .04, .4, pad, 2.6, 9.43, -1, g);
   const cr = glow(0xe0473a, .2, 1.8); box(.7, 2.2, .15, cr, -3, 11.2, 2.06, g); box(2.2, .7, .15, cr, -3, 11.2, 2.06, g);
   box(3, 2.8, .2, mat(0x9fc2cc, { roughness: .2 }), 0, 1.4, 4.05, g); box(5, .25, 2, w, 0, 3, 4.9, g, .05);
-  windows(g.position.x, g.position.z, 12, 8, 3, 2.9, 0, { gap: 2.2 });
-  tagPick(g, "clinique"); tree(-16.7, -16.8); tree(-27.8, -16.8, .9); tree(-27.6, -28, .9);
+  windows(g, 12, 8, 3, 2.9, 0, { gap: 2.2 });
+  tagPick(g, "clinique"); tree(-15, -15.2, .8); tree(-29, -15.8, .8); tree(-29, -28.6, .8); tree(-15.6, -28.6, .8);
 }
-{ const g = placeGroup("medecin", -3.5, -21.5, 8.2, { fy: 2.6, dist: 28 });
-  box(7, 4.2, 6, mat(0xe6efe4), 0, 2.1, 0, g, .2); prism(7.6, 2.4, 6.6, mat(0x6f9a7c), 0, 4.2, 0, g, Math.PI / 2);
+{ const g = placeGroup("medecin", -5, -21.5, 8.2, { fy: 2.6, dist: 28 });
+  box(7, 4.2, 6, mat(0xe6efe4), 0, 2.1, 0, g, .2); prism(6.6, 2.4, 7.6, mat(0x6f9a7c), 0, 4.2, 0, g, Math.PI / 2);
   const gc = glow(0x2fa36b, .25, 1.8); box(.4, 1.3, .12, gc, 2.4, 3.2, 3.08, g); box(1.3, .4, .12, gc, 2.4, 3.2, 3.08, g);
   box(1.5, 2.4, .2, mat(0x6f553f), -1, 1.2, 3.05, g);
-  windows(g.position.x, g.position.z, 7, 6, 1, 3, 0, { gap: 2.5 });
-  tagPick(g, "medecin"); tree(-8.5, -17.5); tree(1.5, -27.5, .9); tree(-8.5, -27.5, .8);
+  windows(g, 7, 6, 1, 3, 0, { gap: 2.5 });
+  tagPick(g, "medecin"); tree(-1.2, -28.4, .8);
 }
-{ const g = placeGroup("usine", -21.5, 22, 21.5, { fy: 5, dist: 40 });
+{ const g = placeGroup("usine", -21.5, 22, 21.5, { rot: Math.PI, fy: 5, dist: 40, azim: Math.PI + .55 });
   const c = mat(0xd7c8b6), roof = mat(0x8c7f72), w = mat(0xf6f1e8), red = mat(0xd2513e);
   box(13, 6, 9, c, 0, 3, 0, g, .15);
   for (let i = 0; i < 4; i++) { const s = new THREE.Shape(); s.moveTo(0, 0); s.lineTo(3.25, 0); s.lineTo(3.25, 2.2); s.lineTo(0, 0);
@@ -239,41 +261,39 @@ function tagPick(g, id) { g.traverse(o => { if (o.isMesh) { o.userData.place = i
   box(3.2, 3.6, .2, mat(0x6d6a66), -3, 1.8, 4.55, g); box(3.2, 3.6, .2, mat(0x6d6a66), 2.5, 1.8, 4.55, g);
   box(1.6, 1, .1, glow(0xff8a3a, .9, 2.4), 5.4, 2, 4.56, g);
   for (let k = 0; k < 5; k++) cyl(.95 - k * .04, 1 - k * .04, 2.8, k % 2 ? red : w, 4.4, 6 + k * 2.8 + 1.4, -2.3, g, 20);
-  windows(g.position.x, g.position.z, 13, 9, 1, 4.2, .6, { gap: 2.6, skipFront: true, ww: 1.4, wh: 1.4 });
-  tagPick(g, "usine"); tree(-27.8, 16.6); tree(-16.6, 28, .9);
+  windows(g, 13, 9, 1, 4.2, .6, { gap: 2.6, skipFront: true, ww: 1.4, wh: 1.4 });
+  tagPick(g, "usine"); tree(-28.6, 15.6); tree(-16, 28.4, .9); tree(-29, 28.6, .8);
 }
 let rotor;
-{ const g = placeGroup("energie", 6, -23, 14.5, { fy: 5, dist: 34, fx: 0 });
+{ const g = placeGroup("energie", 5.4, -23, 14.5, { fy: 5, dist: 34, fx: 0 });
   box(3.2, 2.6, 2.4, mat(0xe7e1d6), -2.2, 1.3, 2.5, g, .12); box(.5, .9, .1, glow(0xf2c230, .25, 1.6), -2.2, 1.6, 3.75, g);
-  cyl(.25, .45, 12, mat(0xfbf8f2), 1, 6, 0, g, 16); box(.8, .8, 1.6, mat(0xfbf8f2), 1, 12.2, .4, g, .3);
-  rotor = new THREE.Group(); rotor.position.set(1, 12.2, 1.3); g.add(rotor);
-  for (let k = 0; k < 3; k++) { const b = box(.35, 5.6, .12, mat(0xfbf8f2), 0, 2.8, 0, rotor, .12); const piv = new THREE.Group(); piv.rotation.z = k * Math.PI * 2 / 3; piv.add(b); rotor.add(piv); }
-  tagPick(g, "energie"); tree(-5, -28, .8);
+  cyl(.25, .45, 12, mat(0xfbf8f2), 0, 6, 0, g, 16); box(.8, .8, 1.6, mat(0xfbf8f2), 0, 12.2, .4, g, .3);
+  rotor = new THREE.Group(); rotor.position.set(0, 12.2, 1.3); g.add(rotor);
+  for (let k = 0; k < 3; k++) { const b = box(.35, 4.6, .12, mat(0xfbf8f2), 0, 2.3, 0, rotor, .12); const piv = new THREE.Group(); piv.rotation.z = k * Math.PI * 2 / 3; piv.add(b); rotor.add(piv); }
+  tagPick(g, "energie");
 }
 
-/* ---------- Le reste de la ville ---------- */
+/* ---------- Le reste de la ville : des maisons tournées vers leur rue ---------- */
 const pastel = [0xf3cfb3, 0xe9d9bb, 0xf5dfaa, 0xe6bfae, 0xdfe3c8, 0xf0e2cf, 0xe8c9b9], roofs = [0xc76e56, 0xb4634e, 0x8f7a6a, 0xd38a5c];
-function house(x, z, rot = 0, big = false) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; root.add(g);
+function house(x, z, big = false) {
+  const rot = faceRoad(x, z);
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; g.userData.fp = true; root.add(g);
   const w = big ? 5 : 3.6, d = big ? 4.6 : 3.4, h = big ? 6.5 : 2.8;
   box(w, h, d, mat(pastel[(Math.random() * pastel.length) | 0]), 0, h / 2, 0, g, .15);
   if (big) box(w + .3, .35, d + .3, mat(0xf7efe3), 0, h + .17, 0, g, .08);
-  else prism(w + .5, 1.6, d + .4, mat(roofs[(Math.random() * roofs.length) | 0]), 0, h, 0, g, Math.PI / 2);
+  else prism(d + .4, 1.6, w + .5, mat(roofs[(Math.random() * roofs.length) | 0]), 0, h, 0, g, Math.PI / 2);
   box(.9, 1.6, .12, mat(0x7d604c), 0, .8, d / 2 + .02, g);
-  g.updateMatrixWorld(true);
-  const p = new THREE.Vector3();
   for (let f = 0; f < (big ? 2 : 1); f++) for (let s = -1; s <= 1; s += 2) {
-    p.set(s * w * .28, f * 3 + 1.9, d / 2 + .03); g.localToWorld(p); WINS.push([p.x, p.y, p.z, rot ? 1 : 0, .7, .9]);
-    p.set(s * w * .28, f * 3 + 1.9, -d / 2 - .03); g.localToWorld(p); WINS.push([p.x, p.y, p.z, rot ? 1 : 0, .7, .9]); }
+    winAt(g, s * w * .28, f * 3 + 1.9, d / 2 + .03, 0, .7, .9); winAt(g, s * w * .28, f * 3 + 1.9, -d / 2 - .03, 0, .7, .9); }
 }
-house(-7.5, -26.8); house(-27.2, 4.5, Math.PI / 2); house(-27.2, -5.5, Math.PI / 2, true); house(-16.8, -4.8, -Math.PI / 2);
-house(-27.4, 9.2, Math.PI / 2); house(-6, 16.8, Math.PI, true); house(6, 16.6, Math.PI); house(-27.5, -12.5);
-house(17.5, -27.2, 0, true); house(27.5, -12.6, 0); house(17, 26.8, 0); house(-8.7, 26.6, Math.PI, false);
-house(9.3, 26.8, Math.PI); house(-17, 17.3, Math.PI / 2); house(16.6, 17, 0); house(27.2, 12.4, Math.PI);
-house(16.8, -17.4, -Math.PI / 2, true); house(28.4, -21.5, Math.PI / 2);
+house(-6.8, -27.4); house(6.8, -16.6);
+house(-26.5, 6.2); house(-20.5, 6.2); house(-27.5, -6);
+house(17, 7); house(27.5, 7.5);
+// La place : une couronne d'arbres qui laisse libres les quatre allées
 for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2 + .3, r = 7.2 + ((k % 2) ? .6 : 0); if (Math.abs(Math.sin(a)) > .2 && Math.abs(Math.cos(a)) > .2) tree(Math.cos(a) * r, Math.sin(a) * r, .9); }
-[[-8, -8], [8, -8], [-8, 8], [8, 8], [-4, -8.4], [4, 8.4], [-8.4, 4], [8.4, -4]].forEach(([x, z]) => tree(x, z, 1.05));
-for (let t = -26; t <= 26; t += 6.5) if (Math.abs(t) > 15) { tree(t, -29, .75); tree(-29, t, .75); }
+[[-8, -8], [8, -8], [-8, 8], [8, 8]].forEach(([x, z]) => tree(x, z, 1.05));
+// Bords du plateau
+for (let t = -26; t <= 26; t += 6.5) if (Math.abs(t) > 15) { tree(t, -29.2, .7); tree(-29.2, t, .7); }
 
 { const n = TREES.length, o = new THREE.Object3D(), col = new THREE.Color();
   const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.16, .22, 1.4, 8), mat(0x8b6a52), n);
@@ -359,7 +379,6 @@ controls.minPolarAngle = .18; controls.maxPolarAngle = 1.42;
 controls.screenSpacePanning = false; controls.zoomToCursor = true;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-const overviewDist = () => innerHeight > innerWidth ? 196 : 110;
 const distK = () => { const a = innerWidth / innerHeight; return a < 1 ? Math.min(1.9, .8 / a) : 1; };
 camera.position.set(-70, 120, 150); controls.target.set(0, 0, 0); controls.update();
 
@@ -370,7 +389,8 @@ function flyTo(target, dist, azim, polar, dur = 1.15) {
   const a1 = azim ?? s0.theta; let d = a1 - s0.theta; d = Math.atan2(Math.sin(d), Math.cos(d));
   fly = { t: 0, dur, t0: controls.target.clone(), t1: target.clone(), r0: s0.radius, r1: dist, a0: s0.theta, a1: s0.theta + d, p0: s0.phi, p1: polar ?? Math.min(Math.max(s0.phi, .75), 1.1) };
 }
-controls.addEventListener("start", () => { fly = null; });
+let userMoved = false;
+controls.addEventListener("start", () => { fly = null; userMoved = true; });
 const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 function stepFly(dt) {
   if (!fly) return; fly.t += dt / fly.dur; const k = ease(Math.min(1, fly.t));
@@ -380,7 +400,42 @@ function stepFly(dt) {
   if (fly.t >= 1) fly = null;
 }
 function clampTarget() { const t = controls.target; t.x = Math.max(-34, Math.min(34, t.x)); t.z = Math.max(-34, Math.min(34, t.z)); t.y = Math.max(-3, Math.min(14, t.y)); }
-function overview() { flyTo(new THREE.Vector3(0, 0, 0), overviewDist(), -.5, .92, 1.3); }
+/* Vue d'ensemble cadrée au calcul : toute la ville (et les repères au-dessus des toits) tient
+   entre le bandeau du haut et la barre du bas, centrée dans l'espace libre, quel que soit l'écran. */
+const _oc = new THREE.PerspectiveCamera(), _op = new THREE.Vector3(), _os = new THREE.Spherical();
+const OV_PTS = []; [-HALF, HALF].forEach(x => [-HALF, HALF].forEach(z => [0, -DEPTH].forEach(y => OV_PTS.push(new THREE.Vector3(x, y, z)))));
+const OV_BLD = [];
+function bldPoints() { if (OV_BLD.length) return; const b = new THREE.Box3();
+  root.children.forEach(o => { if (o.isGroup && o.userData.fp) { b.setFromObject(o); [b.min.x, b.max.x].forEach(x => [b.min.z, b.max.z].forEach(z => [0, b.max.y].forEach(y => OV_BLD.push(new THREE.Vector3(x, y, z))))); } }); }
+function overviewView() {
+  bldPoints();
+  return innerHeight > innerWidth ? fitView(-.25, .82) : fitView(-.5, .92);
+}
+function fitView(azim, polar) {
+  const W = innerWidth, H = innerHeight;
+  const top = $("brief").getBoundingClientRect().bottom + 12, bot = Math.min(H - 70, $("ask").getBoundingClientRect().top - 12);
+  // Les bâtiments restent toujours entiers à l'écran. Sur un écran en hauteur, seuls les coins nus du plateau
+  // (du sol et des arbres) peuvent dépasser un peu : la ville est plus grande.
+  const side = W > 900 ? 70 : 10, slabSide = H > W ? -Math.round(W * .06) : side, PIN = 44;
+  _oc.fov = camera.fov; _oc.aspect = W / H; _oc.updateProjectionMatrix();
+  const t = new THREE.Vector3(0, 0, 0); let d = H > W ? 190 : 120;
+  for (let i = 0; i < 10; i++) {
+    _os.set(d, polar, azim); _oc.position.setFromSpherical(_os).add(t); _oc.lookAt(t); _oc.updateMatrixWorld();
+    const box = () => ({ x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9 }), sl = box(), bt = box();
+    const px = (b, v, lift = 0) => { _op.copy(v).project(_oc); const x = (_op.x + 1) / 2 * W, y = (1 - _op.y) / 2 * H - lift;
+      b.x0 = Math.min(b.x0, x); b.x1 = Math.max(b.x1, x); b.y0 = Math.min(b.y0, y); b.y1 = Math.max(b.y1, y); };
+    OV_PTS.forEach(v => px(sl, v)); OV_BLD.forEach(v => px(bt, v)); PLACES.forEach(p => p.anchor && px(bt, p.anchor, PIN));
+    const y0 = Math.min(sl.y0, bt.y0), y1 = Math.max(sl.y1, bt.y1);
+    const need = Math.max((sl.x1 - sl.x0) / (W - 2 * slabSide), (bt.x1 - bt.x0) / (W - 2 * side), (y1 - y0) / Math.max(120, bot - top));
+    const upp = 2 * d * Math.tan(THREE.MathUtils.degToRad(_oc.fov / 2)) / H;
+    const right = new THREE.Vector3(Math.cos(azim), 0, -Math.sin(azim)), fwd = new THREE.Vector3(-Math.sin(azim), 0, -Math.cos(azim));
+    t.addScaledVector(right, ((bt.x0 + bt.x1) / 2 - W / 2) * upp);
+    t.addScaledVector(fwd, -((y0 + y1) / 2 - (top + bot) / 2) * upp / Math.cos(polar));
+    d *= need;
+  }
+  return { t, d, azim, polar };
+}
+function overview(dur = 1.3) { const v = overviewView(); flyTo(v.t, v.d, v.azim, v.polar, dur); }
 let viewShift = 0, viewShiftGoal = 0;
 function layout() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = h > w ? 42 : 34; camera.updateProjectionMatrix(); }
 addEventListener("resize", layout); layout();
@@ -388,7 +443,7 @@ addEventListener("resize", layout); layout();
 /* =========================================================
    Repères sur les lieux
    ========================================================= */
-const pinsEl = $("pins");
+const pinsEl = $("pins"), briefEl = $("brief"), colEl = document.querySelector(".top .col"), askEl = $("ask");
 PLACES.forEach(p => {
   const b = document.createElement("button"); b.className = "pin"; b.style.setProperty("--c", p.color);
   b.innerHTML = '<span class="bub"><span class="ic"></span><span class="tx"><b></b><span></span></span></span><span class="stem"></span><span class="foot"></span>';
@@ -407,14 +462,18 @@ function placePins() {
       compact: dist > (small ? 78 : 95) && S.sel !== p && !p.urgent, prio: (S.sel === p ? 0 : (p.urgent ? 1 : 2)) * 1000 + dist });
   });
   items.sort((a, b) => a.prio - b.prio);
-  const taken = [], topLimit = 110, botLimit = H - (S.sel || talkOpen || bookOpen || setOpen ? H * .46 : 84);
+  // Le bandeau, les boutons ronds et la barre du bas sont déjà « pris » : aucun repère ne passe dessous.
+  const ui = r => ({ x0: r.left - 6, x1: r.right + 6, y0: r.top - 6, y1: r.bottom + 6 });
+  const taken = [ui(briefEl.getBoundingClientRect()), ui(colEl.getBoundingClientRect())];
+  const topLimit = 40, botLimit = H - (S.sel || talkOpen || bookOpen || setOpen ? H * .46 : 84);
+  if (!S.sel && !talkOpen && !bookOpen && !setOpen) taken.push(ui(askEl.getBoundingClientRect()));
   items.forEach(it => {
     const el = it.p.pin; el.classList.toggle("compact", it.compact); el.classList.toggle("sel", S.sel === it.p);
     const bub = el.firstChild, w = bub.offsetWidth || 42, h = (bub.offsetHeight || 42) + 22;
     let dx = 0; const L = it.x - w / 2, Rr = it.x + w / 2; if (L < 8) dx = 8 - L; else if (Rr > W - 8) dx = W - 8 - Rr;
     bub.style.transform = dx ? `translateX(${dx}px)` : "";
     let ok = false, lift = 0;
-    if (it.onScreen && it.y < botLimit + 20) for (const k of [0, 1, 2]) {
+    if (it.onScreen && it.y < botLimit + 20) for (const k of (it.p.urgent || S.sel === it.p ? [0, 1, 2] : [0, 1])) {
       const L2 = k * (h - 10), r = { x0: it.x - w / 2 + dx, x1: it.x + w / 2 + dx, y0: it.y - h - L2, y1: it.y - L2 };
       if (r.y0 < topLimit - 30) break;
       if (!taken.some(t => r.x0 < t.x1 + 4 && r.x1 > t.x0 - 4 && r.y0 < t.y1 + 2 && r.y1 > t.y0 - 2)) { ok = true; lift = L2; taken.push(r); break; }
@@ -1270,6 +1329,8 @@ async function enter(session) {
   if (ok !== true) { showGate(session.user && !session.user.email_confirmed_at ? "Confirme d’abord ton e-mail (lien reçu), puis reviens ici." : "Cette ville est privée."); return; }
   gate.hidden = true;
   await loadAll(); goLive(); goTelecommande();
+  // Le bandeau du haut a pris sa vraie taille : on recadre si tu n’as encore rien touché
+  if (!userMoved && !S.sel) overview(.9);
 }
 $("gform").addEventListener("submit", async e => {
   e.preventDefault(); const email = $("gmail").value.trim(), password = $("gpass").value;
@@ -1287,7 +1348,7 @@ sb.auth.getSession().then(({ data }) => enter(data.session));
    ========================================================= */
 let last = performance.now(), clock = 0;
 refreshPins(); updateBrief();
-flyTo(new THREE.Vector3(0, 0, 0), overviewDist(), -.5, .92, 2.2);
+overview(2.2);
 function frame(now) {
   const dt = Math.min((now - last) / 1000, .05); last = now; clock += dt;
   stepFly(dt); controls.update(); clampTarget();
