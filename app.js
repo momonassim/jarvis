@@ -3,9 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { creerVille } from "./ville.js?v=maquette1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -45,322 +43,32 @@ const byId = Object.fromEntries(PLACES.map(p => [p.id, p]));
 const S = { sel: null, night: false, prenom: "", profil: "", patients: [], rdv: [], creneaux: [], loaded: false };
 
 /* =========================================================
-   Rendu 3D (la maquette)
+   La ville en 3D : la maquette (fichier ville.js).
+   L'ancienne ville est gardée sur la branche « ancienne-ville » du dépôt.
    ========================================================= */
-const small = Math.min(innerWidth, innerHeight) < 700;
 const canvas = $("c");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xf6e8d8, 200, 420);
-const camera = new THREE.PerspectiveCamera(36, 1, 1, 600);
-
-const hemi = new THREE.HemisphereLight(0xfff4e6, 0xb48a6c, 1.15); scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
-sun.position.set(-38, 62, 30); sun.castShadow = true;
-sun.shadow.mapSize.set(small ? 2048 : 3072, small ? 2048 : 3072);
-Object.assign(sun.shadow.camera, { left: -46, right: 46, top: 46, bottom: -46, near: 10, far: 180 });
-sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04; sun.shadow.radius = 3;
-scene.add(sun);
-
-const MAT = {};
-function mat(hex, o = {}) { const k = hex + JSON.stringify(o); if (!MAT[k]) MAT[k] = new THREE.MeshStandardMaterial({ color: hex, roughness: .82, metalness: 0, ...o }); return MAT[k]; }
-const glowMats = [];
-function glow(hex, day = 0, night = 1.6) { const m = new THREE.MeshStandardMaterial({ color: hex, emissive: hex, emissiveIntensity: day, roughness: .5 }); m.userData = { day, night }; glowMats.push(m); return m; }
-
-const root = new THREE.Group(); scene.add(root);
-function add(mesh, parent = root) { mesh.castShadow = true; mesh.receiveShadow = true; parent.add(mesh); return mesh; }
-function box(w, h, d, m, x, y, z, parent, rad = 0) {
-  const g = rad > 0 ? new RoundedBoxGeometry(w, h, d, 2, Math.min(rad, w / 2 - .01, h / 2 - .01, d / 2 - .01)) : new THREE.BoxGeometry(w, h, d);
-  const me = new THREE.Mesh(g, m); me.position.set(x, y, z); return add(me, parent);
-}
-function cyl(rt, rb, h, m, x, y, z, parent, seg = 20) { const me = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m); me.position.set(x, y, z); return add(me, parent); }
-function prism(w, h, d, m, x, y, z, parent, rotY = 0) {
-  const s = new THREE.Shape(); s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(0, h); s.lineTo(-w / 2, 0);
-  const g = new THREE.ExtrudeGeometry(s, { depth: d, bevelEnabled: false }); g.translate(0, 0, -d / 2);
-  const me = new THREE.Mesh(g, m); me.position.set(x, y, z); me.rotation.y = rotY; return add(me, parent);
-}
-
-/* ---------- Le socle, avec le garage en coupe ---------- */
-const HALF = 30, DEPTH = 4.4;
-const topM = mat(0xefe3cf), soilM = mat(0xc2906e, { roughness: .95 }), soilDark = mat(0x9b6a50, { roughness: .95 });
-function slab(x0, x1, z0, z1, y0 = -DEPTH, y1 = 0) {
-  const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
-  const me = new THREE.Mesh(g, [soilM, soilM, topM, soilDark, soilM, soilM]); me.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-  me.receiveShadow = true; me.castShadow = true; root.add(me); return me;
-}
-const GZ0 = -9, GZ1 = 5, GX0 = 22, RAMPZ1 = -6, RX0 = 14, GH = 3.6;
-slab(-HALF, RX0, -HALF, HALF); slab(RX0, HALF, -HALF, GZ0); slab(RX0, HALF, GZ1, HALF); slab(RX0, GX0, RAMPZ1, GZ1);
-slab(RX0, HALF, GZ0, GZ1, -DEPTH, -DEPTH + .4); slab(GX0, HALF, GZ0, GZ1, -.5, 0);
-{ const len = Math.hypot(GX0 - RX0, GH), a = Math.atan2(GH, GX0 - RX0);
-  const r = box(len, .3, RAMPZ1 - GZ0, mat(0x8d847d), (RX0 + GX0) / 2, -GH / 2 - .15, (GZ0 + RAMPZ1) / 2); r.rotation.z = -a;
-  for (let i = 0; i < 5; i++) { const t = (i + .5) / 5; box(.35, .05, 2.4, mat(0xf1ead9), RX0 + t * (GX0 - RX0), -t * GH + .03, (GZ0 + RAMPZ1) / 2).rotation.z = -a; } }
-box(.2, GH - .5, GZ1 - GZ0, mat(0xd8cdbd), GX0 + .1, -DEPTH + .4 + (GH - .5) / 2, (GZ0 + GZ1) / 2);
-box(HALF - GX0, .05, GZ1 - GZ0, mat(0x5d5752), (GX0 + HALF) / 2, -DEPTH + .43, (GZ0 + GZ1) / 2);
-for (let k = 0; k < 3; k++) box(HALF - GX0 - 1.2, .02, .12, mat(0xf6f0e4), (GX0 + HALF) / 2 + .3, -DEPTH + .47, -4.5 + k * 4.2);
-[[-4.3], [2.2]].forEach(([z]) => box(.5, GH - .5, .5, mat(0xcfc3b2), 26.2, -DEPTH + .4 + (GH - .5) / 2, z));
-const gLamp = glow(0xfff2cf, 1.4, 2.4);
-for (let k = 0; k < 3; k++) box(4, .08, .25, gLamp, 26, -.62, -6 + k * 4.5);
-const garageLight = new THREE.PointLight(0xffe7bf, 30, 14, 1.6); garageLight.position.set(27, -1.6, -1.5); root.add(garageLight);
-
-/* ---------- Rues ---------- */
-const roadM = mat(0x8f8780, { roughness: .9 }), lineM = mat(0xf6f0e4), walkM = mat(0xe2d4bf);
-function road(x0, x1, z0, z1) { box(x1 - x0, .06, z1 - z0, roadM, (x0 + x1) / 2, .03, (z0 + z1) / 2); }
-const R1 = 10, R2 = 14;
-road(-R2, -R1, -HALF, HALF); road(R1, R2, -HALF, HALF);
-road(-HALF, -R2, -R2, -R1); road(-R1, R1, -R2, -R1); road(R2, HALF, -R2, -R1);
-road(-HALF, -R2, R1, R2); road(-R1, R1, R1, R2); road(R2, HALF, R1, R2);
-{ const dashes = [];
-  for (let t = -HALF + 1; t < HALF; t += 2.6) if (Math.abs(Math.abs(t) - 12) > 2.6) dashes.push([12, t, true], [-12, t, true], [t, 12, false], [t, -12, false]);
-  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, .02, .16), lineM, dashes.length), o = new THREE.Object3D();
-  dashes.forEach((d, i) => { o.position.set(d[0], .07, d[1]); o.rotation.y = d[2] ? Math.PI / 2 : 0; o.updateMatrix(); im.setMatrixAt(i, o.matrix); }); im.receiveShadow = true; root.add(im); }
-{ const zebra = []; [-12, 12].forEach(cx => [-12, 12].forEach(cz => {
-    for (let k = -3; k <= 3; k++) { zebra.push([cx + k * .55, cz + (cz > 0 ? -2.9 : 2.9), 0]); zebra.push([cx + (cx > 0 ? -2.9 : 2.9), cz + k * .55, 1]); } }));
-  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(.3, .02, 1.4), lineM, zebra.length), o = new THREE.Object3D();
-  zebra.forEach((z, i) => { o.position.set(z[0], .07, z[1]); o.rotation.y = z[2] ? Math.PI / 2 : 0; o.updateMatrix(); im.setMatrixAt(i, o.matrix); }); root.add(im); }
-
-/* ---------- Place centrale ---------- */
-box(19.4, .12, 19.4, mat(0xb9cf97), 0, .06, 0);
-cyl(5.2, 5.2, .16, walkM, 0, .1, 0, root, 48);
-cyl(2.2, 2.4, .6, mat(0xf3ece0), 0, .4, 0, root, 40);
-cyl(1.9, 1.9, .1, mat(0x8fc4c9, { roughness: .2 }), 0, .66, 0, root, 40);
-cyl(.25, .35, 1.4, mat(0xf3ece0), 0, 1.2, 0, root, 16);
-[[0, 1], [1, 0], [0, -1], [-1, 0]].forEach(([a, b]) => box(1.6, .13, 5.2, walkM, a * 7.4, .11, b * 7.4, root).rotation.y = a ? Math.PI / 2 : 0);
-
-/* ---------- Arbres et fenêtres (en série) ---------- */
-const TREES = [], WINS = [];
-function tree(x, z, s = 1) { TREES.push([x, z, s * (.85 + Math.random() * .35)]); }
-/* Une fenêtre posée sur une façade, en coordonnées du bâtiment (g) : elle suit sa rotation.
-   side 0 = façade avant/arrière (axe z du bâtiment), 1 = façade de côté (axe x). */
-const _wp = new THREE.Vector3();
-function winAt(g, x, y, z, side, w, h) {
-  g.updateMatrixWorld(true); _wp.set(x, y, z); g.localToWorld(_wp);
-  const quarter = Math.round(g.rotation.y / (Math.PI / 2)) & 1;
-  WINS.push([_wp.x, _wp.y, _wp.z, side ^ quarter, w, h]);
-}
-function windows(g, w, d, floors, fh, y0 = 0, opts = {}) {
-  const ww = opts.ww || .9, wh = opts.wh || 1.2, gap = opts.gap || 2, cx = opts.cx || 0, cz = opts.cz || 0;
-  for (let f = 0; f < floors; f++) { const y = y0 + f * fh + fh * .55;
-    const nx = Math.max(1, Math.floor((w - .6) / gap)), nz = Math.max(1, Math.floor((d - .6) / gap));
-    for (let i = 0; i < nx; i++) { const x = cx - w / 2 + (i + .5) * w / nx; if (!opts.skipFront) winAt(g, x, y, cz + d / 2 + .03, 0, ww, wh); if (!opts.skipBack) winAt(g, x, y, cz - d / 2 - .03, 0, ww, wh); }
-    for (let i = 0; i < nz; i++) { const z = cz - d / 2 + (i + .5) * d / nz; winAt(g, cx + w / 2 + .03, y, z, 1, ww, wh); winAt(g, cx - w / 2 - .03, y, z, 1, ww, wh); }
-  }
-}
-/* Les rues : deux bandes nord-sud et deux bandes est-ouest. Un bâtiment regarde la rue la plus proche. */
-function faceRoad(x, z) {
-  const near = v => { const a = Math.abs(v); return a > 14 ? [a - 14, -Math.sign(v)] : [10 - a, Math.sign(v)]; };
-  const [dx, sx] = near(x), [dz, sz] = near(z);
-  return dx < dz ? Math.atan2(sx, 0) : Math.atan2(0, sz);
-}
-
-/* ---------- Les lieux ---------- */
-const pickables = [];
-function placeGroup(id, x, z, top, opts = {}) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = opts.rot || 0; g.userData.fp = true; root.add(g);
-  const p = byId[id]; p.group = g; p.anchor = new THREE.Vector3(x + (opts.ax || 0), top, z + (opts.az || 0)); p.focus = new THREE.Vector3(x + (opts.fx || 0), opts.fy ?? top * .4, z + (opts.fz || 0));
-  p.dist = opts.dist || Math.max(26, top * 2.6); p.azim = opts.azim; p.polar = opts.polar;
-  return g;
-}
-function tagPick(g, id) { g.traverse(o => { if (o.isMesh) { o.userData.place = id; pickables.push(o); } }); }
-
-/* Chaque lieu a sa façade (l'avant du bâtiment, côté +z avant rotation) tournée vers une rue ou vers la place.
-   Plan des pâtés : rues à 10–14 du centre, place au milieu, huit pâtés autour. */
-{ const g = placeGroup("home", 23.5, 0, 17.6, { rot: -Math.PI / 2, fy: 8, dist: 48, azim: -.8, polar: 1.02 });
-  const facade = mat(0xf2ae8a), white = mat(0xfaf4ea);
-  box(9, 16, 8, facade, 0, 8, 0, g, .25);
-  box(9.6, .5, 8.6, white, 0, 16.2, 0, g, .15);
-  for (let f = 1; f < 5; f++) { box(9.4, .18, 1.1, white, 0, f * 3.2, 4.5, g, .05); box(9.4, .6, .08, white, 0, f * 3.2 + .4, 5.02, g); }
-  box(2.2, 2.6, .3, mat(0x7a5b48), 0, 1.3, 4.05, g, .05);
-  box(3.4, .2, 1.4, white, 0, 2.8, 4.6, g, .05);
-  windows(g, 9, 8, 5, 3.2, 0, { gap: 2.2 });
-  box(1.3, 1.6, .12, glow(0x3fd39a, .9, 2.2), -2.2, 3 * 3.2 + 1.7, 4.08, g);
-  box(1.5, 1.2, 1.2, mat(0xe9ddcb), 2.5, 16.9, -1.5, g, .1);
-  tagPick(g, "home");
-  const ga = placeGroup("garage", 26, -2, -.2, { fy: -2.2, fx: 0, dist: 30, azim: Math.PI / 2 + .28, polar: 1.32, ax: 1.5, az: 1.5 });
-  const car = new THREE.Group(); car.position.set(26.2, -DEPTH + .45, -.2); root.add(car);
-  const body = mat(0x8d93a3, { roughness: .4 });
-  box(4.6, .95, 2, body, 0, .75, 0, car, .4);
-  box(2.6, .8, 1.8, body, -.2, 1.5, 0, car, .35);
-  box(2.5, .62, 1.84, mat(0x2c2f36, { roughness: .15 }), -.2, 1.52, 0, car, .25);
-  [[-1.5, .95], [1.5, .95], [-1.5, -.95], [1.5, -.95]].forEach(([a, b]) => { const w = cyl(.42, .42, .3, mat(0x2a2624), a, .42, b, car, 18); w.rotation.x = Math.PI / 2; });
-  const hl = glow(0xfff4d6, .6, 1.8); box(.1, .18, .5, hl, 2.31, .95, .6, car); box(.1, .18, .5, hl, 2.31, .95, -.6, car);
-  car.rotation.y = Math.PI / 2; car.position.z = -1.4;
-  tagPick(car, "garage"); ga.userData.fp = false; ga.add(new THREE.Object3D());
-  box(.15, 1.8, .15, mat(0x5d5752), 14.6, .9, -9.6); box(1.2, .7, .08, mat(0x3e74c9), 14.6, 2, -9.6, root, .05);
-  tree(28.6, -7.6, .8); tree(29, -4, .75);
-}
-{ const g = placeGroup("banque", 22, -22, 9.2, { fy: 3 });
-  const c = mat(0xf7e2a3), w = mat(0xfbf5e8);
-  box(11, 1, 8, w, 0, .5, 0, g, .1); box(10, 6.4, 6.6, c, 0, 4.2, -.4, g, .15);
-  for (let i = 0; i < 6; i++) cyl(.32, .36, 5.4, w, -4.2 + i * 1.68, 3.7, 3.4, g, 16);
-  box(11, .6, 8.2, w, 0, 7.4, 0, g, .1); prism(11, 1.9, 1.4, w, 0, 7.7, 3.4, g); box(10, 1.6, 5, c, 0, 8.4, -1, g, .1);
-  box(1.6, 2.6, .2, mat(0x7a5b48), 0, 2.3, 2.9, g);
-  windows(g, 10, 6.6, 2, 2.8, 1.4, { cz: -.4, skipFront: true, gap: 2.4 });
-  tagPick(g, "banque"); tree(15.4, -16); tree(28.8, -16); tree(28.6, -28.4, .8); tree(15.6, -28.4, .8);
-}
-{ const g = placeGroup("impots", 22.5, 22, 14, { rot: Math.PI, fy: 4, azim: Math.PI - .5 });
-  const c = mat(0xe8e3da), roof = mat(0x6c7a84);
-  box(12, 7, 8, c, 0, 3.5, 0, g, .15); prism(8.6, 2.6, 12.6, roof, 0, 7, 0, g, Math.PI / 2);
-  box(12.4, .4, .5, mat(0xfaf6ee), 0, 7, 4.1, g); box(2.4, 3, .25, mat(0x55606a), 0, 1.5, 4.05, g, .05); box(4.4, .25, 1.6, mat(0xfaf6ee), 0, 3.2, 4.7, g, .05);
-  windows(g, 12, 8, 2, 3.2, 0, { gap: 2.3 });
-  cyl(.08, .08, 5, mat(0xdcd6cc), 5.3, 9.5, 4, g, 8);
-  [0x2f55a4, 0xf6f3ee, 0xe0453a].forEach((col, i) => box(.7, 1.4, .06, mat(col), 5.3 + .35 + i * .7, 11.2, 4, g));
-  tagPick(g, "impots"); tree(16.2, 28.2); tree(29.2, 15.2, .8); tree(28.6, 28.2, .9);
-}
-{ const g = placeGroup("mairie", 0, 22.5, 16.4, { rot: Math.PI, fy: 5, azim: Math.PI + .25 });
-  const c = mat(0xefdcc0), w = mat(0xfaf3e7), roof = mat(0xbd6b52), ink = mat(0x3a302a);
-  box(14, 6, 7, c, 0, 3, 0, g, .15); prism(7.4, 2.4, 14.4, roof, 0, 6, 0, g, Math.PI / 2);
-  box(3.6, 10.5, 3.6, w, 0, 5.25, 1.2, g, .15);
-  const face = cyl(1.2, 1.2, .15, mat(0xfffbf2), 0, 8.6, 3.06, g, 32); face.rotation.x = Math.PI / 2;
-  // Aiguilles à 10 h 10, pivot au centre du cadran
-  [[.62, .09, Math.PI / 3], [.88, .07, -Math.PI / 3]].forEach(([L, t, a]) => { const piv = new THREE.Group(); piv.position.set(0, 8.6, 3.16); piv.rotation.z = a; g.add(piv); box(t, L, .05, ink, 0, L / 2, 0, piv); });
-  cyl(.09, .09, .07, ink, 0, 8.6, 3.18, g, 12).rotation.x = Math.PI / 2;
-  prism(4.2, 3, 4.2, roof, 0, 10.5, 1.2, g); box(1.8, 2.6, .2, mat(0x7a5b48), 0, 1.3, 3.05, g);
-  windows(g, 14, 7, 2, 2.8, 0, { gap: 2.6 });
-  tagPick(g, "mairie");
-  // Le parvis : la mairie donne sur la place
-  box(13, .1, 4.2, walkM, 0, .05, 5.6, g);
-  tree(-8.4, 16.6, .9); tree(8.4, 16.6, .9); tree(-6, 28.2); tree(6.5, 28.2);
-}
-{ const g = placeGroup("orange", -21.5, -2.5, 10.6, { rot: Math.PI / 2, fy: 2.5, dist: 30, azim: Math.PI / 2 - .45 });
-  const c = mat(0xf7efe5), o = mat(0xff7a1a, { roughness: .6 });
-  box(8, 4.6, 6, c, 0, 2.3, 0, g, .2); box(8.4, .5, 6.4, mat(0x3b322d), 0, 4.75, 0, g, .1);
-  const aw = box(7.6, .15, 1.8, o, 0, 3.2, 3.7, g); aw.rotation.x = .32;
-  box(6.4, 2, .12, mat(0x2c3a40, { roughness: .15 }), 0, 1.5, 3.02, g); box(2.4, .9, .15, o, 2.4, 4.2, 3.1, g, .05);
-  cyl(.1, .16, 5.4, mat(0xdcd3c8), -2.4, 7.7, -1.2, g, 8);
-  for (let k = 0; k < 3; k++) { const a = k * 2.1; box(.3, 1.1, .12, mat(0xf6f2ea), -2.4 + Math.cos(a) * .35, 9.4, -1.2 + Math.sin(a) * .35, g).rotation.y = -a; }
-  tagPick(g, "orange"); tree(-16, 3.6); tree(-16, -8.4, .9); tree(-29, 1.5, .8);
-}
-{ const g = placeGroup("clinique", -22, -22.5, 13.4, { fy: 5 });
-  const w = mat(0xf7f4ee), pad = mat(0xf6f2ea);
-  box(12, 9, 8, w, 0, 4.5, 0, g, .2); box(6, 4, 5, w, -3, 11, -.5, g, .2); box(12.4, .35, 8.4, mat(0xd9e4e6), 0, 9.1, 0, g, .1);
-  cyl(2.2, 2.2, .12, mat(0x5e6a70), 2.6, 9.35, -1, g, 32);
-  // Un vrai « H » : deux montants et une barre entre eux
-  box(.42, .04, 2.1, pad, 1.8, 9.43, -1, g); box(.42, .04, 2.1, pad, 3.4, 9.43, -1, g); box(1.2, .04, .4, pad, 2.6, 9.43, -1, g);
-  const cr = glow(0xe0473a, .2, 1.8); box(.7, 2.2, .15, cr, -3, 11.2, 2.06, g); box(2.2, .7, .15, cr, -3, 11.2, 2.06, g);
-  box(3, 2.8, .2, mat(0x9fc2cc, { roughness: .2 }), 0, 1.4, 4.05, g); box(5, .25, 2, w, 0, 3, 4.9, g, .05);
-  windows(g, 12, 8, 3, 2.9, 0, { gap: 2.2 });
-  tagPick(g, "clinique"); tree(-15, -15.2, .8); tree(-29, -15.8, .8); tree(-29, -28.6, .8); tree(-15.6, -28.6, .8);
-}
-{ const g = placeGroup("medecin", -5, -21.5, 8.2, { fy: 2.6, dist: 28 });
-  box(7, 4.2, 6, mat(0xe6efe4), 0, 2.1, 0, g, .2); prism(6.6, 2.4, 7.6, mat(0x6f9a7c), 0, 4.2, 0, g, Math.PI / 2);
-  const gc = glow(0x2fa36b, .25, 1.8); box(.4, 1.3, .12, gc, 2.4, 3.2, 3.08, g); box(1.3, .4, .12, gc, 2.4, 3.2, 3.08, g);
-  box(1.5, 2.4, .2, mat(0x6f553f), -1, 1.2, 3.05, g);
-  windows(g, 7, 6, 1, 3, 0, { gap: 2.5 });
-  tagPick(g, "medecin"); tree(-1.2, -28.4, .8);
-}
-{ const g = placeGroup("usine", -21.5, 22, 21.5, { rot: Math.PI, fy: 5, dist: 40, azim: Math.PI + .55 });
-  const c = mat(0xd7c8b6), roof = mat(0x8c7f72), w = mat(0xf6f1e8), red = mat(0xd2513e);
-  box(13, 6, 9, c, 0, 3, 0, g, .15);
-  for (let i = 0; i < 4; i++) { const s = new THREE.Shape(); s.moveTo(0, 0); s.lineTo(3.25, 0); s.lineTo(3.25, 2.2); s.lineTo(0, 0);
-    const ge = new THREE.ExtrudeGeometry(s, { depth: 9, bevelEnabled: false }); ge.translate(-6.5 + i * 3.25, 6, -4.5);
-    add(new THREE.Mesh(ge, roof), g); box(.08, 2, 8.6, glow(0xffd79a, .15, 1.4), -6.5 + (i + 1) * 3.25 - .06, 7.1, 0, g); }
-  box(3.2, 3.6, .2, mat(0x6d6a66), -3, 1.8, 4.55, g); box(3.2, 3.6, .2, mat(0x6d6a66), 2.5, 1.8, 4.55, g);
-  box(1.6, 1, .1, glow(0xff8a3a, .9, 2.4), 5.4, 2, 4.56, g);
-  for (let k = 0; k < 5; k++) cyl(.95 - k * .04, 1 - k * .04, 2.8, k % 2 ? red : w, 4.4, 6 + k * 2.8 + 1.4, -2.3, g, 20);
-  windows(g, 13, 9, 1, 4.2, .6, { gap: 2.6, skipFront: true, ww: 1.4, wh: 1.4 });
-  tagPick(g, "usine"); tree(-28.6, 15.6); tree(-16, 28.4, .9); tree(-29, 28.6, .8);
-}
-let rotor;
-{ const g = placeGroup("energie", 5.4, -23, 14.5, { fy: 5, dist: 34, fx: 0 });
-  box(3.2, 2.6, 2.4, mat(0xe7e1d6), -2.2, 1.3, 2.5, g, .12); box(.5, .9, .1, glow(0xf2c230, .25, 1.6), -2.2, 1.6, 3.75, g);
-  cyl(.25, .45, 12, mat(0xfbf8f2), 0, 6, 0, g, 16); box(.8, .8, 1.6, mat(0xfbf8f2), 0, 12.2, .4, g, .3);
-  rotor = new THREE.Group(); rotor.position.set(0, 12.2, 1.3); g.add(rotor);
-  for (let k = 0; k < 3; k++) { const b = box(.35, 4.6, .12, mat(0xfbf8f2), 0, 2.3, 0, rotor, .12); const piv = new THREE.Group(); piv.rotation.z = k * Math.PI * 2 / 3; piv.add(b); rotor.add(piv); }
-  tagPick(g, "energie");
-}
-
-/* ---------- Le reste de la ville : des maisons tournées vers leur rue ---------- */
-const pastel = [0xf3cfb3, 0xe9d9bb, 0xf5dfaa, 0xe6bfae, 0xdfe3c8, 0xf0e2cf, 0xe8c9b9], roofs = [0xc76e56, 0xb4634e, 0x8f7a6a, 0xd38a5c];
-function house(x, z, big = false) {
-  const rot = faceRoad(x, z);
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; g.userData.fp = true; root.add(g);
-  const w = big ? 5 : 3.6, d = big ? 4.6 : 3.4, h = big ? 6.5 : 2.8;
-  box(w, h, d, mat(pastel[(Math.random() * pastel.length) | 0]), 0, h / 2, 0, g, .15);
-  if (big) box(w + .3, .35, d + .3, mat(0xf7efe3), 0, h + .17, 0, g, .08);
-  else prism(d + .4, 1.6, w + .5, mat(roofs[(Math.random() * roofs.length) | 0]), 0, h, 0, g, Math.PI / 2);
-  box(.9, 1.6, .12, mat(0x7d604c), 0, .8, d / 2 + .02, g);
-  for (let f = 0; f < (big ? 2 : 1); f++) for (let s = -1; s <= 1; s += 2) {
-    winAt(g, s * w * .28, f * 3 + 1.9, d / 2 + .03, 0, .7, .9); winAt(g, s * w * .28, f * 3 + 1.9, -d / 2 - .03, 0, .7, .9); }
-}
-house(-6.8, -27.4); house(6.8, -16.6);
-house(-26.5, 6.2); house(-20.5, 6.2); house(-27.5, -6);
-house(17, 7); house(27.5, 7.5);
-// La place : une couronne d'arbres qui laisse libres les quatre allées
-for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2 + .3, r = 7.2 + ((k % 2) ? .6 : 0); if (Math.abs(Math.sin(a)) > .2 && Math.abs(Math.cos(a)) > .2) tree(Math.cos(a) * r, Math.sin(a) * r, .9); }
-[[-8, -8], [8, -8], [-8, 8], [8, 8]].forEach(([x, z]) => tree(x, z, 1.05));
-// Bords du plateau
-for (let t = -26; t <= 26; t += 6.5) if (Math.abs(t) > 15) { tree(t, -29.2, .7); tree(-29.2, t, .7); }
-
-{ const n = TREES.length, o = new THREE.Object3D(), col = new THREE.Color();
-  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.16, .22, 1.4, 8), mat(0x8b6a52), n);
-  const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.25, 2), mat(0xffffff, { roughness: .9 }), n);
-  const greens = [0x86b06f, 0x9cbc78, 0x739f63, 0xa8c27f];
-  TREES.forEach(([x, z, s], i) => { o.position.set(x, .7 * s, z); o.scale.set(s, s, s); o.rotation.set(0, 0, 0); o.updateMatrix(); trunk.setMatrixAt(i, o.matrix);
-    o.position.set(x, 2.1 * s, z); o.scale.set(s, s * 1.12, s); o.rotation.y = Math.random() * 6; o.updateMatrix(); crown.setMatrixAt(i, o.matrix);
-    crown.setColorAt(i, col.setHex(greens[i % greens.length])); });
-  [trunk, crown].forEach(m => { m.castShadow = true; m.receiveShadow = true; root.add(m); }); }
-const winDay = new THREE.Color(0x5d6a70), winLit = new THREE.Color(0xffd28a), winOff = new THREE.Color(0x3c3a3e);
-const winMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, .06), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .25, metalness: .1 }), WINS.length);
-const winLitFlags = WINS.map(() => Math.random() < .55);
-{ const o = new THREE.Object3D(); WINS.forEach(([x, y, z, side, w, h], i) => { o.position.set(x, y, z); o.rotation.set(0, side ? Math.PI / 2 : 0, 0); o.scale.set(w, h, 1); o.updateMatrix(); winMesh.setMatrixAt(i, o.matrix); winMesh.setColorAt(i, winDay); }); root.add(winMesh); }
-const winGlowMat = new THREE.MeshBasicMaterial({ color: 0xffc977, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
-const litIdx = WINS.map((w, i) => i).filter(i => winLitFlags[i]);
-{ const winGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), winGlowMat, litIdx.length), o = new THREE.Object3D();
-  litIdx.forEach((wi, i) => { const [x, y, z, side, w, h] = WINS[wi]; o.position.set(x, y, z); o.rotation.set(0, side ? Math.PI / 2 : 0, 0); o.scale.set(w * .92, h * .92, 1); o.updateMatrix(); winGlow.setMatrixAt(i, o.matrix); });
-  root.add(winGlow); }
-
-/* ---------- Lampadaires ---------- */
-const lampHead = glow(0xffe2a8, 0, 2.2), lamps = [];
-for (let t = -26; t <= 26; t += 8) { if (Math.abs(Math.abs(t) - 12) < 3) continue; lamps.push([9.4, t], [-9.4, t], [t, 9.4], [t, -9.4]); }
-lamps.forEach(([x, z]) => { cyl(.07, .09, 3.2, mat(0x4b4440), x, 1.6, z, root, 6); cyl(.3, .22, .25, lampHead, x, 3.25, z, root, 10); });
-const haloTex = (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"); const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, "rgba(255,220,160,.9)"); g.addColorStop(.35, "rgba(255,200,130,.35)"); g.addColorStop(1, "rgba(255,190,120,0)"); x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
-const haloMat = new THREE.SpriteMaterial({ map: haloTex, transparent: true, depthWrite: false, opacity: 0, blending: THREE.AdditiveBlending });
-lamps.forEach(([x, z]) => { const s = new THREE.Sprite(haloMat); s.position.set(x, 3.3, z); s.scale.set(3, 3, 1); root.add(s); });
-{ const s = new THREE.Sprite(haloMat); s.position.set(27, -.9, -1.5); s.scale.set(9, 4, 1); root.add(s); }
-
-/* ---------- Jarvis, au-dessus de la place ---------- */
-const jarvis = new THREE.Group(); jarvis.position.set(0, 8.5, 0); root.add(jarvis);
-{ const core = new THREE.Mesh(new THREE.SphereGeometry(1.05, 40, 24), new THREE.MeshStandardMaterial({ color: 0xffc56b, emissive: 0xff9a3d, emissiveIntensity: 1.3, roughness: .3 }));
-  jarvis.add(core); core.userData.place = "jarvis"; pickables.push(core);
-  const ringM = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: .75 });
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.9, .04, 8, 90), ringM); ring.rotation.x = Math.PI / 2.3; jarvis.add(ring); jarvis.userData.ring = ring;
-  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(2.4, .025, 8, 90), ringM); ring2.rotation.x = Math.PI / 1.8; ring2.rotation.y = .6; jarvis.add(ring2); jarvis.userData.ring2 = ring2;
-  const h = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, transparent: true, depthWrite: false, opacity: .9, blending: THREE.AdditiveBlending })); h.scale.set(7, 7, 1); jarvis.add(h);
-  const jl = new THREE.PointLight(0xffb062, 40, 22, 1.7); jarvis.add(jl); jarvis.userData.light = jl; }
-
-/* ---------- Voitures qui circulent ---------- */
-const cars = [], carCols = [0xd9574a, 0xf2efe6, 0x4d7bc2, 0xf2b544, 0x6aa37d, 0x3d3a3a];
-function makeCar(c) { const g = new THREE.Group(); const m = mat(c, { roughness: .4, metalness: .2 });
-  box(2.4, .7, 1.2, m, 0, .55, 0, g, .25); box(1.3, .55, 1.05, m, -.15, 1.1, 0, g, .22); box(1.25, .42, 1.1, mat(0x2a2d33, { roughness: .15 }), -.15, 1.12, 0, g, .15);
-  const hl = glow(0xfff2cc, 0, 2); box(.06, .14, .3, hl, 1.2, .6, .33, g); box(.06, .14, .3, hl, 1.2, .6, -.33, g);
-  root.add(g); return g; }
-function loopPos(t, L) { const s = t % 4, k = s % 1; let x, z, ang;
-  if (s < 1) { x = -L + 2 * L * k; z = -L; ang = 0; } else if (s < 2) { x = L; z = -L + 2 * L * k; ang = -Math.PI / 2; } else if (s < 3) { x = L - 2 * L * k; z = L; ang = Math.PI; } else { x = -L; z = L - 2 * L * k; ang = Math.PI / 2; }
-  return [x, z, ang]; }
-for (let i = 0; i < 6; i++) cars.push({ g: makeCar(carCols[i]), t: i / 6 * 4, r: i % 2 ? 11.1 : 12.9, dir: i % 2 ? -1 : 1, v: .045 + .01 * (i % 3) });
+let viewShiftGoal = 0, userMoved = false, V = null;
+V = await creerVille(canvas, {
+  pick: id => { userMoved = true; if (id === "jarvis") openTalk(null); else if (byId[id]) select(byId[id]); },
+  progress: t => { const b = $("briefTxt"); if (b && !S.loaded) b.textContent = t; },
+  frame: () => V && V.decalage(viewShiftGoal),
+});
+V.controls.addEventListener("start", () => { userMoved = true; });
+PLACES.forEach(p => { p.color = V.couleur(p.id) || p.color; });
+const icone = (el, p) => { el.innerHTML = V.icone(p.id); el.classList.add("svgic"); };
+function overview() { V.ensemble(); }
 
 /* ---------- Jour et nuit ---------- */
 const SKY = {
-  day: { s1: "#f2dcc3", s2: "#fbf2e7", fog: 0xf6e8d8, hemi: 1.15, sun: 2.6, sunC: 0xfff1dc, exp: 1.05, win: 0, halo: 0, pos: [-38, 62, 30], theme: "#f1dcc4" },
-  night: { s1: "#1c1512", s2: "#3a2a22", fog: 0x2b1f1a, hemi: .32, sun: .55, sunC: 0xb8c4ff, exp: 1.15, win: 1, halo: .9, pos: [30, 50, -20], theme: "#1c1512" },
+  day: { s1: "#cdd8e2", s2: "#e9eef3", theme: "#cdd8e2" },
+  night: { s1: "#0b0f1d", s2: "#1a2233", theme: "#0b0f1d" },
 };
 function applySky(night) {
   S.night = night; const k = night ? SKY.night : SKY.day;
   document.body.style.setProperty("--sky1", k.s1); document.body.style.setProperty("--sky2", k.s2);
   document.body.classList.toggle("night", night);
   document.querySelector('meta[name="theme-color"]').setAttribute("content", k.theme);
-  scene.fog.color.setHex(k.fog); hemi.intensity = k.hemi; hemi.color.setHex(night ? 0x8f8fb8 : 0xfff4e6); hemi.groundColor.setHex(night ? 0x3a2a22 : 0xb48a6c);
-  sun.intensity = k.sun; sun.color.setHex(k.sunC); sun.position.set(...k.pos); renderer.toneMappingExposure = k.exp;
-  winGlowMat.opacity = k.win; haloMat.opacity = k.halo;
-  WINS.forEach((w, i) => winMesh.setColorAt(i, night ? (winLitFlags[i] ? winLit : winOff) : winDay)); winMesh.instanceColor.needsUpdate = true;
-  glowMats.forEach(m => m.emissiveIntensity = night ? m.userData.night : m.userData.day);
-  garageLight.intensity = night ? 45 : 30; jarvis.userData.light.intensity = night ? 60 : 25;
+  V.setNuit(night);
   $("skyIc").innerHTML = night ? '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>'
     : '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>';
 }
@@ -368,132 +76,15 @@ function applySky(night) {
 $("sky").addEventListener("click", () => applySky(!S.night));
 
 /* =========================================================
-   Caméra libre : un doigt pour tourner, deux pour zoomer et glisser.
-   Elle ne bouge seule que quand tu touches un lieu.
+   Les lieux dans la ville : mâts 3D et panneaux sur les façades (dans ville.js).
+   L'app leur envoie les vraies données à chaque mise à jour.
    ========================================================= */
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true; controls.dampingFactor = .09;
-controls.rotateSpeed = .55; controls.zoomSpeed = .9; controls.panSpeed = .9;
-controls.minDistance = 9; controls.maxDistance = 230;
-controls.minPolarAngle = .18; controls.maxPolarAngle = 1.42;
-controls.screenSpacePanning = false; controls.zoomToCursor = true;
-controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-const distK = () => { const a = innerWidth / innerHeight; return a < 1 ? Math.min(1.9, .8 / a) : 1; };
-camera.position.set(-70, 120, 150); controls.target.set(0, 0, 0); controls.update();
-
-let fly = null;
-const tmpS = new THREE.Spherical();
-function flyTo(target, dist, azim, polar, dur = 1.15) {
-  const s0 = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
-  const a1 = azim ?? s0.theta; let d = a1 - s0.theta; d = Math.atan2(Math.sin(d), Math.cos(d));
-  fly = { t: 0, dur, t0: controls.target.clone(), t1: target.clone(), r0: s0.radius, r1: dist, a0: s0.theta, a1: s0.theta + d, p0: s0.phi, p1: polar ?? Math.min(Math.max(s0.phi, .75), 1.1) };
-}
-let userMoved = false;
-controls.addEventListener("start", () => { fly = null; userMoved = true; });
-const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-function stepFly(dt) {
-  if (!fly) return; fly.t += dt / fly.dur; const k = ease(Math.min(1, fly.t));
-  controls.target.lerpVectors(fly.t0, fly.t1, k);
-  tmpS.set(fly.r0 + (fly.r1 - fly.r0) * k, fly.p0 + (fly.p1 - fly.p0) * k, fly.a0 + (fly.a1 - fly.a0) * k);
-  camera.position.setFromSpherical(tmpS).add(controls.target);
-  if (fly.t >= 1) fly = null;
-}
-function clampTarget() { const t = controls.target; t.x = Math.max(-34, Math.min(34, t.x)); t.z = Math.max(-34, Math.min(34, t.z)); t.y = Math.max(-3, Math.min(14, t.y)); }
-/* Vue d'ensemble cadrée au calcul : toute la ville (et les repères au-dessus des toits) tient
-   entre le bandeau du haut et la barre du bas, centrée dans l'espace libre, quel que soit l'écran. */
-const _oc = new THREE.PerspectiveCamera(), _op = new THREE.Vector3(), _os = new THREE.Spherical();
-const OV_PTS = []; [-HALF, HALF].forEach(x => [-HALF, HALF].forEach(z => [0, -DEPTH].forEach(y => OV_PTS.push(new THREE.Vector3(x, y, z)))));
-const OV_BLD = [];
-function bldPoints() { if (OV_BLD.length) return; const b = new THREE.Box3();
-  root.children.forEach(o => { if (o.isGroup && o.userData.fp) { b.setFromObject(o); [b.min.x, b.max.x].forEach(x => [b.min.z, b.max.z].forEach(z => [0, b.max.y].forEach(y => OV_BLD.push(new THREE.Vector3(x, y, z))))); } }); }
-function overviewView() {
-  bldPoints();
-  return innerHeight > innerWidth ? fitView(-.25, .82) : fitView(-.5, .92);
-}
-function fitView(azim, polar) {
-  const W = innerWidth, H = innerHeight;
-  const top = $("brief").getBoundingClientRect().bottom + 12, bot = Math.min(H - 70, $("ask").getBoundingClientRect().top - 12);
-  // Les bâtiments restent toujours entiers à l'écran. Sur un écran en hauteur, seuls les coins nus du plateau
-  // (du sol et des arbres) peuvent dépasser un peu : la ville est plus grande.
-  const side = W > 900 ? 70 : 10, slabSide = H > W ? -Math.round(W * .06) : side, PIN = 44;
-  _oc.fov = camera.fov; _oc.aspect = W / H; _oc.updateProjectionMatrix();
-  const t = new THREE.Vector3(0, 0, 0); let d = H > W ? 190 : 120;
-  for (let i = 0; i < 10; i++) {
-    _os.set(d, polar, azim); _oc.position.setFromSpherical(_os).add(t); _oc.lookAt(t); _oc.updateMatrixWorld();
-    const box = () => ({ x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9 }), sl = box(), bt = box();
-    const px = (b, v, lift = 0) => { _op.copy(v).project(_oc); const x = (_op.x + 1) / 2 * W, y = (1 - _op.y) / 2 * H - lift;
-      b.x0 = Math.min(b.x0, x); b.x1 = Math.max(b.x1, x); b.y0 = Math.min(b.y0, y); b.y1 = Math.max(b.y1, y); };
-    OV_PTS.forEach(v => px(sl, v)); OV_BLD.forEach(v => px(bt, v)); PLACES.forEach(p => p.anchor && px(bt, p.anchor, PIN));
-    const y0 = Math.min(sl.y0, bt.y0), y1 = Math.max(sl.y1, bt.y1);
-    const need = Math.max((sl.x1 - sl.x0) / (W - 2 * slabSide), (bt.x1 - bt.x0) / (W - 2 * side), (y1 - y0) / Math.max(120, bot - top));
-    const upp = 2 * d * Math.tan(THREE.MathUtils.degToRad(_oc.fov / 2)) / H;
-    const right = new THREE.Vector3(Math.cos(azim), 0, -Math.sin(azim)), fwd = new THREE.Vector3(-Math.sin(azim), 0, -Math.cos(azim));
-    t.addScaledVector(right, ((bt.x0 + bt.x1) / 2 - W / 2) * upp);
-    t.addScaledVector(fwd, -((y0 + y1) / 2 - (top + bot) / 2) * upp / Math.cos(polar));
-    d *= need;
-  }
-  return { t, d, azim, polar };
-}
-function overview(dur = 1.3) { const v = overviewView(); flyTo(v.t, v.d, v.azim, v.polar, dur); }
-let viewShift = 0, viewShiftGoal = 0;
-function layout() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = h > w ? 42 : 34; camera.updateProjectionMatrix(); }
-addEventListener("resize", layout); layout();
-
-/* =========================================================
-   Repères sur les lieux
-   ========================================================= */
-const pinsEl = $("pins"), briefEl = $("brief"), colEl = document.querySelector(".top .col"), askEl = $("ask");
-PLACES.forEach(p => {
-  const b = document.createElement("button"); b.className = "pin"; b.style.setProperty("--c", p.color);
-  b.innerHTML = '<span class="bub"><span class="ic"></span><span class="tx"><b></b><span></span></span></span><span class="stem"></span><span class="foot"></span>';
-  b.querySelector(".ic").textContent = p.emoji; b.querySelector(".tx b").textContent = p.name; p.statusEl = b.querySelector(".tx span");
-  b.addEventListener("click", e => { e.stopPropagation(); select(p); }); pinsEl.append(b); p.pin = b;
-});
-function refreshPins() { PLACES.forEach(p => { p.pin.classList.toggle("urgent", !!p.urgent); p.statusEl.textContent = p.status; p.pin.setAttribute("aria-label", p.name + ", " + p.status); }); }
-const v3 = new THREE.Vector3();
+const briefEl = $("brief");
 let talkOpen = false;
-/* Repères stables : un ordre fixe (sélection, puis urgences, puis l'ordre des lieux), une hauteur fixe,
-   et un fondu lent quand deux repères se gênent. */
-function placePins() {
-  const W = innerWidth, H = innerHeight, items = [], thr = small ? 78 : 95;
-  PLACES.forEach((p, i) => {
-    v3.copy(p.anchor); const dist = camera.position.distanceTo(v3); v3.project(camera);
-    const x = (v3.x + 1) / 2 * W, y = (1 - v3.y) / 2 * H;
-    if (p._compact === undefined) p._compact = dist > thr;
-    if (dist > thr + 6) p._compact = true; else if (dist < thr - 6) p._compact = false;
-    items.push({ p, x, y, onScreen: v3.z < 1 && x > -40 && x < W + 40 && y > -40 && y < H + 40,
-      compact: p._compact && S.sel !== p && !p.urgent, prio: (S.sel === p ? 0 : (p.urgent ? 1 : 2)) * 100 + i });
-  });
-  items.sort((a, b) => a.prio - b.prio);
-  // Le bandeau, les boutons ronds et la barre du bas sont déjà « pris » : aucun repère ne passe dessous.
-  const ui = r => ({ x0: r.left - 6, x1: r.right + 6, y0: r.top - 6, y1: r.bottom + 6 });
-  const taken = [ui(briefEl.getBoundingClientRect()), ui(colEl.getBoundingClientRect())];
-  const topLimit = 40, botLimit = H - (S.sel || talkOpen || bookOpen || setOpen ? H * .46 : 84);
-  if (!S.sel && !talkOpen && !bookOpen && !setOpen) taken.push(ui(askEl.getBoundingClientRect()));
-  items.forEach(it => {
-    const p = it.p, el = p.pin; el.classList.toggle("compact", it.compact); el.classList.toggle("sel", S.sel === p);
-    const bub = el.firstChild, w = bub.offsetWidth || 42, h = (bub.offsetHeight || 42) + 22;
-    let dx = 0; const L = it.x - w / 2, Rr = it.x + w / 2; if (L < 8) dx = 8 - L; else if (Rr > W - 8) dx = W - 8 - Rr;
-    bub.style.transform = dx ? `translateX(${dx}px)` : "";
-    // Toujours à la même hauteur, juste au-dessus de son lieu : il ne saute plus.
-    let free = false;
-    if (it.onScreen && it.y < botLimit + 20) {
-      const r = { x0: it.x - w / 2 + dx, x1: it.x + w / 2 + dx, y0: it.y - h, y1: it.y };
-      if (r.y0 >= topLimit - 30 && !taken.some(t => r.x0 < t.x1 + 2 && r.x1 > t.x0 - 2 && r.y0 < t.y1 && r.y1 > t.y0)) free = true;
-      if (free || p._shown) taken.push(r);
-    }
-    // Il ne s'efface qu'après un vrai blocage, et ne revient qu'une fois la place libre un moment.
-    if (free) { p._ok = (p._ok || 0) + 1; p._miss = 0; } else { p._miss = (p._miss || 0) + 1; p._ok = 0; }
-    if (!it.onScreen) p._shown = false;
-    else if (p._shown && p._miss > 10) p._shown = false;
-    else if (!p._shown && p._ok > 8) p._shown = true;
-    if (S.sel === p && it.onScreen) p._shown = true;
-    el.querySelector(".stem").style.height = "14px";
-    el.classList.toggle("hide", !p._shown);
-    el.style.transform = `translate(${it.x}px,${it.y}px) translate(-50%,-100%)`;
-    el.style.zIndex = String(5000 - it.prio);
-  });
+function refreshPins() {
+  V.setDonnees(PLACES.map(p => ({ id: p.id, n: p.name, c: p.color, place: p.place, status: p.status, say: p.say, facts: p.facts || [],
+    alerts: (p.docs || []).filter(d => d.alerteId).map(d => ({ t: d.t.replace(/^⚠︎\s*/, ""), d: d.d })),
+    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent })));
 }
 
 /* =========================================================
@@ -502,13 +93,26 @@ function placePins() {
 const sheet = $("sheet");
 function select(p) {
   S.sel = p; closeTalk(true); closeBook(true); closeSettings(true);
-  flyTo(p.focus, p.dist * distK(), p.azim, p.polar);
-  viewShiftGoal = 1;
-  $("card").style.setProperty("--c", p.color); $("pIc").style.setProperty("--c", p.color); $("pIc").textContent = p.emoji;
-  $("pPlace").textContent = p.place; $("pName").textContent = p.name;
-  renderSheet(p);
-  sheet.classList.add("open"); $("ask").classList.add("away");
+  sheet.classList.remove("open"); viewShiftGoal = 0;
+  V.ouvrir(p.id);
+  const bar = $("lieubar"); bar.style.setProperty("--c", p.color);
+  icone($("lbIc"), p); $("lbName").textContent = p.name; $("lbSub").textContent = p.status || p.place || "";
+  $("lbDot").hidden = !p.urgent;
+  bar.classList.add("on"); $("ask").classList.add("away");
 }
+function openDetails() {
+  const p = S.sel; if (!p) return;
+  $("card").style.setProperty("--c", p.color); $("pIc").style.setProperty("--c", p.color); icone($("pIc"), p);
+  $("pPlace").textContent = p.place; $("pName").textContent = p.name;
+  renderSheet(p); viewShiftGoal = 1;
+  sheet.classList.add("open"); $("lieubar").classList.remove("on");
+}
+function closeDetails() { sheet.classList.remove("open"); viewShiftGoal = 0; if (S.sel) $("lieubar").classList.add("on"); }
+const pas = d => { const i = S.sel ? PLACES.indexOf(S.sel) : -1; select(PLACES[(i + d + PLACES.length) % PLACES.length]); };
+$("lbPrev").addEventListener("click", () => pas(-1));
+$("lbNext").addEventListener("click", () => pas(1));
+$("lbMore").addEventListener("click", openDetails);
+$("lbClose").addEventListener("click", () => { deselect(); });
 function renderSheet(p) {
   $("pSay").textContent = p.say;
   const f = $("pFacts"); f.innerHTML = "";
@@ -530,14 +134,14 @@ function renderSheet(p) {
     const u = mk("Mettre à jour", "soft", async () => { u.disabled = true; u.textContent = "Je regarde…"; await medin({ action: "sync" }, true); u.disabled = false; u.textContent = "Mettre à jour"; });
   } else mk("Demander à Jarvis", "main", () => openTalk(p));
 }
-function deselect() { if (!S.sel) return; S.sel = null; sheet.classList.remove("open"); $("ask").classList.remove("away"); viewShiftGoal = 0; }
-$("pClose").addEventListener("click", deselect);
+function deselect() { if (!S.sel) return; S.sel = null; sheet.classList.remove("open"); $("lieubar").classList.remove("on"); $("ask").classList.remove("away"); viewShiftGoal = 0; V.fermer(); }
+$("pClose").addEventListener("click", closeDetails);
 $("home").addEventListener("click", () => { deselect(); closeTalk(); closeBook(); closeSettings(); overview(); });
 function swipeClose(el, fn) { let y0 = null;
   el.addEventListener("pointerdown", e => { if (e.target.closest("button,input,a,.msgs,.chips,.slots")) return; y0 = e.clientY; });
   el.addEventListener("pointerup", e => { if (y0 !== null && e.clientY - y0 > 50 && !el.scrollTop) fn(); y0 = null; });
   el.addEventListener("pointercancel", () => y0 = null); }
-swipeClose($("card"), deselect);
+swipeClose($("card"), closeDetails);
 
 /* ---------- Un papier ---------- */
 async function openDoc(p, d) {
@@ -599,7 +203,7 @@ function aRegarder() {
 }
 function allerA(x) {
   $("alertwrap").classList.remove("open");
-  select(x.p);
+  select(x.p); openDetails();
   if (x.d) setTimeout(() => openDoc(x.p, x.d), 750);
 }
 function ouvrirListe() {
@@ -610,7 +214,7 @@ function ouvrirListe() {
   $("alertT").textContent = u.length + " choses à regarder";
   u.forEach(x => {
     const b = document.createElement("button"); b.type = "button"; b.className = "alertItem"; b.style.setProperty("--c", x.p.color);
-    const ic = document.createElement("span"); ic.className = "aic"; ic.textContent = x.p.emoji;
+    const ic = document.createElement("span"); ic.className = "aic svgic"; ic.innerHTML = V.icone(x.p.id);
     const t = document.createElement("span"); t.className = "atx";
     const n = document.createElement("small"); n.textContent = x.p.name + (x.quand ? " · " + x.quand : "");
     const h = document.createElement("b"); h.textContent = x.titre;
@@ -622,20 +226,6 @@ function ouvrirListe() {
   $("alertwrap").classList.add("open");
 }
 $("brief").addEventListener("click", ouvrirListe);
-
-/* ---------- Toucher un bâtiment ---------- */
-const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let down = null, touches = 0;
-canvas.addEventListener("pointerdown", e => { touches++; down = { x: e.clientX, y: e.clientY, t: performance.now(), multi: touches > 1 }; });
-const up = () => { touches = Math.max(0, touches - 1); };
-canvas.addEventListener("pointercancel", up);
-canvas.addEventListener("pointerup", e => {
-  up(); if (!down) return; const d = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t, multi = down.multi; down = null;
-  if (d > 8 || dt > 350 || multi) return;
-  ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
-  const hit = ray.intersectObjects(pickables, false)[0]; if (!hit) return;
-  const id = hit.object.userData.place;
-  if (id === "jarvis") openTalk(null); else select(byId[id]);
-});
 
 /* =========================================================
    Les données (Supabase, en direct)
@@ -922,21 +512,13 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && S.
 const LIEU_APP = { logement: "home", energie: "energie", sante: "clinique", travail: "usine", impots: "impots", voiture: "garage", papiers: "mairie", banque: "banque", bebe: "medecin", abonnements: "orange" };
 const sansAccent = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function fermerTout() { deselect(); closeTalk(); closeBook(); closeSettings(); $("paperwrap").classList.remove("open"); $("alertwrap").classList.remove("open"); }
-function bougerCamera(a) {
-  fly = null; const s = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
-  let theta = s.theta, r = s.radius, phi = s.phi;
-  if (a.tourner) theta += (Number(a.tourner) || 0) * Math.PI / 180;
-  if (a.zoom === "avant") r *= .6; else if (a.zoom === "arriere") r *= 1.6;
-  if (a.vue === "dessus") phi = .35; else if (a.vue === "rasante") phi = 1.2;
-  r = Math.max(controls.minDistance, Math.min(controls.maxDistance, r));
-  flyTo(controls.target.clone(), r, theta, phi, 1.2);
-}
+function bougerCamera(a) { V.orbit(a); }
 async function ordreEcran(o) {
   const a = o.args || {};
   if (o.action === "lieu") { const p = byId[LIEU_APP[a.lieu] || a.lieu]; if (p) { $("paperwrap").classList.remove("open"); select(p); } }
   else if (o.action === "document") {
     const p = byId[LIEU_APP[a.lieu] || a.lieu]; if (!p) return;
-    select(p); const q = sansAccent(a.titre).split(/\s+/).filter(Boolean);
+    select(p); openDetails(); const q = sansAccent(a.titre).split(/\s+/).filter(Boolean);
     const d = (p.docs || []).find(x => q.every(m => sansAccent(x.t + " " + x.d).includes(m))) || (p.docs || []).find(x => q.some(m => sansAccent(x.t + " " + x.d).includes(m)));
     if (d) setTimeout(() => openDoc(p, d), 700); else toast("Je ne trouve pas « " + a.titre + " » ici.");
   }
@@ -1047,7 +629,7 @@ function stepDone(r) {
     sb.storage.from("papiers").createSignedUrl(r.rdv.chemin, 600).then(({ data }) => { if (data) { a.href = data.signedUrl; a.textContent = "Voir la confirmation (PDF)"; } else a.textContent = "PDF pas encore prêt"; });
   } else if (ok) { const p = document.createElement("p"); p.className = "hint"; p.textContent = "Le PDF de confirmation arrivera dans Ta santé dès que MédinLyon le donne."; o.append(p); }
   const b = document.createElement("button"); b.className = "btn soft wide"; b.textContent = ok ? "Voir Ta santé" : "Réessayer"; o.append(b);
-  b.addEventListener("click", () => { if (ok) { closeBook(true); select(byId.clinique); } else stepSlot(); });
+  b.addEventListener("click", () => { if (ok) { closeBook(true); select(byId.clinique); openDetails(); } else stepSlot(); });
 }
 
 /* =========================================================
@@ -1341,7 +923,7 @@ async function enter(session) {
   gate.hidden = true;
   await loadAll(); goLive(); goTelecommande();
   // Le bandeau du haut a pris sa vraie taille : on recadre si tu n’as encore rien touché
-  if (!userMoved && !S.sel) overview(.9);
+  if (!userMoved && !S.sel) overview();
 }
 $("gform").addEventListener("submit", async e => {
   e.preventDefault(); const email = $("gmail").value.trim(), password = $("gpass").value;
@@ -1354,27 +936,9 @@ $("gform").addEventListener("submit", async e => {
 sb.auth.onAuthStateChange((ev, session) => { if (ev === "SIGNED_OUT") { showGate("Connecte-toi pour ouvrir ta ville."); } });
 sb.auth.getSession().then(({ data }) => enter(data.session));
 
-/* =========================================================
-   La boucle
-   ========================================================= */
-let last = performance.now(), clock = 0;
+/* ---------- Démarrage ---------- */
 refreshPins(); updateBrief();
-overview(2.2);
-function frame(now) {
-  const dt = Math.min((now - last) / 1000, .05); last = now; clock += dt;
-  stepFly(dt); controls.update(); clampTarget();
-  viewShift += (viewShiftGoal - viewShift) * (1 - Math.pow(.002, dt));
-  const W = innerWidth, H = innerHeight;
-  if (viewShift > .001) camera.setViewOffset(W, H, 0, H * .2 * viewShift, W, H); else camera.clearViewOffset();
-  cars.forEach(c => { c.t = (c.t + c.dir * c.v * dt + 4) % 4; const [x, z, a] = loopPos(c.t, c.r); c.g.position.set(x, .08, z); c.g.rotation.y = a + (c.dir < 0 ? Math.PI : 0); });
-  if (rotor) rotor.rotation.z -= dt * .6;
-  jarvis.position.y = 8.5 + Math.sin(clock * .6) * .25;
-  jarvis.userData.ring.rotation.z += dt * .25; jarvis.userData.ring2.rotation.z -= dt * .18;
-  renderer.render(scene, camera);
-  placePins();
-  requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
+window.__jv = { V, select, deselect, openDetails, PLACES, byId, refreshPins, applySky };
 
 $("alertClose").addEventListener("click", () => $("alertwrap").classList.remove("open"));
 $("alertwrap").addEventListener("click", e => { if (e.target.id === "alertwrap") $("alertwrap").classList.remove("open"); });

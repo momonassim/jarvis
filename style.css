@@ -193,3 +193,21 @@ p.empty{margin:0}
 .alertItem .atx small{font-size:12px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .alertItem .atx b{font-size:15px;font-weight:700;line-height:1.25}
 .alertItem .ago{flex:none;font-size:22px;color:#d9483b;font-weight:700}
+
+/* ---------- Ville maquette : barre du lieu ouvert ---------- */
+.lieubar{position:fixed;left:50%;bottom:calc(12px + var(--safe-b));z-index:7;transform:translate(-50%,140%);opacity:0;pointer-events:none;display:flex;align-items:center;gap:6px;
+  width:min(560px,calc(100% - 24px));box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:6px;box-shadow:0 10px 34px -12px rgba(30,40,55,.4);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .3s}
+.lieubar.on{transform:translate(-50%,0);opacity:1;pointer-events:auto}
+.lbn{flex:none;width:42px;height:42px;border-radius:50%;border:0;background:rgba(47,52,60,.07);color:var(--ink);font-size:22px;line-height:1;cursor:pointer}
+.lbn.x{font-size:15px;background:transparent}
+.lbmid{flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:0;background:none;padding:2px 4px;cursor:pointer;color:var(--ink);text-align:left;font:inherit;position:relative}
+.lbic{flex:none;width:36px;height:36px;border-radius:50%;background:var(--c);display:grid;place-items:center}
+.lbtx{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
+.lbtx b{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lbtx small{font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lbgo{flex:none;font-size:12.5px;font-weight:700;color:var(--ink2);padding:8px 10px;border-radius:999px;background:rgba(47,52,60,.06)}
+.lbdot{position:absolute;left:30px;top:2px;width:10px;height:10px;border-radius:50%;background:var(--red);border:2px solid #fff}
+@media (max-width:420px){ .lbgo{display:none} }
+.svgic svg{width:58%;height:58%;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.alertItem .aic.svgic{background:var(--c)}
