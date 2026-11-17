@@ -453,13 +453,17 @@ PLACES.forEach(p => {
 function refreshPins() { PLACES.forEach(p => { p.pin.classList.toggle("urgent", !!p.urgent); p.statusEl.textContent = p.status; p.pin.setAttribute("aria-label", p.name + ", " + p.status); }); }
 const v3 = new THREE.Vector3();
 let talkOpen = false;
+/* Repères stables : un ordre fixe (sélection, puis urgences, puis l'ordre des lieux), une hauteur fixe,
+   et un fondu lent quand deux repères se gênent. */
 function placePins() {
-  const W = innerWidth, H = innerHeight, items = [];
-  PLACES.forEach(p => {
+  const W = innerWidth, H = innerHeight, items = [], thr = small ? 78 : 95;
+  PLACES.forEach((p, i) => {
     v3.copy(p.anchor); const dist = camera.position.distanceTo(v3); v3.project(camera);
     const x = (v3.x + 1) / 2 * W, y = (1 - v3.y) / 2 * H;
-    items.push({ p, x, y, dist, onScreen: v3.z < 1 && x > -40 && x < W + 40 && y > -40 && y < H + 40,
-      compact: dist > (small ? 78 : 95) && S.sel !== p && !p.urgent, prio: (S.sel === p ? 0 : (p.urgent ? 1 : 2)) * 1000 + dist });
+    if (p._compact === undefined) p._compact = dist > thr;
+    if (dist > thr + 6) p._compact = true; else if (dist < thr - 6) p._compact = false;
+    items.push({ p, x, y, onScreen: v3.z < 1 && x > -40 && x < W + 40 && y > -40 && y < H + 40,
+      compact: p._compact && S.sel !== p && !p.urgent, prio: (S.sel === p ? 0 : (p.urgent ? 1 : 2)) * 100 + i });
   });
   items.sort((a, b) => a.prio - b.prio);
   // Le bandeau, les boutons ronds et la barre du bas sont déjà « pris » : aucun repère ne passe dessous.
@@ -468,20 +472,27 @@ function placePins() {
   const topLimit = 40, botLimit = H - (S.sel || talkOpen || bookOpen || setOpen ? H * .46 : 84);
   if (!S.sel && !talkOpen && !bookOpen && !setOpen) taken.push(ui(askEl.getBoundingClientRect()));
   items.forEach(it => {
-    const el = it.p.pin; el.classList.toggle("compact", it.compact); el.classList.toggle("sel", S.sel === it.p);
+    const p = it.p, el = p.pin; el.classList.toggle("compact", it.compact); el.classList.toggle("sel", S.sel === p);
     const bub = el.firstChild, w = bub.offsetWidth || 42, h = (bub.offsetHeight || 42) + 22;
     let dx = 0; const L = it.x - w / 2, Rr = it.x + w / 2; if (L < 8) dx = 8 - L; else if (Rr > W - 8) dx = W - 8 - Rr;
     bub.style.transform = dx ? `translateX(${dx}px)` : "";
-    let ok = false, lift = 0;
-    if (it.onScreen && it.y < botLimit + 20) for (const k of (it.p.urgent || S.sel === it.p ? [0, 1, 2] : [0, 1])) {
-      const L2 = k * (h - 10), r = { x0: it.x - w / 2 + dx, x1: it.x + w / 2 + dx, y0: it.y - h - L2, y1: it.y - L2 };
-      if (r.y0 < topLimit - 30) break;
-      if (!taken.some(t => r.x0 < t.x1 + 4 && r.x1 > t.x0 - 4 && r.y0 < t.y1 + 2 && r.y1 > t.y0 - 2)) { ok = true; lift = L2; taken.push(r); break; }
+    // Toujours à la même hauteur, juste au-dessus de son lieu : il ne saute plus.
+    let free = false;
+    if (it.onScreen && it.y < botLimit + 20) {
+      const r = { x0: it.x - w / 2 + dx, x1: it.x + w / 2 + dx, y0: it.y - h, y1: it.y };
+      if (r.y0 >= topLimit - 30 && !taken.some(t => r.x0 < t.x1 + 2 && r.x1 > t.x0 - 2 && r.y0 < t.y1 && r.y1 > t.y0)) free = true;
+      if (free || p._shown) taken.push(r);
     }
-    el.querySelector(".stem").style.height = (14 + lift) + "px";
-    el.classList.toggle("hide", !ok);
+    // Il ne s'efface qu'après un vrai blocage, et ne revient qu'une fois la place libre un moment.
+    if (free) { p._ok = (p._ok || 0) + 1; p._miss = 0; } else { p._miss = (p._miss || 0) + 1; p._ok = 0; }
+    if (!it.onScreen) p._shown = false;
+    else if (p._shown && p._miss > 10) p._shown = false;
+    else if (!p._shown && p._ok > 8) p._shown = true;
+    if (S.sel === p && it.onScreen) p._shown = true;
+    el.querySelector(".stem").style.height = "14px";
+    el.classList.toggle("hide", !p._shown);
     el.style.transform = `translate(${it.x}px,${it.y}px) translate(-50%,-100%)`;
-    el.style.zIndex = String(5000 - Math.round(it.prio % 1000));
+    el.style.zIndex = String(5000 - it.prio);
   });
 }
 
