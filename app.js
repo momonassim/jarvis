@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=maquette1";
+import { creerVille } from "./ville.js?v=maquette2";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -50,6 +50,7 @@ const canvas = $("c");
 let viewShiftGoal = 0, userMoved = false, V = null;
 V = await creerVille(canvas, {
   pick: id => { userMoved = true; if (id === "jarvis") openTalk(null); else if (byId[id]) select(byId[id]); },
+  action: (id, a) => { userMoved = true; if (a === "rdv") openBook(); },
   progress: t => { const b = $("briefTxt"); if (b && !S.loaded) b.textContent = t; },
   frame: () => V && V.decalage(viewShiftGoal),
 });

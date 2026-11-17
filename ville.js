@@ -947,7 +947,12 @@ renderer.domElement.addEventListener('pointerdown',e=>{downXY=[e.clientX,e.clien
 renderer.domElement.addEventListener('pointerup',e=>{ if(!downXY||Math.hypot(e.clientX-downXY[0],e.clientY-downXY[1])>6) return;
   const rr=canvas.getBoundingClientRect(); _ndc.set((e.clientX-rr.left)/rr.width*2-1,-((e.clientY-rr.top)/rr.height)*2+1); rc.setFromCamera(_ndc,camera);
   const h=rc.intersectObjects(pickables,false).filter(i=>{let o=i.object; while(o){ if(!o.visible) return false; o=o.parent;} return true;});
-  if(h.length){ const u=h[0].object.userData; if(u.panel){ const P=u.panel; if(SEL!==u.place){HK.pick&&HK.pick(u.place.id);return;} if(FOCUS===P){ FOCUS=null; const v=viewFor(SEL); flyTo(v[0],v[1],v[2]); } else { FOCUS=P; const v=frameInfos([P.info],P.maxD||SEL.maxD||13,1.08); flyTo(v[0],v[1],v[2]); } return; }
+  if(h.length){ const u=h[0].object.userData;
+    // bouton dessiné sur un panneau (ex. « Prendre rendez-vous ») : un appui dessus lance l'action
+    if(u.panel&&u.panel.o.hit&&h[0].uv&&h[0].face&&h[0].face.normal.z>.5){ const P=u.panel, b=P.o.hit, Hc=P.c.height/(P.c.width/1000);
+      const px=h[0].uv.x*1000, py=(1-h[0].uv.y)*Hc;
+      if(px>=b.x0-20&&px<=b.x1+20&&py>=b.y0-20&&py<=b.y1+20){ HK.action&&HK.action(u.place.id,b.act); return; } }
+    if(u.panel){ const P=u.panel; if(SEL!==u.place){HK.pick&&HK.pick(u.place.id);return;} if(FOCUS===P){ FOCUS=null; const v=viewFor(SEL); flyTo(v[0],v[1],v[2]); } else { FOCUS=P; const v=frameInfos([P.info],P.maxD||SEL.maxD||13,1.08); flyTo(v[0],v[1],v[2]); } return; }
     HK.pick&&HK.pick(u.place.id); return; }
   let best=null,bd=1e9; const hp=new THREE.Vector3(); for(const B of BOXES){ if(!B.id)continue; if(rc.ray.intersectBox(B.b,hp)){const d=hp.distanceTo(camera.position); if(d<bd){bd=d;best=B.id;}}}
   let first=1e9; for(const B of BOXES){ if(rc.ray.intersectBox(B.b,hp)) first=Math.min(first,hp.distanceTo(camera.position)); }
@@ -1135,7 +1140,7 @@ function buildOpenings(){
   // ---------- IMPÔTS : l'avis sort de la façade entre les drapeaux ----------
   const I=PL.impots; if(I) newPanel('impots',I.mat,{x:I.W/2,y:6.75,z0:-.5,z1:.42,w:5.0,h:3.0,kind:'slide',d:0,frame:true,thick:.22,draw:boardReal('impots')});
   // ---------- TA SANTÉ ----------
-  const C=PL.clinique; if(C) newPanel('clinique',C.mat,{x:C.W/2,y:6.95,z0:-.5,z1:.42,w:5.2,h:3.5,kind:'slide',d:0,frame:true,thick:.22,draw:boardReal('clinique',{button:'Prendre rendez-vous'})});
+  const C=PL.clinique; if(C) newPanel('clinique',C.mat,{x:C.W/2,y:6.95,z0:-.5,z1:.42,w:5.2,h:3.5,kind:'slide',d:0,frame:true,thick:.22,hit:{x0:610,y0:46,x1:940,y1:104,act:'rdv'},draw:boardReal('clinique',{button:'Prendre rendez-vous'})});
   // ---------- TES PAPIERS : trois papiers encadrés dans les fenêtres de la mairie ----------
   const Mr=PL.mairie; if(Mr) [5.1,8.0,10.9].forEach((cx,i)=>newPanel('mairie',Mr.mat,{x:cx,y:5.3+1.16,z0:-.5,z1:.08,w:1.25,h:1.95,kind:'slide',d:i*.12,thick:.08,draw:docReal('mairie',i)}));
   // ---------- LE BÉBÉ : deux affiches dans les vitrines du cabinet ----------
