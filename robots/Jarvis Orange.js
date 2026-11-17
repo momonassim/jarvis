@@ -1,4 +1,9 @@
-// Jarvis — robot Orange v7 (tourne sur ton iPhone, avec ta connexion)
+// Jarvis — robot Orange v8 (tourne sur ton iPhone, avec ta connexion)
+// NOUVEAU v8 : deux modes, choisis tout seuls.
+//  · TOUR COMPLET (comme avant, ~1 h) : la 1re fois, puis une fois par mois.
+//  · TOUR RAPIDE (quelques minutes) : les autres jours. Il ne relit que ce qui bouge :
+//    nouvelles factures (et leur PDF s'il est nouveau), conso, offre et options, état de la box.
+//  Pour forcer un tour complet depuis Raccourcis : mets le texte « complet » en paramètre de « Run Script ».
 // Fait le tour COMPLET de ton espace client Orange, pour TOUS tes contrats : il touche chaque contrat
 // l'un après l'autre (comme toi à la main), puis lit toutes ses pages (offre, options,
 // lignes, box, matériel, conso, factures, paiements, contrats, compte…), les données
@@ -14,6 +19,8 @@ const HOTE = "espace-client.orange.fr";
 const START = "https://" + HOTE + "/accueil";
 const KEYS = { id: "jarvis.orange.id", pw: "jarvis.orange.password", sb: "jarvis.supabase.secret" };
 const MAX_PAGES = 130, MAX_CLICS = 60, MAX_PDF = 80;
+const JOURS_ENTRE_TOURS_COMPLETS = 30;
+let complet = true;
 // Liens jamais suivis (actions, sortie, boutique…)
 const EVITER = /d[ée]connex|logout|r[ée]sili|supprim|annul|souscri|command|panier|boutique|acheter|achat|mailto:|tel:|javascript:|chat|messenger|forum|communaute|assistance\.orange|aide\.orange|recrutement|paiement-en-ligne|payer/i;
 
@@ -125,7 +132,10 @@ async function charger(u) {
   await until(`document.readyState==='complete'`, 25);
   await js(ECOUTE);
   await until(`(document.body&&document.body.innerText||'').length>500`, 12);
-  await wait(2500);
+  if (complet) { await wait(2500); return; }
+  // tour rapide : on attend juste que la page ait fini de recevoir ses données (calme 1,2 s, 5 s max)
+  let avant = -1, calme = 0;
+  for (let k = 0; k < 20 && calme < 3; k++) { await wait(400); const n = await js(`(window.__api||[]).length+(document.body.innerText||'').length`); calme = n === avant ? calme + 1 : 0; avant = n; }
 }
 
 // Choisir un contrat, comme quand tu le touches dans le carrousel en haut de l'accueil
@@ -182,6 +192,15 @@ async function run() {
   sbKey = await secret(KEYS.sb, "Supabase", "Colle ta clé secrète Supabase (sb_secret_…)", true);
   await login(id, pw);
 
+  // tour complet ou rapide ?
+  try {
+    const force = String(args.shortcutParameter || "").toLowerCase().includes("complet");
+    const e = JSON.parse((await sb(`/rest/v1/jarvis_items?source=eq.orange&kind=eq.etat&label=eq.tour-complet&select=data`)).body || "[]");
+    const dernier = e[0] && e[0].data && Date.parse(e[0].data.le);
+    complet = force || !dernier || (Date.now() - dernier) > JOURS_ENTRE_TOURS_COMPLETS * 864e5;
+  } catch (_) { complet = true; }
+  debug.push({ step: "mode", complet });
+
   // factures déjà rangées, par contrat et par date
   const dejaFact = new Map();
   try { for (const r of JSON.parse((await sb(`/rest/v1/jarvis_items?source=eq.orange&kind=eq.facture&select=date,data`)).body)) if (r.data && r.data.path) dejaFact.set(`${r.data.contrat}|${r.date}`, r.data.path); } catch (_) {}
@@ -212,7 +231,7 @@ async function run() {
 
   // ---------- les codes RIO (pour changer d'opérateur en gardant son numéro) ----------
   const rios = [];
-  for (const c of contrats) {
+  for (const c of (complet ? contrats : [])) {
     for (const l of (c.lignes || [])) {
       try {
         await choisir(c);
@@ -243,6 +262,18 @@ async function run() {
 
   for (const c of contrats) {
   await choisir(c);
+  if (!complet) {
+    for (const u of ["/offre-options/", "/conso/", "/equipements/"].map((r) => "https://" + HOTE + r + c.cid)) {
+      try {
+        await charger(u);
+        if (!(await js(`location.host===${JSON.stringify(HOTE)}`))) continue;
+        const info = JSON.parse(await js(`JSON.stringify({url:location.href,titre:document.title,texte:((document.querySelector('main')||document.body).innerText||'').slice(0,40000)})`));
+        pages.push({ url: info.url.split("?")[0], contrat: courant, titre: info.titre, texte: masquer(info.texte) });
+        await recolter();
+      } catch (e) { debug.push({ step: "rapide-" + slug(u).slice(-40), erreur: String(e && e.message || e) }); }
+    }
+    continue;
+  }
   file = [await path(), ...["/facture-paiement/", "/offre-options/", "/equipements/", "/conso/"].map((r) => "https://" + HOTE + r + c.cid),
     "https://" + HOTE + "/equipements/" + c.cid + "/tv", "https://" + HOTE + "/conso/" + c.cid + "/equipement/equipement-principal"];
   vus.delete(norm(file[0]));
@@ -325,7 +356,7 @@ async function run() {
     try {
       await choisir(c);
       await charger("https://" + HOTE + "/facture-paiement/" + c.cid); await wait(1500);
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < (complet ? 3 : 0); i++) {
         const more = await js(`(()=>{const b=[...document.querySelectorAll('button,a')].find(x=>/historique|anciennes factures|voir (plus|toutes)/i.test((x.innerText||'').trim())&&!x.dataset.jf&&!/t[ée]l[ée]charger|pdf/i.test(x.innerText||''));if(!b)return false;b.dataset.jf=1;b.click();return true;})()`);
         if (!more) break; await wait(2500);
       }
@@ -393,7 +424,7 @@ async function run() {
   if (factures.length && !factures.some((f) => f.path)) debug.push({ step: "factures-pdf", erreur: "aucun PDF de facture téléchargé" });
 
   // PDF trouvés en lien direct
-  for (const [h, t] of liensPdf) {
+  for (const [h, t] of (complet ? liensPdf : [])) {
     if (pdfsEnvoyes >= MAX_PDF) break;
     try { await js(LIRE(`{u:${JSON.stringify(h)}}`)); await rangerPdf(await attendreP(), t, h); } catch (_) {}
   }
@@ -406,6 +437,7 @@ async function run() {
     ...docs.map((d) => ({ source: "orange", kind: "document", label: d.path, date: null, amount: null, data: d })),
     ...debug.map((d) => ({ source: "orange", kind: "debug", label: String(d.step).slice(0, 120), date: null, amount: null, data: d })),
   ];
+  if (complet) items.push({ source: "orange", kind: "etat", label: "tour-complet", date: null, amount: null, data: { le: new Date().toISOString() } });
   const uniq = new Map(); for (const it of items) uniq.set(`${it.kind}|${it.label}`, it);
   const tout = [...uniq.values()];
   for (let i = 0; i < tout.length; i += 15) {
@@ -413,7 +445,7 @@ async function run() {
       { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" });
     if (res.status >= 300) throw new Error(`Supabase a refusé (${res.status}) ${res.body.slice(0, 120)}`);
   }
-  return `${pages.length} pages lues, ${donnees.size} blocs de données, ${factures.length} factures, ${pdfsEnvoyes} PDF rangés, ${rios.length} codes RIO.`;
+  return `${complet ? "Tour complet" : "Tour rapide"} : ${pages.length} pages lues, ${donnees.size} blocs de données, ${factures.length} factures, ${pdfsEnvoyes} PDF rangés, ${rios.length} codes RIO.`;
 }
 
 try {
