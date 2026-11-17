@@ -1156,7 +1156,7 @@ function updateHome(dt){ if(!HOME.win) return; const D=DATA.home||{}, e=D.etat||
 
 /* ---------- GAZ ET ÉLECTRICITÉ : la boutique Plenitude et, derrière, l'enclos des générateurs ---------- */
 const NRG={gens:[],arcs:[],nums:{},k:1};
-function dotTex(){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d'); const g=x.createRadialGradient(32,32,0,32,32,32); g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(.35,'rgba(255,255,255,.8)'); g.addColorStop(1,'rgba(255,255,255,0)'); x.fillStyle=g; x.fillRect(0,0,64,64); const t=new THREE.CanvasTexture(c); return t; }
+function dotTex(){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d'); const g=x.createRadialGradient(32,32,0,32,32,32); g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(.5,'rgba(255,255,255,.95)'); g.addColorStop(1,'rgba(255,255,255,0)'); x.fillStyle=g; x.fillRect(0,0,64,64); const t=new THREE.CanvasTexture(c); return t; }
 const DOT=dotTex();
 // un texte dessiné en particules (points) : renvoie les positions dans un plan de largeur w
 function textPoints(str,w,step=3){ const c=document.createElement('canvas'); c.width=640; c.height=150; const x=c.getContext('2d'); x.fillStyle='#fff'; x.font=`800 112px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; x.textAlign='center'; x.textBaseline='middle';
@@ -1168,7 +1168,7 @@ function numCloud(key,str,col,w){ const old=NRG.nums[key]; if(old&&old.str===str
   const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3)); geo.setAttribute('color',new THREE.BufferAttribute(cols,3));
   const pts=new THREE.Points(geo,new THREE.PointsMaterial({size:w/78,map:DOT,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false}));
   const g=old?old.g:NRG.slots[key]; g.add(pts); const o={str,pts,base,n,col:cc,g}; NRG.nums[key]=o; return o; }
-function labelPlane(lines,w,h,opt={}){ const c=document.createElement('canvas'); c.width=Math.round(w*220); c.height=Math.round(h*220); const x=c.getContext('2d');
+function labelPlane(lines,w,h,opt={}){ const c=document.createElement('canvas'); const ppu=opt.ppu||220; c.width=Math.round(w*ppu); c.height=Math.round(h*ppu); const x=c.getContext('2d');
   const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:t,transparent:true,toneMapped:false,side:THREE.DoubleSide}));
   m.userData.draw=(L)=>{ x.clearRect(0,0,c.width,c.height); if(opt.bg){ x.fillStyle=opt.bg; x.beginPath(); x.roundRect(4,4,c.width-8,c.height-8,18); x.fill(); if(opt.edge){ x.strokeStyle=opt.edge; x.lineWidth=6; x.stroke(); } }
     L.forEach((l,i)=>{ x.font=`${l.w||800} ${l.s}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing=(l.ls||0)+'px';}catch(e){} x.fillStyle=l.c||'#fff'; x.textAlign='center'; x.fillText(l.t,c.width/2,l.y); }); t.needsUpdate=true; };
@@ -1177,7 +1177,7 @@ function buildEnergy(em,E){ const P=PLACES.find(q=>q.id==='energie'); const W=E.
   const add=(m,x,y,z,act)=>{ m.position.set(x,y,z); root.add(m); m.castShadow=true; m.receiveShadow=true; if(act){ m.userData.place=P; m.userData.act=act; pickables.push(m);} return m; };
   const genM=new THREE.MeshStandardMaterial({color:0xe4e2dd,roughness:.5,metalness:.35}), finM=new THREE.MeshStandardMaterial({color:0xcfccc6,roughness:.6,metalness:.3}), insM=new THREE.MeshStandardMaterial({color:0xf6f4ef,roughness:.3});
   // deux générateurs : électricité (bleu) et gaz (orange), avec un liseré lumineux
-  [['elec',W+2.0,0x6fd3ff],['gaz',W+5.2,0xffa04a]].forEach(([k,gx,col])=>{
+  [['elec',W+2.0,0x6fd3ff]].forEach(([k,gx,col])=>{
     const body=add(new THREE.Mesh(new THREE.BoxGeometry(2.3,2.0,2.2),genM),gx,1.12,-2.6,'details');
     for(let f=0;f<7;f++) add(new THREE.Mesh(new THREE.BoxGeometry(.05,1.6,.2),finM),gx-1.0+f*.33,1.1,-1.42);
     const ledM=new THREE.MeshBasicMaterial({color:col,toneMapped:false}); const led=add(new THREE.Mesh(new THREE.BoxGeometry(2.32,.07,2.22),ledM),gx,2.05,-2.6); led.castShadow=false;
@@ -1188,25 +1188,50 @@ function buildEnergy(em,E){ const P=PLACES.find(q=>q.id==='energie'); const W=E.
     const arc=new THREE.Line(ag,new THREE.LineBasicMaterial({color:col,transparent:true,blending:THREE.AdditiveBlending,toneMapped:false})); root.add(arc); NRG.arcs.push({arc,ins,col});
     // l'emplacement du chiffre en particules, au-dessus du générateur
     const slot=new THREE.Group(); slot.position.set(gx,4.2,-2.4); root.add(slot); NRG.slots[k]=slot;
-    const lab=labelPlane([{t:k==='elec'?'ÉLECTRICITÉ':'GAZ',s:54,y:66,ls:8},{t:'par mois',s:40,y:120,w:600,c:'rgba(255,255,255,.75)'}],2.4,.62); lab.position.set(0,-.72,0); slot.add(lab); slot.userData.lab=lab;
+    const lab=labelPlane([{t:'ÉLECTRICITÉ',s:54,y:66,ls:8},{t:'par mois',s:40,y:120,w:600,c:'rgba(255,255,255,.75)'}],2.4,.62); lab.position.set(0,-.72,0); slot.add(lab); slot.userData.lab=lab;
+    // plaque du générateur : le montant lisible tout de suite, de jour comme de nuit
+    const pl=labelPlane([{t:'ÉLECTRICITÉ',s:40,y:58,ls:6,c:'#2f343c'},{t:'—',s:84,y:150,c:'#1b86c9'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}],1.5,1.0,{bg:'#fbfaf7',edge:'#1b86c9'});
+    pl.position.set(gx,1.5,-1.29); root.add(pl); pl.userData.place=P; pl.userData.act='details'; pickables.push(pl); NRG.elecPlate=pl;
   });
+  // ----- LE GAZ : une cuve couchée sur ses berceaux, la conduite jaune, le compteur et la flamme bleue -----
+  { const tx=W+5.1, tz=-2.7; const tankM=new THREE.MeshStandardMaterial({color:0xf1efea,roughness:.35,metalness:.2}), yel=new THREE.MeshStandardMaterial({color:0xf2c230,roughness:.45,metalness:.2});
+    const body=add(new THREE.Mesh(new THREE.CylinderGeometry(.82,.82,2.4,32),tankM),tx,1.15,tz,'details'); body.rotation.z=Math.PI/2;
+    for(const sd of [-1,1]){ const cap=add(new THREE.Mesh(new THREE.SphereGeometry(.82,24,16,0,Math.PI*2,0,Math.PI/2),tankM),tx+sd*1.2,1.15,tz,'details'); cap.rotation.z=-sd*Math.PI/2;
+      add(new THREE.Mesh(new THREE.BoxGeometry(.18,.5,1.3),finM),tx+sd*.75,.27,tz); }
+    // conduite jaune : sort de la cuve, longe le sol et rejoint la boutique
+    const path=new THREE.CatmullRomCurve3([V(tx-1.9,1.15,tz),V(tx-2.3,1.15,tz),V(tx-2.4,.25,tz),V(tx-2.4,.25,-.9),V(W+.1,.25,-.9),V(W-.05,.9,-.9)]);
+    add(new THREE.Mesh(new THREE.TubeGeometry(path,60,.07,10,false),yel),0,0,0);
+    // brûleur témoin + flamme bleue
+    add(new THREE.Mesh(new THREE.CylinderGeometry(.09,.12,.7,12),finM),tx+.4,2.3,tz);
+    const fl=new THREE.Group(); fl.position.set(tx+.4,2.68,tz); root.add(fl);
+    const mkF=(r,h,c,o)=>{ const m=new THREE.Mesh(new THREE.ConeGeometry(r,h,20,1,true),new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:o,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,side:THREE.DoubleSide})); m.position.y=h/2; fl.add(m); return m; };
+    NRG.flame={g:fl,parts:[mkF(.2,.75,0x2f6dff,.55),mkF(.12,.5,0x7fc3ff,.7),mkF(.06,.28,0xe8f6ff,.9)]};
+    // plaque de la cuve : le montant du gaz
+    const gp=labelPlane([{t:'GAZ',s:44,y:60,ls:10,c:'#2f343c'},{t:'—',s:84,y:150,c:'#d9661a'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}],1.3,.95,{bg:'#fbfaf7',edge:'#f2c230'});
+    gp.position.set(tx,1.4,tz+.86); gp.rotation.x=-.12; root.add(gp); gp.userData.place=P; gp.userData.act='details'; pickables.push(gp); NRG.gasPlate=gp; }
   // le grillage tout autour de l'enclos
   const gc=document.createElement('canvas'); gc.width=gc.height=64; const gx2=gc.getContext('2d'); gx2.strokeStyle='rgba(205,208,212,1)'; gx2.lineWidth=3; gx2.beginPath(); gx2.moveTo(0,0); gx2.lineTo(64,64); gx2.moveTo(64,0); gx2.lineTo(0,64); gx2.stroke();
   const gt=new THREE.CanvasTexture(gc); gt.wrapS=gt.wrapT=THREE.RepeatWrapping; const fenceM=new THREE.MeshStandardMaterial({map:gt,transparent:true,alphaTest:.3,side:THREE.DoubleSide,roughness:.5,metalness:.5});
-  const fence=(x0,z0,x1,z1)=>{ const L=Math.hypot(x1-x0,z1-z0); const t=gt.clone(); t.needsUpdate=true; t.repeat.set(L/.28,2.1/.28); const m=new THREE.Mesh(new THREE.PlaneGeometry(L,2.1),fenceM.clone()); m.material.map=t; m.position.set((x0+x1)/2,1.17,(z0+z1)/2); m.rotation.y=-Math.atan2(z1-z0,x1-x0); root.add(m);
-    for(let k=0;k<=Math.ceil(L/1.6);k++){ const f=k/Math.ceil(L/1.6); const pm=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,2.3,8),finM); pm.position.set(x0+(x1-x0)*f,1.15,z0+(z1-z0)*f); root.add(pm); } };
-  const xa=W+.5, xb=W+6.7, za=-.5, zb=-D-.1; fence(xa,za,xb,za); fence(xb,za,xb,zb); fence(xa,zb,xb,zb);
+  const fence=(x0,z0,x1,z1,fh=2.1)=>{ const L=Math.hypot(x1-x0,z1-z0); const t=gt.clone(); t.needsUpdate=true; t.repeat.set(L/.28,fh/.28); const m=new THREE.Mesh(new THREE.PlaneGeometry(L,fh),fenceM.clone()); m.material.map=t; m.position.set((x0+x1)/2,.12+fh/2,(z0+z1)/2); m.rotation.y=-Math.atan2(z1-z0,x1-x0); root.add(m);
+    for(let k=0;k<=Math.ceil(L/1.6);k++){ const f=k/Math.ceil(L/1.6); const pm=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,fh+.2,8),finM); pm.position.set(x0+(x1-x0)*f,.12+fh/2,z0+(z1-z0)*f); root.add(pm); } };
+  const xa=W+.5, xb=W+6.7, za=-.5, zb=-D-.1; fence(xa,za,xb,za,.85); fence(xb,za,xb,zb); fence(xa,zb,xb,zb);
   // panneau émaillé accroché au grillage : les nouveaux tarifs
-  const warn=labelPlane([{t:'PLENITUDE',s:40,y:56,ls:6,c:'#2f343c'},{t:'—',s:40,y:120,c:'#c9483a'}],2.4,.8,{bg:'#fbfaf7',edge:'#c9483a'}); warn.position.set((xa+xb)/2,1.25,za+.04); root.add(warn); NRG.warn=warn;
+  const warn=labelPlane([{t:'PLENITUDE',s:40,y:56,ls:6,c:'#2f343c'},{t:'—',s:40,y:120,c:'#c9483a'}],1.55,.62,{bg:'#fbfaf7',edge:'#c9483a',ppu:340}); warn.position.set(W+3.6,.5,za+.04); root.add(warn); NRG.warn=warn;
   warn.userData.place=P; warn.userData.act='details'; pickables.push(warn);
-  P.view=[V(W+3.6,5.2,8.2).applyMatrix4(em),V(W+3.6,2.6,-2.4).applyMatrix4(em)]; P.fov=58; E.view=P.view;
+  P.view=[V(W+3.55,5.0,9.0).applyMatrix4(em),V(W+3.55,2.3,-2.4).applyMatrix4(em)]; P.fov=70; E.view=P.view;
 }
 function updateEnergy(dt){ if(!NRG.root) return; const D=DATA.energie||{}, F=D.facts||[], t=performance.now()/1000;
   const val=(re)=>{ const f=F.find(r=>re.test(r[0])); return f?String(f[1]).replace(/\s*par mois/,''):'—'; };
   const mode=NIGHT?'n':'j'; if(NRG.mode!==mode){ NRG.mode=mode; for(const key in NRG.nums){ NRG.nums[key].pts.geometry.dispose(); NRG.nums[key].g.remove(NRG.nums[key].pts); } NRG.nums={};
-    for(const key in NRG.slots){ const lab=NRG.slots[key].userData.lab, dark=!NIGHT; lab.userData.draw([{t:key==='elec'?'ÉLECTRICITÉ':'GAZ',s:54,y:66,ls:8,c:dark?'#2f343c':'#fff'},{t:'par mois',s:40,y:120,w:600,c:dark?'#6b7079':'rgba(255,255,255,.75)'}]); } }
-  numCloud('elec',val(/électri/i),NIGHT?'#8fe0ff':'#1b86c9',2.6); numCloud('gaz',val(/gaz/i),NIGHT?'#ffb066':'#d9661a',2.6);
-  for(const key in NRG.nums){ const m=NRG.nums[key].pts.material; const b=NIGHT?THREE.AdditiveBlending:THREE.NormalBlending; if(m.blending!==b){ m.blending=b; m.size=NIGHT?2.6/78:2.6/52; m.needsUpdate=true; } }
+    for(const key in NRG.slots){ const lab=NRG.slots[key].userData.lab, dark=!NIGHT; lab.userData.draw([{t:'ÉLECTRICITÉ',s:54,y:66,ls:8,c:dark?'#2f343c':'#fff'},{t:'par mois',s:40,y:120,w:600,c:dark?'#6b7079':'rgba(255,255,255,.75)'}]); } }
+  numCloud('elec',val(/électri/i),NIGHT?'#8fe0ff':'#0f6fae',2.6);
+  const ve=val(/électri/i), vg=val(/gaz/i);
+  if(NRG.elecPlate.userData.v!==ve){ NRG.elecPlate.userData.v=ve; NRG.elecPlate.userData.draw([{t:'ÉLECTRICITÉ',s:40,y:58,ls:6,c:'#2f343c'},{t:ve,s:ve.length>8?70:84,y:150,c:'#1b86c9'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}]); }
+  if(NRG.gasPlate.userData.v!==vg){ NRG.gasPlate.userData.v=vg; NRG.gasPlate.userData.draw([{t:'GAZ',s:44,y:60,ls:10,c:'#2f343c'},{t:vg,s:vg.length>8?66:80,y:150,c:'#d9661a'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}]); }
+  // la flamme : calme quand tout va bien, elle vacille quand il y a une alerte
+  if(NRG.flame){ const alerte=(D.alerts||[]).length>0, w=alerte?.35:.08; NRG.flame.parts.forEach((m,i)=>{ const f=1+Math.sin(t*(7+i*3))*w*.6+(Math.random()-.5)*w; m.scale.set(1+(Math.random()-.5)*w*.4,f,1+(Math.random()-.5)*w*.4); });
+    NRG.flame.g.rotation.z=alerte?Math.sin(t*5)*.12:Math.sin(t*1.3)*.02; }
+  for(const key in NRG.nums){ const m=NRG.nums[key].pts.material; const b=NIGHT?THREE.AdditiveBlending:THREE.NormalBlending; if(m.blending!==b){ m.blending=b; m.size=NIGHT?2.6/78:2.6/46; m.needsUpdate=true; } }
   // coupure chez toi : tout s'éteint doucement
   const off=(DATA.home&&DATA.home.etat==='coupure'); NRG.k+=((off?0:1)-NRG.k)*Math.min(1,dt*1.5); const k=NRG.k;
   for(const key in NRG.nums){ const o=NRG.nums[key], a=o.pts.geometry.attributes.position.array, c=o.pts.geometry.attributes.color.array;
@@ -1220,6 +1245,37 @@ function updateEnergy(dt){ if(!NRG.root) return; const D=DATA.energie||{}, F=D.f
   // le panneau émaillé : l'alerte en cours (nouveaux tarifs…)
   const al=(D.alerts||[])[0]; const txt=al?al.t.replace(/^Plenitude\s*[—-]\s*/i,'').slice(0,30):'Échéancier à jour ✓';
   if(NRG.warn.userData.txt!==txt){ NRG.warn.userData.txt=txt; NRG.warn.userData.draw([{t:'PLENITUDE',s:40,y:56,ls:6,c:'#2f343c'},{t:txt,s:al?34:36,y:122,w:700,c:al?'#c9483a':'#5FAE8C'}]); }
+}
+
+/* ---------- ABONNEMENTS : la boutique Orange, ses vitrines et ses étiquettes de prix ---------- */
+const SHOP={};
+function buildShop(L){ const P=PLACES.find(q=>q.id==='orange'); const root=new THREE.Group(); root.matrixAutoUpdate=false; root.matrix.copy(L.mat); scene.add(root);
+  const add=(m,x,y,z,act=true)=>{ m.position.set(x,y,z); root.add(m); m.castShadow=true; if(act){ m.userData.place=P; m.userData.act='details'; pickables.push(m);} return m; };
+  const white=new THREE.MeshStandardMaterial({color:0xfbfaf7,roughness:.35}), dark=new THREE.MeshStandardMaterial({color:0x2b2f36,roughness:.25,metalness:.4});
+  const xs=[1.6,4.0,6.4], z=-.16, y0=.55;
+  xs.forEach(cx=>add(new THREE.Mesh(new THREE.BoxGeometry(1.2,.22,.32),white),cx,y0+.11,z));        // présentoirs
+  // vitrine 1 : le téléphone (forfait mobile)
+  const scC=document.createElement('canvas'); scC.width=192; scC.height=384; const sx=scC.getContext('2d'); const g=sx.createLinearGradient(0,0,0,384); g.addColorStop(0,'#ff8a3c'); g.addColorStop(1,'#ff5a1f'); sx.fillStyle=g; sx.fillRect(0,0,192,384);
+  sx.fillStyle='#fff'; sx.font="800 72px 'Plus Jakarta Sans',Helvetica,Arial"; sx.textAlign='center'; sx.fillText('5G',96,200); const scT=new THREE.CanvasTexture(scC); scT.colorSpace=THREE.SRGBColorSpace;
+  const ph=add(new THREE.Mesh(new THREE.BoxGeometry(.36,.7,.04),[dark,dark,dark,dark,new THREE.MeshBasicMaterial({map:scT,toneMapped:false}),dark]),xs[0]-.18,y0+.6,z); ph.rotation.x=-.12;
+  // vitrine 2 : la Livebox, ses voyants
+  add(new THREE.Mesh(new THREE.BoxGeometry(.62,.36,.2),white),xs[1]-.2,y0+.4,z);
+  SHOP.leds=[0,1,2].map(k=>add(new THREE.Mesh(new THREE.CircleGeometry(.022,12),new THREE.MeshBasicMaterial({color:0x5FAE8C,toneMapped:false})),xs[1]-.34+k*.08,y0+.45,z+.102,false));
+  // les étiquettes de prix (une par contrat) et le tableau du total
+  SHOP.tags=xs.map((cx,i)=>{ const tg=labelPlane([{t:'—',s:40,y:60}],i===2?1.4:1.15,i===2?1.08:.83,{bg:'#fbfaf7',edge:'#ff7a1f',ppu:i===2?400:400}); tg.position.set(i===2?cx:cx+.22,i===2?y0+.85:y0+.66,z+.12); tg.rotation.z=i===2?0:.08; root.add(tg); tg.userData.place=P; tg.userData.act='details'; pickables.push(tg);
+    if(i<2){ const str=new THREE.Mesh(new THREE.CylinderGeometry(.006,.006,.55,4),dark); str.position.set(cx+.3,y0+1.2,z+.12); root.add(str); } return tg; });
+}
+function updateShop(dt){ if(!SHOP.tags) return; const D=DATA.orange||{}, F=D.facts||[], t=performance.now()/1000;
+  const nom=f=>/livebox|box/i.test(f[0])?'LIVEBOX':/5g|mobile|open/i.test(f[0])?'MOBILE':String(f[0]).split('·')[0].trim().slice(0,12).toUpperCase(), prix=f=>String(f[1]).replace(/\s*par mois/,'');
+  const mob=F.find(f=>/5g|mobile|open/i.test(f[0])&&!/total|factur/i.test(f[0])), box=F.find(f=>/livebox|box/i.test(f[0])), tot=F.find(f=>/total/i.test(f[0])), nf=F.find(f=>/factur/i.test(f[0]));
+  const al=(D.alerts||[])[0];
+  const want=[[mob,'MOBILE 5G'],[box,'LIVEBOX']].map(([f,n])=>f?[{t:n,s:44,y:70,ls:6,c:'#2f343c'},{t:prix(f),s:96,y:178,c:'#ff6a14'},{t:'par mois',s:36,y:236,w:600,c:'#6b7079'}]:[{t:n,s:44,y:90,ls:6,c:'#2f343c'},{t:'—',s:80,y:200,c:'#9aa0a8'}]);
+  want.push([{t:'TOTAL',s:52,y:80,ls:10,c:'#2f343c'},{t:tot?prix(tot):(mob?prix(mob):'—'),s:118,y:210,c:'#ff6a14'},{t:'par mois',s:42,y:272,w:600,c:'#6b7079'},al?{t:al.t.slice(0,26),s:34,y:350,w:700,c:'#c9483a'}:{t:nf?nf[1]:'',s:32,y:350,w:600,c:'#6b7079'}]);
+  want.forEach((L,i)=>{ const key=JSON.stringify(L); if(SHOP.tags[i].userData.k!==key){ SHOP.tags[i].userData.k=key; SHOP.tags[i].userData.draw(L); } });
+  // les voyants de la Livebox : verts, ou rouges s'il reste une facture à payer
+  SHOP.leds.forEach((m,k)=>m.material.color.set(D.urgent?((Math.sin(t*4+k)>0)?0xe5604f:0x5a2a26):0x5FAE8C));
+  // l'étiquette qui se balance doucement
+  SHOP.tags[0].rotation.z=.08+Math.sin(t*1.1)*.03; SHOP.tags[1].rotation.z=-.06+Math.sin(t*1.3+1)*.03;
 }
 function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(id); const wide=H<900; const T0=o.top||0; const z=o.scale||(H>1400?1.55:1);
   x.globalAlpha=A(t,0); x.fillStyle=D.c; x.beginPath(); x.arc(78,74*z+T0,24*z,0,7); x.fill();
@@ -1267,7 +1323,7 @@ function buildOpenings(){
   // ---------- LE BÉBÉ : deux affiches dans les vitrines du cabinet ----------
   const Bb=PL.medecin; if(Bb) [4.6,7.3].forEach((cx,i)=>newPanel('medecin',Bb.mat,{x:cx,y:.55+1.275,z0:-.55,z1:-.06,w:1.85,h:2.4,kind:'slide',d:i*.15,thick:.08,draw:tileReal('medecin',i)}));
   // ---------- ABONNEMENTS : les vitrines deviennent des affiches ----------
-  const Or=PL.orange; if(Or) [1.6,4.0,6.4].forEach((cx,i)=>newPanel('orange',Or.mat,{x:cx,y:.55+.84,z0:-.55,z1:-.06,w:1.55,h:1.66,kind:'slide',d:i*.12,thick:.08,draw:tileReal('orange',i)}));
+  const Or=PL.orange; if(Or){ buildShop(Or); Or.tX=4.0; Or.tY=1.3; Or.camY=1.5; Or.far=9.4; Or.camDX=0; }
   // ---------- GAZ ET ÉLECTRICITÉ : un écran sort du sol devant le poste ----------
   const E=PL.energie; if(E){ const sub=E.sub, em=M(sub.x,0,sub.z,0,-Math.PI/2,0);
     buildEnergy(em,E); }
@@ -1279,6 +1335,7 @@ PLACES.forEach(p=>{ if(MAXD[p.id]) p.maxD=MAXD[p.id]; });
 for(const p of PLACES){ const L=PL[p.id]; if(p.id!=='garage'&&L&&L.mat){ const far=L.far||9.6, tx=L.tX??L.W/2; p.view=[V(tx+(L.camDX??L.W*.08),L.camY||2.3,far).applyMatrix4(L.mat),V(tx,L.tY||Math.min(L.H*.42,6.2),-1).applyMatrix4(L.mat)]; } }
 { const E=PLACES.find(q=>q.id==='energie'); if(PL.energie) E.view=PL.energie.view; }
 { const Hm=PLACES.find(q=>q.id==='home'); if(Hm) Hm.fov=55; }
+{ const Og=PLACES.find(q=>q.id==='orange'); if(Og) Og.fov=78; }
 function updateOpenings(dt){
   for(const id in PANELS){ const want=(SEL&&SEL.id===id&&!anim)?1:0; const k0=openK[id]; openK[id]=cl(k0+(want?1:-1)*dt/2.4); const K=openK[id];
     if(K===k0&&K!==1&&K!==0) continue;
@@ -1306,7 +1363,7 @@ let lastT=performance.now();
 function update3D(){
   const now=performance.now(), dt=Math.min(.05,(now-lastT)/1000); lastT=now; selT+=dt;
   for(const m of flagMats) m.userData.U.uT.value=now/1000;
-  updateObst(dt); updateHome(dt); updateEnergy(dt);
+  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt);
   // mâts : face à la caméra (autour de l'axe vertical), nom qui s'ouvre de près ; trop près, ils se replient
   for(const p of masts){ const M2=p.mast, hp=M2.head.position; M2.spin.rotation.y=Math.atan2(camera.position.x-hp.x,camera.position.z-hp.z);
     const d=camera.position.distanceTo(hp), sel=p===SEL; const want=(sel||d<150)?1:0; M2.open+=(want-M2.open)*Math.min(1,dt*6);
