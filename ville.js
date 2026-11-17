@@ -608,7 +608,8 @@ function energy(x,z){
 }
 const scene_late=[];
 // petits ajouts propres à chaque lieu
-function antenna(W,f,D){ const Hr=f.H+.5, x=W*.62, z=-D/2-1.6, y=Hr+3.2, s=.38, Hm=7.5;
+let ANTP=null;
+function antenna(W,f,D){ const Hr=f.H+.5, x=W*.62, z=-D/2-1.6, y=Hr+3.2, s=.38, Hm=7.5; ANTP={x,y:y+Hm+.2,z};
   box(x-.8,x+.8,y-.2,y+.1,z-.8,z+.8,'metal');
   for(const [dx,dz] of [[-1,-1],[1,-1],[1,1],[-1,1]]) box(x+dx*s-.05,x+dx*s+.05,y,y+Hm,z+dz*s-.05,z+dz*s+.05,'metal');
   for(let k=0;k<7;k++){const yy=y+.5+k*1.0; for(const [a,b2] of [[0,1],[1,0]]){ const L=Math.hypot(2*s,1.0); put(UB,'metal',M(x+(a?s:0)*1-0, yy+.5, z+(b2?s:0), a?Math.atan2(2*s,1.0):0, 0, a?0:Math.atan2(2*s,1.0), .03,L,.03)); put(UB,'metal',M(x-(a?s:0), yy+.5, z-(b2?s:0), a?-Math.atan2(2*s,1.0):0, 0, a?0:-Math.atan2(2*s,1.0), .03,L,.03)); }
@@ -1264,18 +1265,86 @@ function buildShop(L){ const P=PLACES.find(q=>q.id==='orange'); const root=new T
   // les étiquettes de prix (une par contrat) et le tableau du total
   SHOP.tags=xs.map((cx,i)=>{ const tg=labelPlane([{t:'—',s:40,y:60}],i===2?1.4:1.15,i===2?1.08:.83,{bg:'#fbfaf7',edge:'#ff7a1f',ppu:i===2?400:400}); tg.position.set(i===2?cx:cx+.22,i===2?y0+.85:y0+.66,z+.12); tg.rotation.z=i===2?0:.08; root.add(tg); tg.userData.place=P; tg.userData.act='details'; pickables.push(tg);
     if(i<2){ const str=new THREE.Mesh(new THREE.CylinderGeometry(.006,.006,.55,4),dark); str.position.set(cx+.3,y0+1.2,z+.12); root.add(str); } return tg; });
+  shopExtras(L,root,P);
 }
 function updateShop(dt){ if(!SHOP.tags) return; const D=DATA.orange||{}, F=D.facts||[], t=performance.now()/1000;
   const nom=f=>/livebox|box/i.test(f[0])?'LIVEBOX':/5g|mobile|open/i.test(f[0])?'MOBILE':String(f[0]).split('·')[0].trim().slice(0,12).toUpperCase(), prix=f=>String(f[1]).replace(/\s*par mois/,'');
-  const mob=F.find(f=>/5g|mobile|open/i.test(f[0])&&!/total|factur/i.test(f[0])), box=F.find(f=>/livebox|box/i.test(f[0])), tot=F.find(f=>/total/i.test(f[0])), nf=F.find(f=>/factur/i.test(f[0]));
+  const CT=F.filter(f=>!/total|factur|engagement/i.test(f[0])).slice(0,2), mob=CT[0], box=CT[1], tot=F.find(f=>/total/i.test(f[0])), nf=F.find(f=>/factur/i.test(f[0]));
+  const ville=f=>{ const v=f&&String(f[0]).split('·')[1]; return v?v.trim().normalize('NFC').replace(/^Venissieux$/i,'Vénissieux').toUpperCase():'CONTRAT'; };
   const al=(D.alerts||[])[0];
-  const want=[[mob,'MOBILE 5G'],[box,'LIVEBOX']].map(([f,n])=>f?[{t:n,s:44,y:70,ls:6,c:'#2f343c'},{t:prix(f),s:96,y:178,c:'#ff6a14'},{t:'par mois',s:36,y:236,w:600,c:'#6b7079'}]:[{t:n,s:44,y:90,ls:6,c:'#2f343c'},{t:'—',s:80,y:200,c:'#9aa0a8'}]);
+  const want=[[mob,ville(mob)],[box,ville(box)]].map(([f,n])=>f?[{t:n,s:n.length>10?36:44,y:70,ls:4,c:'#2f343c'},{t:prix(f),s:96,y:178,c:'#ff6a14'},{t:'par mois',s:36,y:236,w:600,c:'#6b7079'}]:[{t:n,s:44,y:90,ls:6,c:'#2f343c'},{t:'—',s:80,y:200,c:'#9aa0a8'}]);
   want.push([{t:'TOTAL',s:52,y:80,ls:10,c:'#2f343c'},{t:tot?prix(tot):(mob?prix(mob):'—'),s:118,y:210,c:'#ff6a14'},{t:'par mois',s:42,y:272,w:600,c:'#6b7079'},al?{t:al.t.slice(0,26),s:34,y:350,w:700,c:'#c9483a'}:{t:nf?nf[1]:'',s:32,y:350,w:600,c:'#6b7079'}]);
   want.forEach((L,i)=>{ const key=JSON.stringify(L); if(SHOP.tags[i].userData.k!==key){ SHOP.tags[i].userData.k=key; SHOP.tags[i].userData.draw(L); } });
   // les voyants de la Livebox : verts, ou rouges s'il reste une facture à payer
   SHOP.leds.forEach((m,k)=>m.material.color.set(D.urgent?((Math.sin(t*4+k)>0)?0xe5604f:0x5a2a26):0x5FAE8C));
   // l'étiquette qui se balance doucement
   SHOP.tags[0].rotation.z=.08+Math.sin(t*1.1)*.03; SHOP.tags[1].rotation.z=-.06+Math.sin(t*1.3+1)*.03;
+  // ondes de l'antenne
+  if(SHOP.waves){ const col=D.urgent?0xe5604f:D.hf?0xff8a1f:0x5FAE8C; SHOP.waves.forEach((m,i)=>{ const f=((t*.35)+i/4)%1; const r=.6+f*7; m.scale.set(r,r,r); m.material.color.set(col); m.material.opacity=(1-f)*.85; }); }
+  // fibre : compte à rebours jusqu'à la prochaine facture
+  if(SHOP.fib){ const F2=SHOP.fib, L=F2.x1-F2.x0; let k=.5, jours=null;
+    if(D.nextBill&&D.lastBill){ k=Math.min(1,Math.max(0,(Date.now()-D.lastBill)/(D.nextBill-D.lastBill))); jours=Math.max(0,Math.ceil((D.nextBill-Date.now())/864e5)); }
+    const len=Math.max(.02,L*k); F2.lit.scale.y=len; F2.lit.position.set(F2.x0+len/2,F2.y,F2.z); F2.tip.position.set(F2.x0+len,F2.y,F2.z); F2.tip.scale.setScalar(1+.25*Math.sin(t*4));
+    const pf=(t*.5)%1; F2.pulse.position.set(F2.x0+len*pf,F2.y,F2.z); F2.pulse.visible=len>.3;
+    const lt=jours==null?'Prochaine facture : —':jours===0?"Facture aujourd'hui":'Facture dans '+jours+' j';
+    if(F2.lab.userData.k!==lt){ F2.lab.userData.k=lt; F2.lab.userData.draw([{t:lt,s:46,y:82,w:800,c:jours!=null&&jours<=3?'#c9483a':'#2f343c'}]); } }
+}
+
+/* ---------- ORANGE : l'antenne qui envoie des ondes de couleur, la fibre qui compte les jours ---------- */
+function shopExtras(L,root,P){
+  // ondes : vertes si tout va bien, orange s'il y a du hors forfait, rouges s'il reste une facture à payer
+  if(ANTP){ SHOP.waves=[]; for(let i=0;i<4;i++){ const m=new THREE.Mesh(new THREE.TorusGeometry(1,.035,6,48),new THREE.MeshBasicMaterial({color:0x5FAE8C,transparent:true,opacity:0,depthWrite:false,toneMapped:false}));
+    m.rotation.x=Math.PI/2; m.position.set(ANTP.x,ANTP.y,ANTP.z); root.add(m); SHOP.waves.push(m); } }
+  // la fibre : un câble le long du soubassement ; la lumière avance vers la porte à mesure que la facture approche
+  const x0=.6, x1=5.9, y=.34, z=.2, Lc=x1-x0;
+  const cab=new THREE.Mesh(new THREE.CylinderGeometry(.035,.035,Lc,10),new THREE.MeshStandardMaterial({color:0xd8d4cc,roughness:.5})); cab.rotation.z=Math.PI/2; cab.position.set((x0+x1)/2,y,z); root.add(cab);
+  const litM=new THREE.MeshBasicMaterial({color:0xff7a1f,toneMapped:false}); const lit=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,1,10),litM); lit.rotation.z=Math.PI/2; root.add(lit);
+  const tip=new THREE.Mesh(new THREE.SphereGeometry(.08,14,10),new THREE.MeshBasicMaterial({color:0xffd2a8,toneMapped:false})); root.add(tip);
+  const pulse=new THREE.Mesh(new THREE.SphereGeometry(.05,10,8),new THREE.MeshBasicMaterial({color:0xffffff,toneMapped:false})); root.add(pulse);
+  const lab=labelPlane([{t:'—',s:40,y:60}],1.3,.38,{bg:'#fbfaf7',edge:'#ff7a1f',ppu:320}); lab.position.set(x1+.72,.36,z+.02); root.add(lab); lab.userData.place=P; lab.userData.act='details'; pickables.push(lab);
+  SHOP.fib={x0,x1,y,z,lit,tip,pulse,lab};
+}
+/* ---------- TON TRAVAIL : la pointeuse, le panneau sécurité et la cheminée du four ---------- */
+const USN={};
+function dateFr(t){ const m=String(t).match(/(\d{1,2})(?:er)?\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)/i); if(!m) return null;
+  const MO=['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre']; const k=MO.indexOf(m[2].toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')); if(k<0) return null;
+  const now=new Date(); let d=new Date(now.getFullYear(),k,+m[1]); if(d<new Date(now.getFullYear(),now.getMonth(),now.getDate())-200*864e5) d=new Date(now.getFullYear()+1,k,+m[1]); return d; }
+function buildUsine(U){ const P=PLACES.find(q=>q.id==='usine'); const root=new THREE.Group(); root.matrixAutoUpdate=false; root.matrix.copy(U.mat); scene.add(root); USN.root=root;
+  const cx=U.W/2, gz=4.2; const grey=new THREE.MeshStandardMaterial({color:0x8b9097,roughness:.45,metalness:.5}), white=new THREE.MeshStandardMaterial({color:0xf3f1ec,roughness:.5});
+  const pick=m=>{ m.userData.place=P; m.userData.act='details'; pickables.push(m); return m; };
+  // la pointeuse, à gauche du portail
+  const px=cx-3.4, pz=gz+.75; const pole=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1.2,10),grey); pole.position.set(px,.6,pz); root.add(pole);
+  const bd=pick(new THREE.Mesh(new THREE.BoxGeometry(.78,.98,.22),grey)); bd.position.set(px,1.62,pz); bd.castShadow=true; root.add(bd);
+  USN.screen=labelPlane([{t:'—',s:30,y:40}],.66,.8,{bg:'#10141a',ppu:420}); USN.screen.position.set(px,1.64,pz+.112); root.add(pick(USN.screen));
+  // le panneau sécurité, à droite du portail (façon « jours sans accident »)
+  const bx=cx-5.95, bz=gz+.3; for(const dx of [-1.15,1.15]){ const pp=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,2.7,10),grey); pp.position.set(bx+dx,1.35,bz-.03); root.add(pp); }
+  USN.board=labelPlane([{t:'—',s:30,y:40}],2.5,1.55,{bg:'#fbfaf7',edge:'#2f8a57',ppu:300}); USN.board.position.set(bx,1.85,bz); root.add(pick(USN.board));
+  // fumée de la cheminée du four (en poste) et sommet qui rougeoie la nuit
+  const chx=U.W*.78, chz=-U.D-5, top=3.3+33.1; USN.smoke=[]; const smM=()=>new THREE.SpriteMaterial({map:DOT,color:0xeeebe6,transparent:true,opacity:0,depthWrite:false});
+  for(let i=0;i<18;i++){ const sp=new THREE.Sprite(smM()); sp.userData.ph=i/18; root.add(sp); USN.smoke.push(sp); } USN.top=V(chx,top,chz);
+  USN.glow=new THREE.Mesh(new THREE.TorusGeometry(.98,.12,8,40),new THREE.MeshBasicMaterial({color:0xff6a2a,transparent:true,opacity:0,toneMapped:false})); USN.glow.rotation.x=Math.PI/2; USN.glow.position.copy(USN.top); root.add(USN.glow);
+  USN.k=0;
+}
+function updateUsine(dt){ if(!USN.root) return; const D=DATA.usine||{}, t=performance.now()/1000;
+  const on=!!D.enPoste; USN.k+=((on?1:0)-USN.k)*Math.min(1,dt*.8);
+  USN.smoke.forEach(sp=>{ const f=(sp.userData.ph+t*.06)%1; sp.position.set(USN.top.x+f*5+Math.sin(t*.5+sp.userData.ph*9)*.6,USN.top.y+.4+f*11,USN.top.z+f*2); const sc=1.6+f*6; sp.scale.set(sc,sc,1); sp.material.opacity=USN.k*.55*(1-f)*Math.min(1,f*6); });
+  USN.glow.material.opacity=USN.k*(NIGHT?.9:.25)*(.8+.2*Math.sin(t*3));
+  // la pointeuse
+  const st=on?'EN POSTE':'REPOS', key=[D.aujTxt,D.demTxt,st].join('|');
+  if(USN.screen.userData.k!==key){ USN.screen.userData.k=key; const sp=s2=>String(s2||'—').split(' · ');
+    const a=sp(D.aujTxt), d2=sp(D.demTxt);
+    USN.screen.userData.draw([{t:'POINTEUSE',s:26,y:42,ls:6,c:'#7f8a96'},{t:'● '+st,s:30,y:86,w:800,c:on?'#5fe0a0':'#9aa3ad'},
+      {t:"AUJOURD'HUI",s:24,y:140,ls:4,c:'#7f8a96'},{t:a[0],s:44,y:186,c:'#ffffff'},{t:a[1]||'',s:30,y:222,w:600,c:'#cfd6dd'},
+      {t:'DEMAIN',s:24,y:268,ls:4,c:'#7f8a96'},{t:d2[0],s:38,y:308,c:'#ffffff'},{t:d2.slice(1).join(' · '),s:26,y:338,w:600,c:'#cfd6dd'}]); }
+  // le panneau sécurité : un compteur de jours par convocation
+  const now=new Date(); now.setHours(0,0,0,0);
+  const conv=(D.alerts||[]).map(a=>({t:a.t,d:dateFr(a.t)})).filter(c=>c.d&&c.d>=now).sort((a,b)=>a.d-b.d).slice(0,3);
+  const bk=JSON.stringify(conv.map(c=>c.t));
+  if(USN.board.userData.k!==bk){ USN.board.userData.k=bk; const c=USN.board.userData; const L=[{t:'SÉCURITÉ · TES RENDEZ-VOUS',s:40,y:70,ls:5,c:'#2f8a57'}];
+    if(!conv.length) L.push({t:'Aucune convocation à venir ✓',s:44,y:240,c:'#2f8a57'});
+    conv.forEach((cv,i)=>{ const j=Math.round((cv.d-now)/864e5), nm=cv.t.replace(/\s*[—-]\s*.*$/,'').replace(/\s+le\s+\d.*$/,'').replace(/\s+du travail$/i,'').slice(0,24);
+      L.push({t:(j===0?"AUJOURD'HUI":j===1?'DEMAIN':'J−'+j)+'  ·  '+nm,s:44,y:180+i*112,w:800,c:j<=3?'#c9483a':'#2f343c'}); });
+    c.draw(L); }
 }
 function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(id); const wide=H<900; const T0=o.top||0; const z=o.scale||(H>1400?1.55:1);
   x.globalAlpha=A(t,0); x.fillStyle=D.c; x.beginPath(); x.arc(78,74*z+T0,24*z,0,7); x.fill();
@@ -1312,8 +1381,7 @@ function buildOpenings(){
     newPanel('garage',gm,{x:wx,y:.98,zb:-2.7,ry:Math.PI/2,z0:-.08,z1:.12,w:2.3,h:1.6,kind:'slide',d:0,frame:false,thick:.12,maxD:2.6,glow:.55,draw:boardReal('garage')}); }
   // ---------- TON TRAVAIL : les portes roulantes montent, le planning est derrière ----------
   const U=PL.usine; if(U&&FDOOR.length===2){ const [d1,d2]=FDOOR;
-    newPanel('usine',U.mat,{x:d1.cx,y:2.6,z1:-.395,w:2.75,h:5.0,kind:'static',d:0,draw:boardReal('usine',{part:0,title:'Planning',maxFacts:9,top:90,scale:2.05})});
-    newPanel('usine',U.mat,{x:d2.cx,y:2.6,z1:-.395,w:2.75,h:5.0,kind:'static',d:0,draw:boardReal('usine',{part:1,title:'À savoir',sub:'',maxAlerts:4,sayLines:12,top:90,scale:2.05})}); }
+    buildUsine(U); U.tX=U.W/2-5.05; U.tY=1.65; U.camY=2.2; U.far=4.2+12.2; U.camDX=0; }
   // ---------- IMPÔTS : l'avis sort de la façade entre les drapeaux ----------
   const I=PL.impots; if(I) newPanel('impots',I.mat,{x:I.W/2,y:6.75,z0:-.5,z1:.42,w:5.0,h:3.0,kind:'slide',d:0,frame:true,thick:.22,draw:boardReal('impots')});
   // ---------- TA SANTÉ ----------
@@ -1336,6 +1404,7 @@ for(const p of PLACES){ const L=PL[p.id]; if(p.id!=='garage'&&L&&L.mat){ const f
 { const E=PLACES.find(q=>q.id==='energie'); if(PL.energie) E.view=PL.energie.view; }
 { const Hm=PLACES.find(q=>q.id==='home'); if(Hm) Hm.fov=55; }
 { const Og=PLACES.find(q=>q.id==='orange'); if(Og) Og.fov=78; }
+{ const Us=PLACES.find(q=>q.id==='usine'); if(Us) Us.fov=55; }
 function updateOpenings(dt){
   for(const id in PANELS){ const want=(SEL&&SEL.id===id&&!anim)?1:0; const k0=openK[id]; openK[id]=cl(k0+(want?1:-1)*dt/2.4); const K=openK[id];
     if(K===k0&&K!==1&&K!==0) continue;
@@ -1363,7 +1432,7 @@ let lastT=performance.now();
 function update3D(){
   const now=performance.now(), dt=Math.min(.05,(now-lastT)/1000); lastT=now; selT+=dt;
   for(const m of flagMats) m.userData.U.uT.value=now/1000;
-  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt);
+  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt); updateUsine(dt);
   // mâts : face à la caméra (autour de l'axe vertical), nom qui s'ouvre de près ; trop près, ils se replient
   for(const p of masts){ const M2=p.mast, hp=M2.head.position; M2.spin.rotation.y=Math.atan2(camera.position.x-hp.x,camera.position.z-hp.z);
     const d=camera.position.distanceTo(hp), sel=p===SEL; const want=(sel||d<150)?1:0; M2.open+=(want-M2.open)*Math.min(1,dt*6);

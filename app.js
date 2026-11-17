@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=gaz1";
+import { creerVille } from "./ville.js?v=usine1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -106,7 +106,7 @@ function etatMaison(p) { const now = new Date(), c = coupureDe(p); let etat = p.
 function refreshPins() {
   V.setDonnees(PLACES.map(p => ({ id: p.id, n: p.name, c: p.color, place: p.place, status: p.status, say: p.say, facts: p.facts || [],
     alerts: (p.docs || []).filter(d => d.alerteId).map(d => ({ t: d.t.replace(/^⚠︎\s*/, ""), d: d.d })),
-    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}) })));
+    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}), ...(p.id === "usine" ? { enPoste: !!p.enPoste, aujTxt: p.aujTxt || "", demTxt: p.demTxt || "" } : {}), ...(p.id === "orange" ? { hf: !!p.hf, nextBill: p.nextBill || null, lastBill: p.lastBill || null } : {}) })));
 }
 
 /* =========================================================
@@ -414,6 +414,10 @@ function applyPlanning(rows) {
   p.say = say + (mc.say ? " " + mc.say : "");
   p.facts = [...facts, ...mc.facts]; cacheArgent(p);
   p.live = "En direct · Mon Planning le " + quand(r.updated_at);
+  { const plages = t => [...String(t || "").matchAll(/(\d{1,2})h\s*[-–]\s*(\d{1,2})h/g)].map(m => [+m[1], +m[2]]);
+    const h = +new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", hour12: false }).slice(0, 2), hier = J[parisDay(-1)];
+    p.enPoste = plages(ditJ(auj)).some(([a, b]) => b > a ? h >= a && h < b : h >= a) || plages(hier && ditJ(hier)).some(([a, b]) => b < a && h < b);
+    p.aujTxt = ditJ(auj); p.demTxt = ditJ(dem); }
   S.planningTxt = fut.slice(0, 21).map(o => `${jour(o.d)} : ${lc(ditJ(o))}`).join("\n");
 }
 /* ---------- Orange (robot Scriptable « Jarvis Orange ») ---------- */
@@ -450,6 +454,12 @@ function applyOrange(rows, apis) {
   const impaye = fac.filter(r => Number(r.data && r.data.reste) > 0);
   if (impaye.length) { o.urgent = true; say = `Il reste ${eur(impaye.reduce((t, r) => t + Number(r.data.reste), 0))} à payer chez Orange. ` + say; }
   o.say = say.trim() || "Orange relu.";
+  o.hf = C.some(c => c.hf && c.hf.displayHF);
+  { const now = parisDay(); let nb = null, last = null;
+    C.forEach(c => { const d = c.f[0] && c.f[0].date; if (!d) return; const x = new Date(d + "T12:00:00"); const nx = new Date(x); nx.setMonth(nx.getMonth() + 1);
+      while (nx.toISOString().slice(0, 10) <= now) nx.setMonth(nx.getMonth() + 1); const pv = new Date(nx); pv.setMonth(pv.getMonth() - 1);
+      if (!nb || nx < nb) { nb = nx; last = pv; } });
+    o.nextBill = nb ? nb.getTime() : null; o.lastBill = last ? last.getTime() : null; }
   o.facts = C.map(c => [c.court, c.prix != null ? eur(c.prix) + " par mois" : "—"]);
   if (C.length > 1 && total) o.facts.push(["Total des offres", eur(total) + " par mois"]);
   if (C.length === 1 && C[0].engagement) o.facts.push(["Engagement", C[0].engagement.replace(/^Vous n’êtes plus engagé$/, "Plus engagé")]);
