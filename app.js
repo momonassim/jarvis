@@ -99,6 +99,7 @@ function select(p) {
   const bar = $("lieubar"); bar.style.setProperty("--c", p.color);
   icone($("lbIc"), p); $("lbName").textContent = p.name; $("lbSub").textContent = p.status || p.place || "";
   $("lbDot").hidden = !p.urgent;
+  const nd = (p.docs || []).length; $("lbGo").textContent = nd ? (innerWidth < 420 ? "Papiers ›" : `Papiers · ${nd} ›`) : "Actions ›";
   bar.classList.add("on"); $("ask").classList.add("away");
 }
 function openDetails() {
@@ -115,11 +116,8 @@ $("lbNext").addEventListener("click", () => pas(1));
 $("lbMore").addEventListener("click", openDetails);
 $("lbClose").addEventListener("click", () => { deselect(); });
 function renderSheet(p) {
-  $("pSay").textContent = p.say;
-  const f = $("pFacts"); f.innerHTML = "";
-  p.facts.forEach(([a, b]) => { const d = document.createElement("div"); d.className = "fact"; const x = document.createElement("b"); x.textContent = a; const y = document.createElement("span"); y.textContent = b; d.append(x, y); f.append(d); });
   const box = $("pDocs"); box.innerHTML = ""; const docs = p.docs || [];
-  const dh = document.createElement("div"); dh.className = "dh"; dh.innerHTML = "<b>Rangés ici</b><span></span>";
+  const dh = document.createElement("div"); dh.className = "dh"; dh.innerHTML = "<b>Papiers rangés</b><span></span>";
   dh.querySelector("span").textContent = docs.length ? docs.length + (docs.length > 1 ? " papiers" : " papier") : ""; box.append(dh);
   if (!docs.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Rien pour l’instant"; box.append(e); }
   docs.forEach(d => { const b = document.createElement("button"); b.className = "doc" + (d.future ? " soon" : "");
@@ -128,19 +126,21 @@ function renderSheet(p) {
     b.addEventListener("click", () => openDoc(p, d)); box.append(b); });
   $("pNote").textContent = p.live || "";
   $("card").scrollTop = 0;
+  $("card").style.setProperty("--c", p.color);
   const acts = $("pActs"); acts.innerHTML = "";
   const mk = (t, c, fn) => { const b = document.createElement("button"); b.className = "btn " + c; b.textContent = t; b.addEventListener("click", fn); acts.append(b); return b; };
   if (p.id === "clinique") {
     mk("Prendre rendez-vous", "main", () => openBook());
     const u = mk("Mettre à jour", "soft", async () => { u.disabled = true; u.textContent = "Je regarde…"; await medin({ action: "sync" }, true); u.disabled = false; u.textContent = "Mettre à jour"; });
-  } else mk("Demander à Jarvis", "main", () => openTalk(p));
+  } else mk("Demander à Jarvis", "soft wide", () => openTalk(p));
 }
 function deselect() { if (!S.sel) return; S.sel = null; sheet.classList.remove("open"); $("lieubar").classList.remove("on"); $("ask").classList.remove("away"); viewShiftGoal = 0; V.fermer(); }
 $("pClose").addEventListener("click", closeDetails);
 $("home").addEventListener("click", () => { deselect(); closeTalk(); closeBook(); closeSettings(); overview(); });
 function swipeClose(el, fn) { let y0 = null;
-  el.addEventListener("pointerdown", e => { if (e.target.closest("button,input,a,.msgs,.chips,.slots")) return; y0 = e.clientY; });
-  el.addEventListener("pointerup", e => { if (y0 !== null && e.clientY - y0 > 50 && !el.scrollTop) fn(); y0 = null; });
+  // on ne ferme qu'en tirant la poignée ou l'en-tête vers le bas : le reste de la fenêtre défile librement
+  el.addEventListener("pointerdown", e => { if (!e.target.closest(".grab,.head") || e.target.closest("button,input,a")) return; y0 = e.clientY; });
+  el.addEventListener("pointerup", e => { if (y0 !== null && e.clientY - y0 > 50) fn(); y0 = null; });
   el.addEventListener("pointercancel", () => y0 = null); }
 swipeClose($("card"), closeDetails);
 
@@ -580,6 +580,7 @@ const CENTRES = { "1": "Villeurbanne", "2": "Lyon 6 Brotteaux" };
 function openBook() {
   if (S.sel) { S.sel = null; sheet.classList.remove("open"); }
   closeTalk(true); closeSettings(true);
+  icone($("bIc"), byId.clinique); $("bIc").style.setProperty("--c", byId.clinique.color);
   bookOpen = true; viewShiftGoal = 1; $("book").classList.add("open"); $("ask").classList.add("away");
   Object.keys(B).forEach(k => delete B[k]); stepWho();
 }

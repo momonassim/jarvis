@@ -1,5 +1,5 @@
 :root{
-  --ink:#231c17; --ink2:#6e635a; --card:rgba(255,251,246,.94); --line:rgba(35,28,23,.08);
+  --ink:#2f343c; --ink2:#7a7f88; --card:rgba(247,243,236,.95); --line:rgba(47,52,60,.12); --paper:#fbf9f5; --soft:rgba(47,52,60,.05); --shadow:0 12px 34px -14px rgba(30,40,55,.38);
   --red:#e0452f; --green:#1f9d63;
   --sans:"Plus Jakarta Sans",-apple-system,"SF Pro Text","Segoe UI",Roboto,Arial,sans-serif;
   --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
@@ -208,6 +208,78 @@ p.empty{margin:0}
 .lbtx small{font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lbgo{flex:none;font-size:12.5px;font-weight:700;color:var(--ink2);padding:8px 10px;border-radius:999px;background:rgba(47,52,60,.06)}
 .lbdot{position:absolute;left:30px;top:2px;width:10px;height:10px;border-radius:50%;background:var(--red);border:2px solid #fff}
-@media (max-width:420px){ .lbgo{display:none} }
+@media (max-width:420px){ .lbgo{padding:7px 9px;font-size:12px} .lbtx small{display:none} }
 .svgic svg{width:58%;height:58%;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .alertItem .aic.svgic{background:var(--c)}
+
+/* =========================================================
+   Habillage unique « maquette » (remplace l'ancien style)
+   ========================================================= */
+.brief,.round,.ask,.lieubar{border-radius:18px;box-shadow:var(--shadow)}
+.round{border-radius:50%}
+.brief small{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+.brief strong{font-size:16px}
+.orb{background:radial-gradient(circle at 38% 32%,#fffaf0 0%,#ffe2b8 50%,#f3b56f 100%);box-shadow:0 0 14px -2px rgba(243,181,111,.65)}
+.orb.huge{box-shadow:0 0 40px 0 rgba(243,181,111,.5)}
+.ask{border-radius:999px;font-size:15px}
+
+/* fenêtres : cartes flottantes qui se posent, plus de dalle qui monte du bas */
+.sheet{left:12px;right:12px;bottom:calc(12px + var(--safe-b));transform:translateY(16px) scale(.98);opacity:0;visibility:hidden;
+  transition:transform .38s cubic-bezier(.2,.8,.2,1),opacity .28s,visibility 0s linear .38s}
+.sheet.open{transform:none;opacity:1;visibility:visible;transition:transform .38s cubic-bezier(.2,.8,.2,1),opacity .28s,visibility 0s}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:6px 16px 16px;box-shadow:var(--shadow);touch-action:auto}
+.card.scroll{max-height:min(70vh,640px);overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.grab{width:34px;height:4px;background:rgba(47,52,60,.16);margin:6px auto 10px;cursor:grab}
+.head{gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.head .ic{width:38px;height:38px;border-radius:50%;font-size:19px}
+.head .nm small{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.head .nm b{font-size:15px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.x{width:36px;height:36px;font-size:14px;background:var(--soft);color:var(--ink)}
+.btn{min-height:46px;border-radius:14px;font-size:15px}
+.btn.main{background:var(--c,var(--ink));color:#fff}
+.btn.soft{background:var(--soft)}
+.acts{margin-top:12px}
+.acts:empty{display:none}
+.note{font-size:11.5px;letter-spacing:.02em}
+
+/* papiers */
+.dh{margin:14px 0 8px}
+.dh b{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--ink2)}
+.dh span{font-size:12px}
+.doc{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.doc .pg{width:28px;height:36px;border-radius:4px;box-shadow:0 0 0 1px var(--line)}
+.doc .dt b{font-size:14.5px}
+.doc .dt span{font-size:12.5px}
+.doc.soon{background:color-mix(in srgb,#5FAE8C 10%,var(--paper))}
+.empty{background:var(--paper);border:1px dashed var(--line);border-radius:14px;font-size:13.5px}
+
+/* un papier, les alertes */
+.paperwrap{background:rgba(30,40,55,.22)}
+.paper{background:var(--paper);border:1px solid var(--line);border-radius:22px;box-shadow:0 30px 60px -24px rgba(30,40,55,.5)}
+.paper::before{height:4px}
+.paper small{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.paper h3{font-size:19px}
+.paper .row{border-top:1px solid var(--line)}
+.paper .where{background:var(--soft)}
+.alertItem{border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);background:var(--paper)}
+
+/* Jarvis : la conversation */
+.m.me{background:var(--ink)}
+.m.j{background:var(--soft)}
+.chip,.compose input,.mic,.opt,.slot,.set{border-color:var(--line)}
+.chip{background:var(--paper);font-size:13.5px}
+.compose input{background:var(--paper)}
+.send{background:var(--ink)}
+.opt,.slot,.set{background:var(--paper);border-radius:14px}
+.opt b{font-size:16px}
+.recap{background:var(--paper)}
+.toast{background:var(--ink);border-radius:14px}
+.gcard{border-radius:22px;background:var(--card)}
+.gcard input{background:var(--paper);border-radius:14px}
+
+/* barre du lieu */
+.lbgo{background:var(--soft);color:var(--ink)}
+.lbgo:empty{display:none}
+
+/* nuit */
+.night .card,.night .brief,.night .round,.night .ask,.night .lieubar{box-shadow:0 12px 34px -12px rgba(0,0,0,.6)}

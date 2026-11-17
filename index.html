@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=maquette1">
+<link rel="stylesheet" href="style.css?v=etape1">
 </head>
 <body>
 <canvas id="c" aria-label="Ta ville. Un doigt pour tourner, deux doigts pour zoomer et te déplacer, touche un lieu pour l’ouvrir."></canvas>
@@ -34,7 +34,7 @@
 
 <div class="lieubar" id="lieubar" role="toolbar" aria-label="Lieu ouvert">
   <button class="lbn" id="lbPrev" aria-label="Lieu précédent">‹</button>
-  <button class="lbmid" id="lbMore" aria-label="Voir le détail et les papiers"><span class="lbic" id="lbIc"></span><span class="lbtx"><b id="lbName"></b><small id="lbSub"></small></span><i class="lbdot" id="lbDot" hidden></i><span class="lbgo">Détails ›</span></button>
+  <button class="lbmid" id="lbMore" aria-label="Voir les papiers et les actions"><span class="lbic" id="lbIc"></span><span class="lbtx"><b id="lbName"></b><small id="lbSub"></small></span><i class="lbdot" id="lbDot" hidden></i><span class="lbgo" id="lbGo"></span></button>
   <button class="lbn" id="lbNext" aria-label="Lieu suivant">›</button>
   <button class="lbn x" id="lbClose" aria-label="Revenir à la ville">✕</button>
 </div>
@@ -43,8 +43,6 @@
   <div class="card scroll" id="card">
     <div class="grab"></div>
     <div class="head"><div class="ic" id="pIc"></div><div class="nm"><small id="pPlace"></small><b id="pName"></b></div><button class="x" id="pClose" aria-label="Fermer">✕</button></div>
-    <p class="say" id="pSay"></p>
-    <div class="facts" id="pFacts"></div>
     <div class="acts" id="pActs"></div>
     <div id="pDocs"></div>
     <p class="note" id="pNote"></p>
@@ -66,7 +64,7 @@
 <div class="sheet book" id="book" role="dialog" aria-labelledby="bQ">
   <div class="card scroll">
     <div class="grab"></div>
-    <div class="head"><div class="ic" style="--c:#ffd0cb">🩺</div>
+    <div class="head"><div class="ic" id="bIc"></div>
       <div class="nm"><small id="bSub"></small><b id="bQ">Pour qui ?</b></div><button class="x" id="bClose" aria-label="Fermer">✕</button></div>
     <div class="bbody" id="bBody"></div>
   </div>
@@ -117,6 +115,6 @@
   "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.45.4"
 }}
 </script>
-<script type="module" src="app.js?v=rdv1"></script>
+<script type="module" src="app.js?v=etape1"></script>
 </body>
 </html>
