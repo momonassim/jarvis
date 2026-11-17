@@ -1101,6 +1101,28 @@ function docReal(id,i){ return (x,t,c)=>{ const H=begin(x,c); const T=tilesFor(i
   x.globalAlpha=A(t,.5); const lab=k.label.toUpperCase(); const fl=fitFont(x,lab,860,54,700,26); txt(x,lab,500,1170,fl,700,PAL.ink,'center',3);
   const v=(k.big+(k.sub?' · '+k.sub:'')); x.textAlign='center'; x.font=`600 46px ${FNT}`; x.fillStyle=k.alert?RED:'#5FAE8C'; wrapLines(x,v,860,46,600,3).forEach((l,j)=>x.fillText(l,500,1245+j*56)); x.textAlign='left'; x.globalAlpha=1; }; }
 // tableau complet (murs, avis encadrés, écrans)
+
+// gravure façon néomorphisme : même pierre que le mur, lettres en relief doux (lumière en haut à gauche)
+function engrave(id){ return (x,t,c)=>{ const S=c.width/1000; x.setTransform(S,0,0,S,0,0); x.globalAlpha=1; x.setLineDash([]); const H=c.height/S; const D=dOf(id);
+  const stone='#e9e4dc', hi='rgba(255,255,255,1)', lo='rgba(92,78,62,.42)';
+  // pierre lisse avec un léger grain
+  x.fillStyle=stone; x.fillRect(0,0,1000,H); x.globalAlpha=.05; for(let i=0;i<500;i++){ x.fillStyle=i%2?'#fff':'#6b5d4c'; x.fillRect((i*137)%1000,(i*251)%H,3,3); } x.globalAlpha=1;
+  const relief=(draw,d,a)=>{ if(a<=0) return; x.save(); x.globalAlpha=a;
+    x.shadowColor=lo; x.shadowOffsetX=d; x.shadowOffsetY=d; x.shadowBlur=d; draw(stone);
+    x.shadowColor=hi; x.shadowOffsetX=-d; x.shadowOffsetY=-d; x.shadowBlur=d; draw(stone);
+    x.shadowColor='transparent'; draw(stone); x.restore(); };
+  const T=(s2,px,py,size,w,al='left',ls=0,col)=>(c0)=>{ x.font=`${w} ${size}px ${FNT}`; try{x.letterSpacing=ls+'px';}catch(e){} x.textAlign=al; x.fillStyle=col||c0; x.fillText(s2,px,py); x.textAlign='left'; try{x.letterSpacing='0px';}catch(e){} };
+  // cadre en creux
+  const k=A(t,0,.4); x.save(); x.globalAlpha=k; x.lineWidth=14; x.strokeStyle=stone; x.shadowColor=lo; x.shadowOffsetX=-4; x.shadowOffsetY=-4; x.shadowBlur=8; x.beginPath(); x.roundRect(36,36,928,H-72,46); x.stroke();
+  x.shadowColor=hi; x.shadowOffsetX=4; x.shadowOffsetY=4; x.stroke(); x.restore();
+  relief(T((D.n||'').toUpperCase(),500,180,72,800,'center',12),6,A(t,.05));
+  x.globalAlpha=A(t,.1); x.fillStyle=D.c||'#C9705A'; x.beginPath(); x.roundRect(440,214,120,8,4); x.fill(); x.globalAlpha=1;
+  let y=330; const F=(D.facts||[]).slice(0,(D.alerts||[]).length?3:4);
+  F.forEach(([a2,b2],i)=>{ const al=A(t,.2+i*.12); relief(T(String(a2).toUpperCase(),110,y,32,800,'left',5,'#8a8178'),3,al);
+    const bs=String(b2); const fs=bs.length>18?50:bs.length>12?64:86; relief(T(bs,106,y+fs+12,fs,800,'left',0,'#4a4540'),3,al); y+=fs+112; });
+  (D.alerts||[]).slice(0,1).forEach(al=>{ const yy=Math.max(y+30,H-110); x.save(); x.globalAlpha=A(t,.6); x.fillStyle='rgba(201,72,58,.12)'; x.beginPath(); x.roundRect(90,yy-58,820,84,22); x.fill();
+    x.fillStyle='#c9483a'; x.font=`800 34px ${FNT}`; const tt=al.t.length>38?al.t.slice(0,37)+'…':al.t; x.fillText('●  '+tt,116,yy); x.restore(); });
+  x.globalAlpha=1; }; }
 function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(id); const wide=H<900; const T0=o.top||0; const z=o.scale||(H>1400?1.55:1);
   x.globalAlpha=A(t,0); x.fillStyle=D.c; x.beginPath(); x.arc(78,74*z+T0,24*z,0,7); x.fill();
   const title=(o.title||D.n).toUpperCase(); const ft=fitFont(x,title,wide?560:820,40*z,700,24); txt(x,title,78+44*z,88*z+T0,ft,700,PAL.ink,'left',5);
@@ -1125,7 +1147,8 @@ function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(i
 
 function buildOpenings(){
   // ---------- CHEZ TOI : quatre grandes cartes sortent de la façade ----------
-  const H0=PL.home; if(H0){ [1.75,4.45,7.15,9.85].forEach((cx,n)=>newPanel('home',H0.mat,{x:cx,y:12.0,z0:-.5,z1:.4,w:2.3,h:2.45,kind:'slide',d:n*.1,thick:.1,draw:tileReal('home',n)})); }
+  // CHEZ TOI : les infos apparaissent gravées en relief dans le mur, à droite du porche du garage
+  const H0=PL.home; if(H0){ newPanel('home',H0.mat,{x:10.05,y:2.15,z0:.02,z1:.36,w:2.9,h:3.3,kind:'slide',d:0,thick:.1,glow:.1,maxD:6.2,draw:engrave('home')}); }
   // ---------- TA VOITURE : une niche dans le mur de la rampe, le panneau s'avance et s'éclaire ----------
   if(GATE){ const gm=GATE.userData.mat, cx=GATE.userData.cx, wx=cx-1.42;
     box2(gm,[wx-.03,wx+.03,2.0,2.06,-4.0,-1.4],'lamp');
