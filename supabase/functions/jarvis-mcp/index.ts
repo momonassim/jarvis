@@ -5,6 +5,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { rangerPapier, poserAlerte, alertesOuvertes, alerteVue, LIEU_APP } from "./mails.ts";
 import { chercher, noter, notesDe } from "./notes.ts";
+import { mailsChercher, mailLire, memoire, mailsSynchroniser, comptesOutlook } from "./outlook.ts";
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -143,8 +144,15 @@ function sante(rows: Row[], detail: boolean) {
   return t;
 }
 function lieu(rows: Row[], id: string, detail: boolean) {
-  const n = notesDe(rows, LIEU_APP[id]), base = lieu0(rows, id, detail);
-  return n.length ? (base === "Rien pour ce lieu pour l'instant." ? "" : base + "\n") + "Notes rangées : " + n.join(" ; ") + "." : base;
+  const n = notesDe(rows, LIEU_APP[id]); let base = lieu0(rows, id, detail);
+  if (n.length) base = (base === "Rien pour ce lieu pour l'instant." ? "" : base + "\n") + "Notes rangées : " + n.join(" ; ") + ".";
+  const m = mailsDe(rows, LIEU_APP[id], detail ? 15 : 4);
+  if (m.length) base = (base === "Rien pour ce lieu pour l'instant." ? "" : base + "\n") + "Retenu des mails Outlook :\n" + m.join("\n");
+  return base;
+}
+function mailsDe(rows: Row[], app: string, n: number) {
+  return rows.filter((r) => r.source === "outlook" && r.kind === "info" && r.data?.lieu === app).sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? ""))).slice(0, n)
+    .map((r) => `- mail du ${frd(r.date)} (de ${r.data.de ?? "?"}) : ${r.data.titre} — ${r.data.texte}${r.data.action ? " À faire : " + r.data.action : ""} [mail n° ${r.data.mail_id}]`);
 }
 function lieu0(rows: Row[], id: string, detail: boolean) {
   if (id === "logement") return logement(rows, detail);
@@ -232,7 +240,9 @@ async function resume() {
   const prof = rows.find((r) => r.source === "jarvis" && r.kind === "profil")?.data?.texte ?? "";
   const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "full", timeStyle: "short" });
   const alertes = al.length ? "## Alertes en cours (lieux en rouge dans l'app)\n" + al.map((x: any) => `- n° ${x.id} · ${x.data.lieu} · ${x.data.titre}${x.data.date_mail ? " (mail du " + frd(x.data.date_mail) + ")" : ""}${x.data.texte ? " : " + x.data.texte : ""}`).join("\n") + "\n\n" : "";
-  return `Jarvis — situation au ${now}.\n${prof}\n\n` + alertes + Object.entries(LIEUX).map(([id, l]) => `## ${l.nom}\n${lieu(rows, id, false)}`).join("\n\n");
+  const comptes = await comptesOutlook(admin).catch(() => []);
+  const boites = comptes.length ? `## Mails Outlook\nBoîtes branchées (lecture seule) : ${comptes.map((c: any) => `${c.compte} (${c.statut}${c.derniere_sync ? ", relue le " + new Date(c.derniere_sync).toLocaleString("fr-FR", { timeZone: "Europe/Paris" }) : ""})`).join(", ")}. Pour une question sur un mail : jarvis_mails_chercher, jarvis_mail_lire, jarvis_memoire.\n\n` : "";
+  return `Jarvis — situation au ${now}.\n${prof}\n\n` + alertes + boites + Object.entries(LIEUX).map(([id, l]) => `## ${l.nom}\n${lieu(rows, id, false)}`).join("\n\n");
 }
 async function documents(q: string) {
   const rows = await lignes(); const mots = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter(Boolean);
@@ -286,6 +296,10 @@ const TOOLS = [
   { name: "jarvis_alerte_vue", title: "Retirer une alerte Jarvis", description: "Retire une alerte (le lieu n'est plus rouge) quand l'utilisateur dit que c'est réglé ou vu. Numéro donné par jarvis_resume.", inputSchema: { type: "object", properties: { numero: { type: "string" } }, required: ["numero"] }, annotations: { readOnlyHint: false, destructiveHint: false } },
   { name: "jarvis_chercher", title: "Chercher dans tout Jarvis", description: "Fouille dans TOUT ce que les robots de Jarvis ont ramené (toutes les pages et données lues chez Orange, Foncia, Plenitude, MédinLyon, papiers du Mac, mails rangés…), pas seulement le résumé. À utiliser dès que l'utilisateur demande un détail précis qui n'est pas dans jarvis_resume ou jarvis_lieu : un code (RIO, PUK…), un numéro de ligne, une option, une date de fin, un détail de facture, une adresse… Donne 1 à 3 mots-clés distinctifs (ex. « RIO », « PUK », « résiliation »). Si tu trouves une info utile à garder, range-la avec jarvis_noter.", inputSchema: { type: "object", properties: { recherche: { type: "string", description: "Mots-clés, tous doivent être présents" } }, required: ["recherche"] }, annotations: { readOnlyHint: true } },
   { name: "jarvis_noter", title: "Ranger une info dans Jarvis", description: "Range une info courte dans un lieu de Jarvis (elle s'affiche dans la fiche du lieu dans l'app, et Jarvis s'en souvient), ex. « Code RIO mobile » → « 01P123456ABC ». Même titre = mise à jour. supprimer à true pour l'enlever. Jamais d'IBAN, de n° de sécu, de mot de passe ou de pièce d'identité.", inputSchema: { type: "object", properties: { lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string" }, texte: { type: "string" }, supprimer: { type: "boolean" } }, required: ["lieu", "titre"] }, annotations: { readOnlyHint: false, destructiveHint: false } },
+  { name: "jarvis_mails_chercher", title: "Chercher dans mes mails Outlook", description: "Cherche dans les mails Outlook de l'utilisateur (lus par Jarvis en lecture seule) : par mots-clés (expéditeur, objet, contenu), période, expéditeur ou domaine de la vie. Cherche aussi directement dans Outlook, y compris les vieux mails, si peu de résultats (ou dans_outlook à true). Donne les n° des mails pour les lire avec jarvis_mail_lire. À utiliser dès qu'il parle d'un mail, d'un courrier reçu, d'une facture, d'une confirmation, d'un message de quelqu'un.", inputSchema: { type: "object", properties: { recherche: { type: "string", description: "Mots-clés, ex. « Foncia régularisation », « amende », « Enedis coupure »" }, depuis: { type: "string", description: "AAAA-MM-JJ" }, jusqu_au: { type: "string", description: "AAAA-MM-JJ" }, de: { type: "string", description: "Expéditeur (nom ou adresse, partiel)" }, lieu: { type: "string", enum: Object.keys(LIEUX) }, limite: { type: "number" }, dans_outlook: { type: "boolean", description: "true pour chercher aussi directement dans Outlook (mails anciens)" } } }, annotations: { readOnlyHint: true } },
+  { name: "jarvis_mail_lire", title: "Lire un mail Outlook", description: "Lit un mail en entier (expéditeur, date, objet, texte, pièces jointes, lien pour l'ouvrir dans Outlook) et ce que Jarvis en a retenu. Numéro donné par jarvis_mails_chercher ou jarvis_memoire, ou référence « outlook:… » d'un vieux mail. Les IBAN et n° de sécu sont masqués.", inputSchema: { type: "object", properties: { numero: { type: "string" } }, required: ["numero"] }, annotations: { readOnlyHint: true } },
+  { name: "jarvis_memoire", title: "Mémoire de Jarvis", description: "Ce que Jarvis a retenu et rangé : les infos utiles tirées des mails (chacune avec le n° du mail source), les notes rangées et les alertes (en cours ou vues). Filtrable par mots, domaine et date. À utiliser pour « qu'est-ce que je dois savoir / faire », « qu'est-ce que la régie m'a envoyé », « où en est … ».", inputSchema: { type: "object", properties: { recherche: { type: "string" }, lieu: { type: "string", enum: Object.keys(LIEUX) }, depuis: { type: "string", description: "AAAA-MM-JJ" }, limite: { type: "number" } } }, annotations: { readOnlyHint: true } },
+  { name: "jarvis_mails_synchroniser", title: "Relire mes mails maintenant", description: "Relit tout de suite les boîtes Outlook branchées (sinon c'est fait toutes les 15 minutes) : nouveaux mails, tri, rangement dans la ville. Lecture seule : rien n'est envoyé ni modifié dans Outlook.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
   { name: "medinlyon_creneaux", title: "Créneaux libres MédinLyon", description: "Créneaux de consultation libres chez MédinLyon (centres Villeurbanne et Lyon 6 Brotteaux), seulement aujourd'hui ou demain. Les créneaux marqués supplément (soir, week-end) coûtent environ 23 € de dépassement : le dire à l'utilisateur.", inputSchema: { type: "object", properties: { centre: { type: "string", description: "« Villeurbanne » ou « Brotteaux »" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" } }, required: ["centre"] }, annotations: { readOnlyHint: true } },
   { name: "medinlyon_reserver", title: "Réserver un rendez-vous MédinLyon", description: "Réserve un rendez-vous MédinLyon pour une personne de la famille. Avant d'appeler cet outil, récapitule à l'utilisateur pour qui, où, quand et le tarif, et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { pour: { type: "string", description: "Nom ou prénom de la personne (famille sur le compte)" }, centre: { type: "string" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" }, heure: { type: "string", description: "HH:MM, un créneau libre" }, confirme: { type: "boolean", description: "true seulement après le oui explicite de l'utilisateur" } }, required: ["pour", "centre", "date", "heure", "confirme"] }, annotations: { destructiveHint: false, readOnlyHint: false } },
   { name: "medinlyon_annuler", title: "Annuler un rendez-vous MédinLyon", description: "Annule un rendez-vous MédinLyon à venir (numéro donné par jarvis_resume). Avant d'appeler, rappelle le rendez-vous à l'utilisateur et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { numero: { type: "string" }, confirme: { type: "boolean" } }, required: ["numero", "confirme"] }, annotations: { destructiveHint: true, readOnlyHint: false } },
@@ -303,6 +317,10 @@ async function appel(nom: string, a: Record<string, any>): Promise<string> {
     case "jarvis_alerte": oublier(); return await poserAlerte(admin, a, Object.keys(LIEUX));
     case "jarvis_alerte_vue": oublier(); return await alerteVue(admin, a.numero);
     case "jarvis_chercher": return await chercher(admin, a);
+    case "jarvis_mails_chercher": return await mailsChercher(admin, a);
+    case "jarvis_mail_lire": return await mailLire(admin, a);
+    case "jarvis_memoire": return await memoire(admin, a);
+    case "jarvis_mails_synchroniser": oublier(); return await mailsSynchroniser(admin);
     case "jarvis_noter": { oublier(); const r = await noter(admin, a, Object.keys(LIEUX)); if (r.startsWith("Rangé")) await ecran("lieu", { lieu: a.lieu }).catch(() => false); return r; }
     case "medinlyon_creneaux": {
       const c = centreId(a.centre); if (!c) return "Centre inconnu : Villeurbanne ou Brotteaux.";
@@ -347,7 +365,7 @@ async function traiter(m: any) {
     case "initialize": {
       const v = VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : VERSIONS[0];
       return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jarvis", title: "Jarvis", version: "1.0.0" },
-        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple et COURT (une ou deux phrases, surtout à l'oral) : donne juste l'info demandée, sans tout réciter. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement. Pour un détail précis (un code RIO, une option, une date…), fouille avec jarvis_chercher, et range ce qui est utile avec jarvis_noter. Si tu as accès à ses mails (Outlook), tu peux ranger les papiers qu'ils contiennent avec jarvis_ranger_papier et signaler ce qui est important avec jarvis_alerte." });
+        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple et COURT (une ou deux phrases, surtout à l'oral) : donne juste l'info demandée, sans tout réciter. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement. Pour un détail précis (un code RIO, une option, une date…), fouille avec jarvis_chercher, et range ce qui est utile avec jarvis_noter. Ses mails Outlook sont lus par Jarvis (lecture seule) : pour toute question sur un mail ou un courrier, utilise jarvis_mails_chercher puis jarvis_mail_lire ; pour ce que Jarvis a retenu (avec le mail source), jarvis_memoire. Tu peux ranger un papier joint avec jarvis_ranger_papier et signaler ce qui est important avec jarvis_alerte." });
     }
     case "ping": return ok({});
     case "tools/list": return ok({ tools: TOOLS });

@@ -153,6 +153,7 @@ async function openDoc(p, d) {
   const pdf = $("dPdf"), x = $("dX");
   pdf.hidden = true; x.hidden = true; x.textContent = "Annuler ce rendez-vous"; x.dataset.step = "";
   if (d.tel) { pdf.hidden = false; pdf.href = "tel:" + d.tel.replace(/\s/g, ""); pdf.textContent = "Appeler " + d.tel; pdf.removeAttribute("target"); }
+  if (d.url) { pdf.hidden = false; pdf.href = d.url; pdf.textContent = "Ouvrir le mail dans Outlook"; pdf.target = "_blank"; pdf.rel = "noopener"; }
   if (d.path) {
     pdf.hidden = false; pdf.textContent = "Je prépare le PDF…"; pdf.removeAttribute("href"); pdf.classList.add("wait"); pdf.target = "_blank";
     const { data, error } = await sb.storage.from("papiers").createSignedUrl(d.path, 600);
@@ -464,6 +465,24 @@ function applyMails(rows) {
       lines: [["Ce qu’il faut savoir", r.data.texte || "—"], ["De", r.data.de || "—"], ["Reçu le", r.data.date_mail ? frd(r.data.date_mail) : "—"]], alerteId: r.id })), ...(p.docs || [])];
   });
 }
+/* ---------- Ce que Jarvis a retenu des mails Outlook (une fiche par mail, avec le lien vers le mail) ---------- */
+function applyOutlook(rows) {
+  rows.filter(r => r.kind === "info" && r.data && byId[r.data.lieu])
+    .sort((a, b) => (b.data.date_mail || "").localeCompare(a.data.date_mail || ""))
+    .slice(0, 300)
+    .forEach(r => {
+      const p = byId[r.data.lieu], d = r.data;
+      const lines = [["En bref", d.texte || "—"]];
+      if (d.action) lines.push(["À faire", d.action]);
+      if (d.echeance) lines.push(["Avant le", frd(d.echeance)]);
+      lines.push(["De", d.de || "—"], ["Reçu le", d.date_mail ? frd(d.date_mail) : "—"]);
+      if ((d.pieces || []).length) lines.push(["Pièces jointes", d.pieces.join(", ")]);
+      const doc = { t: d.titre || "Mail", d: "Mail du " + (d.date_mail ? frd(d.date_mail) : "?"), v: "Mail", where: "Tes mails (Outlook" + (d.compte ? " · " + d.compte : "") + ")", lines, url: d.web_link || null };
+      // salaires et soldes : jamais à l'écran
+      if (ARGENT.test((d.titre || "") + " " + (d.texte || "")) && /€/.test(d.texte || "")) { garde(p, d.titre + " : " + d.texte); doc.lines = doc.lines.filter(l => !/€/.test(l[1] || "")); doc.lines.unshift(["Montants", "Cachés : demande-les-moi dans le chat"]); }
+      p.docs = [...(p.docs || []), doc];
+    });
+}
 /* ---------- Notes rangées par Jarvis (code RIO, numéros…) ---------- */
 function applyNotes(rows) {
   rows.filter(r => r.kind === "note" && r.data && byId[r.data.lieu])
@@ -490,6 +509,7 @@ async function loadAll() {
     applySante(rows.filter(r => r.source === "medinlyon"));
     applyOrange(rows.filter(r => r.source === "orange"), oApi || []);
     applyMails(rows.filter(r => r.source === "mails"));
+    applyOutlook(rows.filter(r => r.source === "outlook"));
     applyNotes(rows.filter(r => r.source === "jarvis"));
     PLACES.forEach(p => {
       if (p.status === "…") { p.status = "À brancher"; p.say = "Je n’ai encore rien pour ce lieu. Dès qu’une source est branchée, je le remplis."; p.live = "Pas encore branché"; }
@@ -773,6 +793,7 @@ const REGLAGES = [
   { name: "ANTHROPIC_API_KEY", label: "Clé Claude", help: "Pour parler avec Jarvis. Elle commence par « sk-ant- » (platform.claude.com › API keys).", type: "password", ph: "sk-ant-…" },
   { name: "MEDINLYON_EMAIL", label: "MédinLyon · e-mail", help: "Pour prendre et annuler les rendez-vous de la famille.", type: "email", ph: "ton e-mail MédinLyon" },
   { name: "MEDINLYON_PASSWORD", label: "MédinLyon · mot de passe", help: "", type: "password", ph: "ton mot de passe MédinLyon" },
+  { name: "MS_CLIENT_SECRET", label: "Outlook · secret de l’application", help: "La « valeur » du secret client créé dans Microsoft Entra (application Jarvis › Certificats et secrets). Elle sert seulement à lire tes mails.", type: "password", ph: "valeur du secret Microsoft" },
 ];
 let setOpen = false;
 async function openSettings() {
@@ -802,6 +823,7 @@ async function openSettings() {
     inp.addEventListener("keydown", e => { if (e.key === "Enter") b.click(); });
     o.append(c);
   });
+  o.append(blocOutlook());
   o.append(blocPapiers());
   o.append(blocVoix());
   o.append(blocConnecteur());
@@ -859,6 +881,68 @@ function blocPapiers() {
   });
   return c;
 }
+/* ---------- Mails Outlook (lecture seule, Microsoft Graph) ----------
+   La connexion se fait chez Microsoft ; Jarvis ne voit jamais le mot de passe.
+   Les nouveaux mails sont relus toutes les 15 minutes par la fonction jarvis-outlook. */
+async function appelOutlook(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  const r = await fetch(SB_URL + "/functions/v1/jarvis-outlook", { method: "POST",
+    headers: { "Content-Type": "application/json", apikey: SB_KEY, Authorization: "Bearer " + (session ? session.access_token : "") },
+    body: JSON.stringify(body) });
+  return await r.json().catch(() => ({ ok: false, message: "pas de réponse" }));
+}
+function blocOutlook() {
+  const c = document.createElement("div"); c.className = "set";
+  c.innerHTML = '<div class="stop"><b>Mails Outlook</b><span></span></div>'
+    + '<small>Jarvis lit tes mails (jamais il n’en envoie, n’en déplace ni n’en supprime), garde ce qui compte et le range dans le bon lieu de la ville. Les IBAN et n° de sécu sont masqués.</small>'
+    + '<div class="cpt"></div>'
+    + '<div class="row2"><button class="btn main go" type="button" style="flex:1">Connecter un compte Outlook</button></div>'
+    + '<div class="row2"><button class="btn soft sy" type="button" style="flex:1" hidden>Relire mes mails maintenant</button></div>';
+  const st = c.querySelector(".stop span"), cpt = c.querySelector(".cpt"), go = c.querySelector(".go"), sy = c.querySelector(".sy");
+  const lister = async () => {
+    const { data } = await sb.rpc("jarvis_outlook_etat_comptes");
+    cpt.textContent = ""; const l = data || [];
+    st.textContent = l.length ? l.length + " boîte" + (l.length > 1 ? "s" : "") + " branchée" + (l.length > 1 ? "s" : "") : "Pas encore branché"; st.className = l.length ? "ok" : "";
+    sy.hidden = !l.length; go.textContent = l.length ? "Connecter un autre compte" : "Connecter un compte Outlook";
+    l.forEach(a => {
+      const d = document.createElement("div"); d.className = "row2"; d.style.alignItems = "center";
+      const t = document.createElement("small"); t.style.flex = "1";
+      t.textContent = a.compte + " — " + (a.statut === "branché" ? "✓ " : "⚠︎ ") + a.statut
+        + (a.derniere_sync ? " · relu à " + new Date(a.derniere_sync).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "")
+        + " · " + (a.nb_mails || 0) + " mails, " + (a.nb_infos || 0) + " infos gardées" + (a.erreur && a.statut !== "branché" ? " (" + a.erreur + ")" : "");
+      const b = document.createElement("button"); b.className = "btn soft"; b.type = "button"; b.textContent = a.statut === "à reconnecter" ? "Reconnecter" : "Débrancher";
+      b.addEventListener("click", async () => {
+        if (b.textContent === "Reconnecter") { go.click(); return; }
+        if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Sûr ?"; return; }
+        b.disabled = true; const j = await appelOutlook({ action: "deconnecter", compte: a.compte });
+        toast(j.message || "Débranché"); lister();
+      });
+      d.append(t, b); cpt.append(d);
+    });
+  };
+  go.addEventListener("click", async () => {
+    go.disabled = true; go.textContent = "J’ouvre Microsoft…";
+    const j = await appelOutlook({ action: "start" });
+    go.disabled = false;
+    if (!j.ok || !j.url) { go.textContent = "Connecter un compte Outlook"; toast(j.message || "Je n’arrive pas à ouvrir Microsoft."); return; }
+    location.href = j.url;
+  });
+  sy.addEventListener("click", async () => {
+    sy.disabled = true; sy.textContent = "Je relis tes mails…";
+    const j = await appelOutlook({ action: "sync" });
+    sy.disabled = false; sy.textContent = "Relire mes mails maintenant";
+    if (!j.ok) { toast("Pas relu : " + (j.message || j.error || "?")); return; }
+    const n = (j.comptes || []).reduce((s, x) => s + (x.nouveaux || 0), 0), err = (j.comptes || []).find(x => x.erreur);
+    toast(err ? "Souci avec " + err.compte + " : " + err.erreur : n + " nouveau" + (n > 1 ? "x" : "") + " mail" + (n > 1 ? "s" : "") + ", " + (j.tries?.tries || 0) + " triés ✓");
+    lister(); loadAll();
+  });
+  lister();
+  return c;
+}
+// Retour de Microsoft (…/jarvis/?outlook=ok)
+{ const q = new URLSearchParams(location.search).get("outlook");
+  if (q) { window.history.replaceState(null, "", location.pathname); setTimeout(() => toast(q === "ok" ? "Outlook est branché ✓ Je range tes mails, ça prend quelques minutes." : "Outlook n’est pas branché. Réessaie depuis les Réglages."), 1500); } }
+
 function blocConnecteur() {
   const URL_MCP = SB_URL + "/functions/v1/jarvis-mcp";
   const c = document.createElement("div"); c.className = "set";

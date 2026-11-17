@@ -1,7 +1,7 @@
 // Jarvis — chercher dans tout ce que les robots ont ramené, et ranger une info dans un lieu.
 import { LIEU_APP } from "./mails.ts";
 
-const slug = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "note";
+const slug = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "note";
 // Jamais d'IBAN ni de n° de sécu dans les réponses ou les notes
 const masquer = (s: string) => s.replace(/\bFR\s?\d{2}(?:[\s.\-]?[0-9A-Z]{2,4}){4,8}/gi, "[IBAN masqué]")
   .replace(/\b[12]\s?\d{2}\s?(?:0[1-9]|1[0-2]|[2-9]\d)\s?(?:\d{2}|2[AB])\s?\d{3}\s?\d{3}\s?\d{2}\b/g, "[n° sécu masqué]");
