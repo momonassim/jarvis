@@ -887,10 +887,11 @@ function iconGeo(id){ const data=svgLoader.parse(`<svg xmlns="http://www.w3.org/
   const g=mergeGeometries(gs.map(x=>{x.deleteAttribute('uv'); if(x.attributes.normal)x.deleteAttribute('normal'); return x;}),false); g.translate(-12,-12,0); g.scale(1/24,-1/24,1); return g; }
 const poleM=new THREE.MeshStandardMaterial({color:0xe7e4de,roughness:.5,metalness:.35,envMapIntensity:.5});
 const whiteM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.45,emissive:0xffffff,emissiveIntensity:.12,side:THREE.DoubleSide});
-function plateTex(p){ const c=document.createElement('canvas'),x=c.getContext('2d'); const fs=58, pad=34; x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){}
-  const tw=Math.ceil(x.measureText(p.n.toUpperCase()).width); c.width=tw+pad*2+26; c.height=104; x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){}
+function plateTex(p,D){ const c=document.createElement('canvas'),x=c.getContext('2d'); const fs=58, pad=34; const st=D&&D.status?String(D.status).slice(0,34):''; x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){}
+  let tw=Math.ceil(x.measureText(p.n.toUpperCase()).width); if(st){ x.font=`700 44px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='0px';}catch(e){} tw=Math.max(tw,Math.ceil(x.measureText(st).width)); x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){} } c.width=tw+pad*2+26; c.height=st?170:104; x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){}
   x.fillStyle='#fbfaf7'; x.beginPath(); x.roundRect(0,0,c.width,c.height,22); x.fill(); x.fillStyle=p.c; x.beginPath(); x.roundRect(0,0,22,c.height,[22,0,0,22]); x.fill();
-  x.fillStyle='#2f343c'; x.textBaseline='middle'; x.fillText(p.n.toUpperCase(),22+pad,c.height/2+3);
+  x.fillStyle='#2f343c'; x.textBaseline='middle'; x.fillText(p.n.toUpperCase(),22+pad,st?58:c.height/2+3);
+  if(st){ x.font=`700 44px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='0px';}catch(e){} x.fillStyle=D.urgent?'#C9483A':'#6b7079'; x.fillText(st,22+pad,124); }
   const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8; return {t,ar:c.width/c.height}; }
 const masts=[], pickables=[]; const iconM=new THREE.MeshBasicMaterial({color:0xfdfcf9,side:THREE.DoubleSide});
 function makeMast(p,base,top,R){
@@ -948,6 +949,7 @@ renderer.domElement.addEventListener('pointerup',e=>{ if(!downXY||Math.hypot(e.c
   const rr=canvas.getBoundingClientRect(); _ndc.set((e.clientX-rr.left)/rr.width*2-1,-((e.clientY-rr.top)/rr.height)*2+1); rc.setFromCamera(_ndc,camera);
   const h=rc.intersectObjects(pickables,false).filter(i=>{let o=i.object; while(o){ if(!o.visible) return false; o=o.parent;} return true;});
   if(h.length){ const u=h[0].object.userData;
+    if(u.act){ if(SEL!==u.place&&u.act==='fenetre'){HK.pick&&HK.pick(u.place.id);return;} HK.action&&HK.action(u.place.id,u.act); return; }
     // bouton dessiné sur un panneau (ex. « Prendre rendez-vous ») : un appui dessus lance l'action
     if(u.panel&&u.panel.o.hit&&h[0].uv&&h[0].face&&h[0].face.normal.z>.5){ const P=u.panel, b=P.o.hit, Hc=P.c.height/(P.c.width/1000);
       const px=h[0].uv.x*1000, py=(1-h[0].uv.y)*Hc;
@@ -1123,6 +1125,45 @@ function engrave(id){ return (x,t,c)=>{ const S=c.width/1000; x.setTransform(S,0
   (D.alerts||[]).slice(0,1).forEach(al=>{ const yy=Math.max(y+30,H-110); x.save(); x.globalAlpha=A(t,.6); x.fillStyle='rgba(201,72,58,.12)'; x.beginPath(); x.roundRect(90,yy-58,820,84,22); x.fill();
     x.fillStyle='#c9483a'; x.font=`800 34px ${FNT}`; const tt=al.t.length>38?al.t.slice(0,37)+'…':al.t; x.fillText('●  '+tt,116,yy); x.restore(); });
   x.globalAlpha=1; }; }
+
+/* ---------- CHEZ TOI : ce qui est déjà là parle (boîte aux lettres, interphone, fenêtre du 4e) ---------- */
+const HOME={};
+function buildHome(L){ const P=PLACES.find(q=>q.id==='home'); const mk=(geo,mat,x,y,z,act)=>{ const m=new THREE.Mesh(geo,mat); m.matrixAutoUpdate=false; m.matrix.copy(L.mat).multiply(M(x,y,z)); m.castShadow=true; scene.add(m);
+    if(act){ m.userData.place=P; m.userData.act=act; pickables.push(m);} return m; };
+  // boîte aux lettres, à droite de la porte
+  const boxM=new THREE.MeshStandardMaterial({color:0xd9d5ce,roughness:.45,metalness:.25}), darkM=new THREE.MeshStandardMaterial({color:0x3a3f47,roughness:.6});
+  const bx=3.3, by=1.35, bz=.2;
+  HOME.box=mk(new THREE.BoxGeometry(.62,.78,.26),boxM,bx,by,bz,'courrier');
+  mk(new THREE.BoxGeometry(.66,.06,.3),boxM,bx,by+.42,bz);                       // petit toit
+  mk(new THREE.BoxGeometry(.44,.035,.02),darkM,bx,by+.22,bz+.135);               // fente
+  const tagC=document.createElement('canvas'); tagC.width=256; tagC.height=64; const tx=tagC.getContext('2d'); tx.fillStyle='#fbfaf7'; tx.fillRect(0,0,256,64); tx.fillStyle='#2f343c'; tx.font="800 30px 'Plus Jakarta Sans',Helvetica,Arial"; tx.textAlign='center'; tx.fillText('COURRIER',128,43);
+  const tagT=new THREE.CanvasTexture(tagC); tagT.colorSpace=THREE.SRGBColorSpace; mk(new THREE.PlaneGeometry(.36,.09),new THREE.MeshBasicMaterial({map:tagT,toneMapped:false}),bx,by-.12,bz+.132);
+  // l'enveloppe qui dépasse de la fente quand il y a du nouveau
+  const envC=document.createElement('canvas'); envC.width=256; envC.height=160; const ex=envC.getContext('2d'); ex.fillStyle='#ffffff'; ex.fillRect(0,0,256,160); ex.fillStyle='#C9705A'; ex.fillRect(0,0,256,26);
+  ex.strokeStyle='rgba(47,52,60,.25)'; ex.lineWidth=5; ex.beginPath(); ex.moveTo(0,26); ex.lineTo(128,110); ex.lineTo(256,26); ex.stroke();
+  const envT=new THREE.CanvasTexture(envC); envT.colorSpace=THREE.SRGBColorSpace;
+  HOME.env=mk(new THREE.BoxGeometry(.48,.3,.014),[boxM,boxM,boxM,boxM,new THREE.MeshBasicMaterial({map:envT,toneMapped:false}),boxM],bx,by+.3,bz+.12,'courrier'); HOME.envY=by+.36; HOME.envX=bx; HOME.envZ=bz+.15; HOME.L=L;
+  // interphone, entre la porte et la boîte
+  const ix=2.72, iy=1.45, iz=.14;
+  mk(new THREE.BoxGeometry(.26,.44,.06),new THREE.MeshStandardMaterial({color:0xb8b2a8,roughness:.35,metalness:.55}),ix,iy,iz,'interphone');
+  mk(new THREE.CircleGeometry(.055,20),darkM,ix,iy+.1,iz+.032);
+  for(let k=0;k<3;k++) mk(new THREE.BoxGeometry(.15,.035,.012),darkM,ix,iy-.05-k*.06,iz+.032);
+  HOME.led=mk(new THREE.CircleGeometry(.018,12),new THREE.MeshBasicMaterial({color:0x5FAE8C,toneMapped:false}),ix+.08,iy+.18,iz+.033);
+  // ta fenêtre au 4e étage : le voyant de la maison
+  HOME.winM=new THREE.MeshBasicMaterial({color:0xffcf8a,toneMapped:false,transparent:true,opacity:.92});
+  HOME.win=mk(new THREE.PlaneGeometry(1.02,1.62),HOME.winM,4.45,14.25+.84,-.12,'fenetre');
+}
+const _wc=new THREE.Color();
+function updateHome(dt){ if(!HOME.win) return; const D=DATA.home||{}, e=D.etat||'ok', t=performance.now()/1000;
+  let col=0xffbf5e, op=1;
+  if(e==='rouge'){ col=0xe5604f; op=.95; }
+  else if(e==='coupure'){ col=0x262b33; op=.96; }
+  else if(e==='veille'){ col=0xffbf5e; op=.45+.25*(.5+.5*Math.sin(t*1.6)); }
+  _wc.set(col); HOME.winM.color.lerp(_wc,Math.min(1,dt*3)); HOME.winM.opacity+= (op-HOME.winM.opacity)*Math.min(1,dt*3);
+  // l'enveloppe : visible et qui frétille quand il y a du nouveau courrier
+  const n=D.nouveau||0; HOME.env.visible=n>0; if(n>0){ const L=HOME.L; const up=.04*Math.sin(t*3)+.02; HOME.env.matrix.copy(L.mat).multiply(M(HOME.envX,HOME.envY+up,HOME.envZ,0,0,.05*Math.sin(t*2.2))); }
+  HOME.led.material.color.set(D.gest?0x5FAE8C:0x9aa0a8);
+}
 function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(id); const wide=H<900; const T0=o.top||0; const z=o.scale||(H>1400?1.55:1);
   x.globalAlpha=A(t,0); x.fillStyle=D.c; x.beginPath(); x.arc(78,74*z+T0,24*z,0,7); x.fill();
   const title=(o.title||D.n).toUpperCase(); const ft=fitFont(x,title,wide?560:820,40*z,700,24); txt(x,title,78+44*z,88*z+T0,ft,700,PAL.ink,'left',5);
@@ -1148,7 +1189,7 @@ function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(i
 function buildOpenings(){
   // ---------- CHEZ TOI : quatre grandes cartes sortent de la façade ----------
   // CHEZ TOI : les infos apparaissent gravées en relief dans le mur, à droite du porche du garage
-  const H0=PL.home; if(H0){ newPanel('home',H0.mat,{x:10.05,y:2.15,z0:.02,z1:.36,w:2.9,h:3.3,kind:'slide',d:0,thick:.1,glow:.1,maxD:6.2,draw:engrave('home')}); }
+  const H0=PL.home; if(H0){ buildHome(H0); H0.tY=8.2; H0.camY=1.3; H0.far=9.8; H0.camDX=-.4; }
   // ---------- TA VOITURE : une niche dans le mur de la rampe, le panneau s'avance et s'éclaire ----------
   if(GATE){ const gm=GATE.userData.mat, cx=GATE.userData.cx, wx=cx-1.42;
     box2(gm,[wx-.03,wx+.03,2.0,2.06,-4.0,-1.4],'lamp');
@@ -1180,6 +1221,7 @@ const MAXD={home:13.2,usine:26,impots:13.2,clinique:13.2,mairie:15,medecin:13.2,
 PLACES.forEach(p=>{ if(MAXD[p.id]) p.maxD=MAXD[p.id]; });
 for(const p of PLACES){ const L=PL[p.id]; if(p.id!=='garage'&&L&&L.mat){ const far=L.far||9.6; p.view=[V(L.W/2+(L.camDX??L.W*.08),L.camY||2.3,far).applyMatrix4(L.mat),V(L.W/2,L.tY||Math.min(L.H*.42,6.2),-1).applyMatrix4(L.mat)]; } }
 { const E=PLACES.find(q=>q.id==='energie'); if(PL.energie) E.view=PL.energie.view; }
+{ const Hm=PLACES.find(q=>q.id==='home'); if(Hm) Hm.fov=80; }
 function updateOpenings(dt){
   for(const id in PANELS){ const want=(SEL&&SEL.id===id&&!anim)?1:0; const k0=openK[id]; openK[id]=cl(k0+(want?1:-1)*dt/2.4); const K=openK[id];
     if(K===k0&&K!==1&&K!==0) continue;
@@ -1207,10 +1249,10 @@ let lastT=performance.now();
 function update3D(){
   const now=performance.now(), dt=Math.min(.05,(now-lastT)/1000); lastT=now; selT+=dt;
   for(const m of flagMats) m.userData.U.uT.value=now/1000;
-  updateObst(dt);
+  updateObst(dt); updateHome(dt);
   // mâts : face à la caméra (autour de l'axe vertical), nom qui s'ouvre de près ; trop près, ils se replient
   for(const p of masts){ const M2=p.mast, hp=M2.head.position; M2.spin.rotation.y=Math.atan2(camera.position.x-hp.x,camera.position.z-hp.z);
-    const d=camera.position.distanceTo(hp), sel=p===SEL; const want=(sel||d<60)?1:0; M2.open+=(want-M2.open)*Math.min(1,dt*6);
+    const d=camera.position.distanceTo(hp), sel=p===SEL; const want=(sel||d<150)?1:0; M2.open+=(want-M2.open)*Math.min(1,dt*6);
     const e=ease(cl(M2.open)); M2.plate.scale.setScalar(Math.max(.001,e)); M2.plate.position.y=-M2.R-M2.R*.47-(1-e)*.3;
     const bob=sel?Math.sin(selT*2.4)*.12:0; M2.spin.position.y=bob; const tooNear=d<11; const sc=tooNear?.001:(sel?1.18:1); M2.spin.scale.lerp(V(sc,sc,sc),Math.min(1,dt*5));
     M2.g.children[0].scale.y+=((tooNear?.001:1)-M2.g.children[0].scale.y)*Math.min(1,dt*5); M2.g.children[0].position.y=M2.g.children[1].position.y+(M2.g.children[0].geometry.parameters.height*M2.g.children[0].scale.y)/2;
@@ -1257,7 +1299,9 @@ let shift=0, shiftGoal=0;
 frame();
 window.VILLE.ready=true;
 
-function setDonnees(list){ for(const d of list){ DATA[d.id]=d; (PANELS[d.id]||[]).forEach(P=>P.last=-1); } if(bankWall) bankWall.userData.last=-1; }
+function setDonnees(list){ for(const d of list){ const old=DATA[d.id]; DATA[d.id]=d; (PANELS[d.id]||[]).forEach(P=>P.last=-1);
+    const p=PLACES.find(q=>q.id===d.id); if(p&&p.mast&&(!old||old.status!==d.status||old.urgent!==d.urgent)){ const {t,ar}=plateTex(p,d); const ph=p.mast.R*.52*(d.status?170/104:1);
+      p.mast.plate.children.forEach(pl=>{ pl.material.map&&pl.material.map.dispose(); pl.material.map=t; pl.material.needsUpdate=true; pl.geometry.dispose(); pl.geometry=new THREE.PlaneGeometry(ph*ar,ph); }); } } if(bankWall) bankWall.userData.last=-1; }
 function orbit(a){ const s=new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)); let th=s.theta,r=s.radius,ph=s.phi;
   if(a.tourner) th+=(Number(a.tourner)||0)*Math.PI/180; if(a.zoom==='avant') r*=.6; else if(a.zoom==='arriere') r*=1.6; if(a.vue==='dessus') ph=.35; else if(a.vue==='rasante') ph=1.2;
   r=Math.max(3,Math.min(220,r)); s.set(r,ph,th); const p=new THREE.Vector3().setFromSpherical(s).add(controls.target); flyTo(p,controls.target.clone(),camera.fov); }

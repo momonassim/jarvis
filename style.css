@@ -283,3 +283,6 @@ p.empty{margin:0}
 
 /* nuit */
 .night .card,.night .brief,.night .round,.night .ask,.night .lieubar{box-shadow:0 12px 34px -12px rgba(0,0,0,.6)}
+
+.dsearch{width:100%;margin:12px 0 0;border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:11px 14px;font:600 15px var(--sans);color:var(--ink);user-select:text;-webkit-user-select:text}
+.doc[hidden]{display:none}

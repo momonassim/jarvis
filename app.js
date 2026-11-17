@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=grave1";
+import { creerVille } from "./ville.js?v=maison1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -50,7 +50,14 @@ const canvas = $("c");
 let viewShiftGoal = 0, userMoved = false, V = null;
 V = await creerVille(canvas, {
   pick: id => { userMoved = true; if (id === "jarvis") openTalk(null); else if (byId[id]) select(byId[id]); },
-  action: (id, a) => { userMoved = true; if (a === "rdv") openBook(); },
+  action: (id, a) => { userMoved = true; if (a === "rdv") { openBook(); return; }
+    const p = byId[id]; if (!p) return; if (S.sel !== p) select(p);
+    if (a === "courrier") { openDetails(); return; }
+    if (a === "interphone") { const g = (p.docs || []).find(d => d.t === "Ton gestionnaire"); if (g) openDoc(p, g); else toast("Je n’ai pas encore les coordonnées de ton gestionnaire."); return; }
+    if (a === "fenetre") { const e = etatMaison(p), c = coupureDe(p);
+      toast(e.etat === "coupure" ? "Coupure en cours" + (c ? " jusqu’à " + c.d1.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "")
+        : e.etat === "veille" ? "Coupure d’électricité demain" + (c ? " à " + c.d0.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "")
+        : e.etat === "rouge" ? "Il reste un montant à régler chez Foncia" : "Tout va bien chez toi" + (p.status ? " · " + p.status : "")); } },
   progress: t => { const b = $("briefTxt"); if (b && !S.loaded) b.textContent = t; },
   frame: () => V && V.decalage(viewShiftGoal),
 });
@@ -82,10 +89,24 @@ $("sky").addEventListener("click", () => applySky(!S.night));
    ========================================================= */
 const briefEl = $("brief");
 let talkOpen = false;
+/* Chez toi : état de la fenêtre (ok / rouge / veille / coupure) et courrier nouveau */
+const MOISN = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+function coupureDe(p) { const a = (p.docs || []).find(d => d.alerteId && /coupure/i.test(d.t)); if (!a) return null;
+  const m = a.t.match(/(\d{1,2})\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)/i); if (!m) return null;
+  const mi = MOISN.findIndex(x => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "") === m[2].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")); if (mi < 0) return null;
+  const h = a.t.match(/(\d{1,2})\s*h\s*(\d{2})?\s*[–-]\s*(\d{1,2})\s*h\s*(\d{2})?/);
+  const now = new Date(), y = now.getFullYear(); const d0 = new Date(y, mi, Number(m[1]), h ? Number(h[1]) : 0, h && h[2] ? Number(h[2]) : 0), d1 = new Date(y, mi, Number(m[1]), h ? Number(h[3]) : 23, h && h[4] ? Number(h[4]) : 59);
+  return { d0, d1, a }; }
+function etatMaison(p) { const now = new Date(), c = coupureDe(p); let etat = p.retard ? "rouge" : "ok";
+  if (c) { if (now >= c.d0 && now <= c.d1) etat = "coupure"; else if (now < c.d0 && c.d0 - now < 36 * 3600e3 && etat === "ok") etat = "veille"; }
+  const semaine = Date.now() - 7 * 864e5;
+  const nouveau = (p.docs || []).filter(d => (d.alerteId && !/coupure/i.test(d.t)) || (d.ts && d.ts > semaine)).length;
+  const gest = (p.docs || []).find(d => d.t === "Ton gestionnaire");
+  return { etat, nouveau, gest: gest ? gest.v : "" }; }
 function refreshPins() {
   V.setDonnees(PLACES.map(p => ({ id: p.id, n: p.name, c: p.color, place: p.place, status: p.status, say: p.say, facts: p.facts || [],
     alerts: (p.docs || []).filter(d => d.alerteId).map(d => ({ t: d.t.replace(/^⚠︎\s*/, ""), d: d.d })),
-    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent })));
+    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}) })));
 }
 
 /* =========================================================
@@ -117,6 +138,8 @@ $("lbMore").addEventListener("click", openDetails);
 $("lbClose").addEventListener("click", () => { deselect(); });
 function renderSheet(p) {
   const box = $("pDocs"); box.innerHTML = ""; const docs = p.docs || [];
+  if (docs.length > 6) { const q = document.createElement("input"); q.className = "dsearch"; q.type = "search"; q.placeholder = "Chercher un papier (ex. octobre, quittance)";
+    q.addEventListener("input", () => { const v = q.value.trim().toLowerCase(); box.querySelectorAll(".doc").forEach(b => b.hidden = v && !b.textContent.toLowerCase().includes(v)); }); box.append(q); }
   const dh = document.createElement("div"); dh.className = "dh"; dh.innerHTML = "<b>Papiers rangés</b><span></span>";
   dh.querySelector("span").textContent = docs.length ? docs.length + (docs.length > 1 ? " papiers" : " papier") : ""; box.append(dh);
   if (!docs.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Rien pour l’instant"; box.append(e); }
@@ -319,7 +342,7 @@ function applyFoncia(rows) {
   const docs = by("document").sort((a, b) => (b.data?.ajoute_le || "").split("/").reverse().join("").localeCompare((a.data?.ajoute_le || "").split("/").reverse().join("")));
   const quitt = docs.filter(d => /quittance/i.test(d.label));
   const sold = solde && solde.amount != null ? Number(solde.amount) : null;
-  h.urgent = sold != null && sold < 0;
+  h.urgent = sold != null && sold < 0; h.retard = h.urgent;
   const res = ((by("logement")[0] || {}).data || {}).residence;
   h.place = "Foncia" + (res ? " · " + res.toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase()) : "");
   h.status = loyer ? `Loyer ${eur(loyer)} · ${sold === 0 ? "à jour" : sold < 0 ? "à régler" : "en avance"}` : "À jour";
@@ -330,7 +353,7 @@ function applyFoncia(rows) {
   if (lots.length) d.push({ t: "Ton logement", d: `${lots.length} lots`, v: "", where: "MyFoncia", lines: lots.map(l => [l.label, l.data?.tantiemes || ""]) });
   if (ops.length) d.push({ t: "Comptabilité", d: `${ops.length} opérations`, v: loyer ? eur(loyer) : "", where: "MyFoncia", lines: ops.slice(0, 10).map(r => [frd(r.date) + " · " + r.label.toLowerCase().replace(/^./, c => c.toUpperCase()).slice(0, 34), (Number(r.amount) > 0 ? "+" : "") + eur(r.amount)]) });
   by("intervention").forEach(r => d.push({ t: "Intervention", d: frd(r.date), v: r.data?.statut || "", where: "MyFoncia", lines: [["Objet", r.label.toLowerCase().replace(/^./, c => c.toUpperCase())], ["Statut", r.data?.statut || "—"]] }));
-  docs.forEach(r => d.push({ t: nice(r.label, r.data?.categorie).slice(0, 60), d: "Ajouté le " + (r.data?.ajoute_le || "—"), v: "PDF", where: "Jarvis › papiers › Foncia",
+  docs.forEach(r => d.push({ ts: (() => { const m = (r.data?.ajoute_le || "").match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0; })(), t: nice(r.label, r.data?.categorie).slice(0, 60), d: "Ajouté le " + (r.data?.ajoute_le || "—"), v: "PDF", where: "Jarvis › papiers › Foncia",
     lines: [["Catégorie", r.data?.categorie || "—"], ["Ajouté le", r.data?.ajoute_le || "—"]], path: r.data?.path ? "foncia/" + r.data.path : null }));
   h.docs = [...d, ...(h.macDocs || [])]; h.live = stamp(rows, "relu par ton iPhone");
   cacheArgent(h);
