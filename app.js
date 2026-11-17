@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=maison1";
+import { creerVille } from "./ville.js?v=nuit1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -52,7 +52,7 @@ V = await creerVille(canvas, {
   pick: id => { userMoved = true; if (id === "jarvis") openTalk(null); else if (byId[id]) select(byId[id]); },
   action: (id, a) => { userMoved = true; if (a === "rdv") { openBook(); return; }
     const p = byId[id]; if (!p) return; if (S.sel !== p) select(p);
-    if (a === "courrier") { openDetails(); return; }
+    if (a === "courrier" || a === "details") { openDetails(); return; }
     if (a === "interphone") { const g = (p.docs || []).find(d => d.t === "Ton gestionnaire"); if (g) openDoc(p, g); else toast("Je n’ai pas encore les coordonnées de ton gestionnaire."); return; }
     if (a === "fenetre") { const e = etatMaison(p), c = coupureDe(p);
       toast(e.etat === "coupure" ? "Coupure en cours" + (c ? " jusqu’à " + c.d1.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "")
