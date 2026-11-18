@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ds5b";
+import { creerVille } from "./ville.js?v=maj1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -1075,6 +1075,26 @@ $("gform").addEventListener("submit", async e => {
 sb.auth.onAuthStateChange((ev, session) => { if (ev === "SIGNED_OUT") { showGate("Connecte-toi pour ouvrir ta ville."); } });
 sb.auth.getSession().then(({ data }) => enter(data.session));
 
+
+/* ---------- Mise à jour : l'app regarde toute seule s'il y a une nouvelle version en ligne ---------- */
+const VERSION = (document.querySelector('script[src*="app.js?v="]')?.getAttribute("src") || "").split("v=")[1] || "";
+let majVue = false;
+async function verifierMaj() {
+  if (majVue || !VERSION) return;
+  try {
+    const html = await (await fetch(location.pathname + "?t=" + Date.now(), { cache: "no-store" })).text();
+    const m = html.match(/app\.js\?v=([\w.-]+)/); if (!m || m[1] === VERSION) return;
+    majVue = true;
+    const b = document.createElement("button"); b.className = "maj"; b.type = "button";
+    b.innerHTML = "<span>↻</span> Mise à jour";
+    b.onclick = () => { b.disabled = true; b.innerHTML = "<span>↻</span> Je recharge…"; location.replace(location.pathname + "?v=" + m[1]); };
+    document.body.appendChild(b); requestAnimationFrame(() => b.classList.add("on"));
+  } catch (e) { /* pas de réseau : on réessaiera */ }
+}
+setInterval(verifierMaj, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) verifierMaj(); });
+addEventListener("focus", verifierMaj);
+setTimeout(verifierMaj, 5000);
 /* ---------- Démarrage ---------- */
 refreshPins(); updateBrief();
 window.__jv = { V, select, deselect, openDetails, PLACES, byId, refreshPins, applySky };

@@ -17,3 +17,7 @@ Aucune donnée personnelle dans ce dépôt : tout est dans Supabase, lisible seu
 - `supabase/functions/jarvis-outlook` : connexion (PKCE), relecture toutes les 15 min (pg_cron `jarvis-outlook-sync`), tri par Claude Haiku, rangement dans les lieux (`jarvis_items` source `outlook`, une info par mail avec son n° de mail) et alertes rouges.
 - Table `jarvis_mails` : mails gardés (IBAN, n° de sécu et n° de carte masqués), fermée à tout le monde sauf aux fonctions du serveur.
 - Connecteur MCP : `jarvis_mails_chercher`, `jarvis_mail_lire`, `jarvis_memoire`, `jarvis_mails_synchroniser`.
+
+## Mises à jour
+
+À chaque changement, changer le numéro `?v=` de `app.js` (et `style.css`) dans `index.html`, et celui de `ville.js` dans `app.js`. L'app ouverte compare son numéro à celui en ligne (toutes les minutes et à chaque retour dans l'app) et affiche le bouton « Mise à jour » : un appui recharge la dernière version, sans se déconnecter.

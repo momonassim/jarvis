@@ -286,3 +286,10 @@ p.empty{margin:0}
 
 .dsearch{width:100%;margin:12px 0 0;border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:11px 14px;font:600 15px var(--sans);color:var(--ink);user-select:text;-webkit-user-select:text}
 .doc[hidden]{display:none}
+
+/* bouton « Mise à jour » : apparaît tout seul quand une nouvelle version est en ligne */
+.maj{position:fixed;left:50%;bottom:calc(22px + var(--safe-b));z-index:40;transform:translate(-50%,16px);opacity:0;display:flex;align-items:center;gap:8px;
+  border:0;background:var(--ink);color:#fff;font-size:15px;font-weight:700;padding:13px 20px;border-radius:999px;box-shadow:0 12px 30px -10px rgba(0,0,0,.45);transition:opacity .35s,transform .35s}
+.maj.on{opacity:1;transform:translate(-50%,0)}
+.maj span{font-size:18px;line-height:1}
+.maj:disabled{opacity:.7}
