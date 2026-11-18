@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ville3";
+import { creerVille } from "./ville.js?v=ville4";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -106,7 +106,7 @@ function etatMaison(p) { const now = new Date(), c = coupureDe(p); let etat = p.
 function refreshPins() {
   V.setDonnees(PLACES.map(p => ({ id: p.id, n: p.name, c: p.color, place: p.place, status: p.status, say: p.say, facts: p.facts || [],
     alerts: (p.docs || []).filter(d => d.alerteId).map(d => ({ t: d.t.replace(/^⚠︎\s*/, ""), d: d.d })),
-    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}), ...(p.id === "usine" ? { enPoste: !!p.enPoste, aujTxt: p.aujTxt || "", demTxt: p.demTxt || "" } : {}), ...(p.id === "orange" ? { hf: !!p.hf, nextBill: p.nextBill || null, lastBill: p.lastBill || null } : {}), ...(p.id === "clinique" ? { prochain: p.prochain || null, liste: p.liste || [] } : {}) })));
+    nDocs: (p.docs || []).filter(d => !d.alerteId).length, urgent: !!p.urgent, ...(p.id === "home" ? etatMaison(p) : {}), ...(p.id === "usine" ? { enPoste: !!p.enPoste, aujTxt: p.aujTxt || "", demTxt: p.demTxt || "", semaine: p.semaine || [], compteurs: p.compteurs || {} } : {}), ...(p.id === "orange" ? { hf: !!p.hf, nextBill: p.nextBill || null, lastBill: p.lastBill || null } : {}), ...(p.id === "clinique" ? { prochain: p.prochain || null, liste: p.liste || [] } : {}) })));
 }
 
 /* =========================================================
@@ -138,6 +138,20 @@ $("lbMore").addEventListener("click", openDetails);
 $("lbClose").addEventListener("click", () => { deselect(); });
 function renderSheet(p) {
   const box = $("pDocs"); box.innerHTML = ""; const docs = p.docs || [];
+  if (p.id === "usine" && (p.semaine || []).length) {   // la semaine et les compteurs (en jours, jamais d’argent)
+    const JR = ["dim", "lun", "mar", "mer", "jeu", "ven", "sam"], NM = { M: "M", A: "A", N: "N", R: "R", J: "?" }, w = document.createElement("div");
+    w.innerHTML = '<div class="dh"><b>Les 7 prochains jours</b><span>M matin · A après-midi · N nuit</span></div><div class="wk"></div><div class="dh"><b>Tes compteurs</b><span></span></div><div class="cpt"></div>';
+    const wk = w.querySelector(".wk");
+    p.semaine.forEach((o, i) => { const c = ["conge", "rc", "maladie"].includes(o.g) ? "C" : (o.poste || "R"), d = new Date(o.d + "T12:00:00"), e = document.createElement("div");
+      e.className = "wd" + (i === 0 ? " auj" : ""); e.innerHTML = `<small>${i === 0 ? "auj." : JR[d.getDay()]} ${d.getDate()}</small><b class="p${c}">${c === "C" ? "C" : NM[c] || c}</b><em>${o.sup ? "sup" : o.rem ? "remonte" : ""}</em>`; wk.append(e); });
+    const C = p.compteurs || {}, j = v => v == null ? "—" : String(Math.round(v * 100) / 100).replace(".", ",") + " j";
+    const L = [["Congés payés", j(C.cp), "restants"], ["COR", j(C.cor), C.cor_janvier != null ? "≈ " + j(C.cor_janvier) + " en janvier" : ""], ["RC8", j(C.rc8), C.rc8_prochain ? "prochain fin " + C.rc8_prochain : ""],
+      ["CET", j(C.cet), C.cm ? "+ " + j(C.cm) + " médaille" : ""], ["Remonte", C.remonte ? j(C.remonte.reste) : "—", C.remonte && C.remonte.prevu != null ? "restants sur " + j(C.remonte.prevu) : ""]];
+    const cp = w.querySelector(".cpt"); L.forEach(([t, v, s]) => { const r = document.createElement("div"); r.className = "cr"; r.innerHTML = "<span><b></b><small></small></span><strong></strong>";
+      r.querySelector("b").textContent = t; r.querySelector("small").textContent = s; r.querySelector("strong").textContent = v; cp.append(r); });
+    if (C.extrait) w.querySelectorAll(".dh span")[1].textContent = "relevé du " + new Date(C.extrait).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+    box.append(w);
+  }
   if (docs.length > 6) { const q = document.createElement("input"); q.className = "dsearch"; q.type = "search"; q.placeholder = "Chercher un papier (ex. octobre, quittance)";
     q.addEventListener("input", () => { const v = q.value.trim().toLowerCase(); box.querySelectorAll(".doc").forEach(b => b.hidden = v && !b.textContent.toLowerCase().includes(v)); }); box.append(q); }
   const dh = document.createElement("div"); dh.className = "dh"; dh.innerHTML = "<b>Papiers rangés</b><span></span>";
@@ -426,6 +440,7 @@ function applyPlanning(rows) {
     const h = +new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", hour12: false }).slice(0, 2), hier = J[parisDay(-1)];
     p.enPoste = plages(ditJ(auj)).some(([a, b]) => b > a ? h >= a && h < b : h >= a) || plages(hier && ditJ(hier)).some(([a, b]) => b < a && h < b);
     p.aujTxt = ditJ(auj); p.demTxt = ditJ(dem); }
+  p.semaine = P.jours.filter(o => o.d >= td).slice(0, 7); p.compteurs = P.compteurs || {};
   S.planningTxt = fut.slice(0, 21).map(o => `${jour(o.d)} : ${lc(ditJ(o))}`).join("\n");
 }
 /* ---------- Orange (robot Scriptable « Jarvis Orange ») ---------- */

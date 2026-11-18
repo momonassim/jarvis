@@ -1007,7 +1007,12 @@ function frameInfos(infos,maxD,margin=1.18){ const n=infos[0].n.clone(), r=infos
   if(d>maxD){ d=maxD; fov=Math.min(78,2*Math.atan(Math.max(H/(2*d),W/(2*d*asp)))*180/Math.PI); }
   const cam=c.clone().addScaledVector(n,d); cam.y+=Math.min(.6,d*.04); return [cam,c,fov]; }
 function viewFor(p){ const list=PANELS[p.id]; if(p.id==='banque') return frameInfos([BANKINFO],15);
-  if(list&&list.length) return frameInfos(list.map(P=>P.info),p.maxD||13); const v=p.view; return [v[0],v[1],p.fov||55]; }
+  if(list&&list.length) return frameInfos(list.map(P=>P.info),p.maxD||13); const v=p.view;
+  // l'entrée de l'usine : on recule sur un écran étroit (téléphone) pour voir la vitrine et la pointeuse en entier
+  if(p.id==='usine'&&PL.usine){ const f=p.fov||55, L=PL.usine, dt=L.far+1, df=L.far-4.35, nf=5.4/(2*Math.tan(f*Math.PI/360)*Math.max(.3,camera.aspect));
+    if(nf>df){ const k=(nf+dt-df)/dt, e=v[1].clone().add(v[0].clone().sub(v[1]).multiplyScalar(k)); return [e,v[1],f]; } }
+  return [v[0],v[1],f0(p)]; }
+function f0(p){ return p.fov||55; }
 // --- petits outils de dessin (espace de 1000 px de large) ---
 function begin(x,c){ const S=c.width/1000; x.setTransform(S,0,0,S,0,0); x.globalAlpha=1; x.setLineDash([]); const H=c.height/S; x.clearRect(0,0,1000,H); x.fillStyle='#f7f3ec'; x.fillRect(0,0,1000,H);
   x.strokeStyle='rgba(47,52,60,.16)'; x.lineWidth=4; x.strokeRect(14,14,972,H-28); return H; }
@@ -1291,16 +1296,30 @@ const USN={};
 function dateFr(t){ const m=String(t).match(/(\d{1,2})(?:er)?\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)/i); if(!m) return null;
   const MO=['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre']; const k=MO.indexOf(m[2].toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')); if(k<0) return null;
   const now=new Date(); let d=new Date(now.getFullYear(),k,+m[1]); if(d<new Date(now.getFullYear(),now.getMonth(),now.getDate())-200*864e5) d=new Date(now.getFullYear()+1,k,+m[1]); return d; }
+// un panneau dessiné en canvas (espace de dessin : 1000 px de large)
+function canvasPlane(w,h,ppu){ const c=document.createElement('canvas'); c.width=Math.round(w*ppu); c.height=Math.round(h*ppu); const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4;
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:t,toneMapped:false})); m.userData.c=c; m.userData.t=t; m.userData.H=1000*h/w; return m; }
+const POSTE_U={M:['Matin','4h–12h'],A:['Après-midi','12h–20h'],N:['Nuit','20h–4h'],R:['Repos',''],J:['Poste à fixer','par le chef']};
+function jourU(o){ if(!o) return {n:'—',h:'',tags:[],k:'R'}; const tags=[]; if(o.sup) tags.push('heures sup'); if(o.rem&&o.poste!=='R') tags.push('remonte'); if(o.ferie) tags.push(o.ferie);
+  if(o.g==='conge') return {n:'Congé payé',h:'',tags,k:'C'}; if(o.g==='rc') return {n:'Récup',h:'',tags,k:'C'}; if(o.g==='maladie') return {n:'Maladie',h:'',tags,k:'C'};
+  const p=POSTE_U[o.poste]||[o.poste||'—','']; if(o.poste==='R'&&o.rem) tags.push('remonte'); return {n:p[0],h:p[1],tags,k:o.poste||'R'}; }
+const COUL_U={M:'#E9A23B',A:'#D96B4A',N:'#3F5B8C',R:'#B9BEC4',J:'#9581C2',C:'#5FAE8C'};
+function fitTxt(x,s,maxW,size,w){ let f=size; x.font=`${w} ${f}px ${FNT}`; while(x.measureText(s).width>maxW&&f>10){ f-=1; x.font=`${w} ${f}px ${FNT}`; } return f; }
 function buildUsine(U){ const P=PLACES.find(q=>q.id==='usine'); const root=new THREE.Group(); root.matrixAutoUpdate=false; root.matrix.copy(U.mat); scene.add(root); USN.root=root;
   const cx=U.W/2, gz=4.2; const grey=new THREE.MeshStandardMaterial({color:0x8b9097,roughness:.45,metalness:.5}), white=new THREE.MeshStandardMaterial({color:0xf3f1ec,roughness:.5});
   const pick=m=>{ m.userData.place=P; m.userData.act='details'; pickables.push(m); return m; };
-  // la pointeuse, à gauche du portail
-  const px=cx-3.4, pz=gz+.75; const pole=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1.2,10),grey); pole.position.set(px,.6,pz); root.add(pole);
-  const bd=pick(new THREE.Mesh(new THREE.BoxGeometry(.78,.98,.22),grey)); bd.position.set(px,1.62,pz); bd.castShadow=true; root.add(bd);
-  USN.screen=labelPlane([{t:'—',s:30,y:40}],.66,.8,{bg:'#10141a',ppu:420}); USN.screen.position.set(px,1.64,pz+.112); root.add(pick(USN.screen));
-  // le panneau sécurité, à droite du portail (façon « jours sans accident »)
-  const bx=cx-5.95, bz=gz+.3; for(const dx of [-1.15,1.15]){ const pp=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,2.7,10),grey); pp.position.set(bx+dx,1.35,bz-.03); root.add(pp); }
-  USN.board=labelPlane([{t:'—',s:30,y:40}],2.5,1.55,{bg:'#fbfaf7',edge:'#2f8a57',ppu:300}); USN.board.position.set(bx,1.85,bz); root.add(pick(USN.board));
+  // la pointeuse : un boîtier vissé sur la face avant du pilier du portail (pas de poteau planté dans le trottoir)
+  const px=cx-3.5, pf=4.56; const bd=pick(new THREE.Mesh(new THREE.BoxGeometry(.6,.78,.08),grey)); bd.position.set(px,1.45,pf+.04); bd.castShadow=true; root.add(bd);
+  USN.screen=canvasPlane(.5,.66,640); USN.screen.position.set(px,1.46,pf+.083); root.add(pick(USN.screen));
+  // le tableau d'affichage : une vitrine posée sur le muret, entre deux piliers de la clôture (elle remplace la travée de grille)
+  const tx0=cx-7.72, tx1=cx-5.28, tw=tx1-tx0, ty0=.52, th=1.56, tz=4.3, tcx=(tx0+tx1)/2; USN.tab={x:tcx,y:ty0+th/2,z:tz};
+  const frM=new THREE.MeshStandardMaterial({color:0x6b4f3a,roughness:.55,metalness:.15});
+  const back=new THREE.Mesh(new THREE.BoxGeometry(tw,th,.06),frM); back.position.set(tcx,ty0+th/2,tz); back.castShadow=true; back.receiveShadow=true; root.add(pick(back));
+  for(const [w,h,x,y] of [[tw,.06,tcx,ty0+.03],[tw,.06,tcx,ty0+th-.03],[.06,th,tx0+.03,ty0+th/2],[.06,th,tx1-.03,ty0+th/2]]){ const f=new THREE.Mesh(new THREE.BoxGeometry(w,h,.1),frM); f.position.set(x,y,tz+.05); f.castShadow=true; root.add(f); }
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(tw+.12,.05,.22),frM); roof.position.set(tcx,ty0+th+.025,tz+.06); roof.castShadow=true; root.add(roof);
+  USN.board=canvasPlane(tw-.14,th-.14,420); USN.board.position.set(tcx,ty0+th/2,tz+.035); root.add(pick(USN.board));
+  const glass=new THREE.Mesh(new THREE.PlaneGeometry(tw-.1,th-.1),new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:.05,metalness:0,transparent:true,opacity:.05,depthWrite:false}));
+  glass.position.set(tcx,ty0+th/2,tz+.09); root.add(glass);
   // fumée de la cheminée du four (en poste) et sommet qui rougeoie la nuit
   const chx=U.W*.78, chz=-U.D-5, top=3.3+33.1; USN.smoke=[]; const smM=()=>new THREE.SpriteMaterial({map:DOT,color:0xeeebe6,transparent:true,opacity:0,depthWrite:false});
   for(let i=0;i<18;i++){ const sp=new THREE.Sprite(smM()); sp.userData.ph=i/18; root.add(sp); USN.smoke.push(sp); } USN.top=V(chx,top,chz);
@@ -1312,21 +1331,48 @@ function updateUsine(dt){ if(!USN.root) return; const D=DATA.usine||{}, t=perfor
   USN.smoke.forEach(sp=>{ const f=(sp.userData.ph+t*.06)%1; sp.position.set(USN.top.x+f*5+Math.sin(t*.5+sp.userData.ph*9)*.6,USN.top.y+.4+f*11,USN.top.z+f*2); const sc=1.6+f*6; sp.scale.set(sc,sc,1); sp.material.opacity=USN.k*.55*(1-f)*Math.min(1,f*6); });
   USN.glow.material.opacity=USN.k*(NIGHT?.9:.25)*(.8+.2*Math.sin(t*3));
   // la pointeuse
-  const st=on?'EN POSTE':'REPOS', key=[D.aujTxt,D.demTxt,st].join('|');
-  if(USN.screen.userData.k!==key){ USN.screen.userData.k=key; const sp=s2=>String(s2||'—').split(' · ');
-    const a=sp(D.aujTxt), d2=sp(D.demTxt);
-    USN.screen.userData.draw([{t:'POINTEUSE',s:26,y:42,ls:6,c:'#7f8a96'},{t:'● '+st,s:30,y:86,w:800,c:on?'#5fe0a0':'#9aa3ad'},
-      {t:"AUJOURD'HUI",s:24,y:140,ls:4,c:'#7f8a96'},{t:a[0],s:44,y:186,c:'#ffffff'},{t:a[1]||'',s:30,y:222,w:600,c:'#cfd6dd'},
-      {t:'DEMAIN',s:24,y:268,ls:4,c:'#7f8a96'},{t:d2[0],s:38,y:308,c:'#ffffff'},{t:d2.slice(1).join(' · '),s:26,y:338,w:600,c:'#cfd6dd'}]); }
-  // le panneau sécurité : un compteur de jours par convocation
+  const sem=D.semaine||[], J0=jourU(sem[0]), J1=jourU(sem[1]), st=on?'EN POSTE':'REPOS', key=JSON.stringify([J0,J1,st]);
+  if(USN.screen.userData.k!==key){ USN.screen.userData.k=key; const c=USN.screen.userData.c, x=c.getContext('2d'), S=c.width/1000, H=USN.screen.userData.H; x.setTransform(S,0,0,S,0,0);
+    x.fillStyle='#10141a'; x.fillRect(0,0,1000,H); x.textAlign='center';
+    const T=(t,y,size,w,col,maxW=880)=>{ if(!t) return; fitTxt(x,t,maxW,size,w); x.fillStyle=col; x.fillText(t,500,y); };
+    T('POINTEUSE',120,66,700,'#7f8a96'); T('● '+st,235,84,800,on?'#5fe0a0':'#c3cad1');
+    x.fillStyle='rgba(255,255,255,.14)'; x.fillRect(80,295,840,5);
+    const bloc=(lab,J,y)=>{ T(lab,y,58,700,'#7f8a96'); T(J.n,y+135,140,800,'#ffffff'); T([J.h,...J.tags].filter(Boolean).join(' · '),y+225,64,600,'#cfd6dd'); };
+    bloc("AUJOURD'HUI",J0,400); bloc('DEMAIN',J1,840);
+    USN.screen.userData.t.needsUpdate=true; }
+  // le tableau d'affichage : la semaine, les compteurs (en jours) et les rendez-vous
   const now=new Date(); now.setHours(0,0,0,0);
-  const conv=(D.alerts||[]).map(a=>({t:a.t,d:dateFr(a.t)})).filter(c=>c.d&&c.d>=now).sort((a,b)=>a.d-b.d).slice(0,3);
-  const bk=JSON.stringify(conv.map(c=>c.t));
-  if(USN.board.userData.k!==bk){ USN.board.userData.k=bk; const c=USN.board.userData; const L=[{t:'SÉCURITÉ · TES RENDEZ-VOUS',s:40,y:70,ls:5,c:'#2f8a57'}];
-    if(!conv.length) L.push({t:'Aucune convocation à venir ✓',s:44,y:240,c:'#2f8a57'});
-    conv.forEach((cv,i)=>{ const j=Math.round((cv.d-now)/864e5), nm=cv.t.replace(/\s*[—-]\s*.*$/,'').replace(/\s+le\s+\d.*$/,'').replace(/\s+du travail$/i,'').slice(0,24);
-      L.push({t:(j===0?"AUJOURD'HUI":j===1?'DEMAIN':'J−'+j)+'  ·  '+nm,s:44,y:180+i*112,w:800,c:j<=3?'#c9483a':'#2f343c'}); });
-    c.draw(L); }
+  const vus=new Set(), conv=(D.alerts||[]).map(a=>({t:a.t,d:dateFr(a.t)})).filter(c=>c.d&&c.d>=now).sort((a,b)=>a.d-b.d).filter(c=>{ const k=+c.d; if(vus.has(k)) return false; vus.add(k); return true; }).slice(0,2);
+  const C=D.compteurs||{}, bk=JSON.stringify([sem.slice(0,7),C,conv.map(c=>c.t)]);
+  if(USN.board.userData.k!==bk){ USN.board.userData.k=bk; const c=USN.board.userData.c, x=c.getContext('2d'), S=c.width/1000, H=USN.board.userData.H; x.setTransform(S,0,0,S,0,0);
+    x.fillStyle='#f4efe6'; x.fillRect(0,0,1000,H); x.textAlign='left';
+    // en-tête
+    x.fillStyle='#B07F55'; x.fillRect(0,0,1000,74); x.font=`800 34px ${FNT}`; x.fillStyle='#fff'; try{x.letterSpacing='5px';}catch(e){} x.fillText("TABLEAU D'AFFICHAGE",30,50); try{x.letterSpacing='0px';}catch(e){}
+    const head=(t,X,Y)=>{ x.font=`800 22px ${FNT}`; x.fillStyle='#8a6a52'; try{x.letterSpacing='3px';}catch(e){} x.fillText(t,X,Y); try{x.letterSpacing='0px';}catch(e){} };
+    // la semaine : 7 cases
+    head('LES 7 PROCHAINS JOURS',30,118); const JR=['DIM','LUN','MAR','MER','JEU','VEN','SAM'];
+    sem.slice(0,7).forEach((o,i)=>{ const J=jourU(o), X=30+i*80, d=new Date(o.d+'T12:00:00'); x.textAlign='center';
+      x.font=`700 19px ${FNT}`; x.fillStyle=i===0?'#2f343c':'#7a7f88'; x.fillText(i===0?"AUJ.":JR[d.getDay()],X+34,150); x.font=`600 17px ${FNT}`; x.fillText(String(d.getDate()),X+34,172);
+      x.fillStyle=COUL_U[J.k]||'#B9BEC4'; x.beginPath(); x.roundRect(X+4,184,60,60,12); x.fill(); if(i===0){ x.strokeStyle='#2f343c'; x.lineWidth=4; x.stroke(); }
+      x.font=`800 30px ${FNT}`; x.fillStyle='#fff'; x.fillText(J.k==='C'?'C':J.k==='J'?'?':J.k,X+34,225);
+      if(o.sup){ x.font=`800 15px ${FNT}`; x.fillStyle='#c9483a'; x.fillText('SUP',X+34,266); } else if(o.rem){ x.font=`700 14px ${FNT}`; x.fillStyle='#8a6a52'; x.fillText('remonte',X+34,266); } });
+    x.textAlign='left'; x.font=`600 16px ${FNT}`; x.fillStyle='#7a7f88'; x.fillText('M matin · A après-midi · N nuit · R repos',30,298);
+    // les rendez-vous
+    head('TES RENDEZ-VOUS',30,350);
+    if(!conv.length){ x.font=`700 26px ${FNT}`; x.fillStyle='#2f8a57'; x.fillText('Aucune convocation à venir ✓',30,392); }
+    conv.forEach((cv,i)=>{ const j=Math.round((cv.d-now)/864e5), Y=372+i*72, nm=cv.t.replace(/\s*[—-]\s*.*$/,'').replace(/\s+le\s+\d.*$/,'').replace(/\s+du travail$/i,'');
+      x.fillStyle=j<=3?'#c9483a':'#B07F55'; x.beginPath(); x.roundRect(30,Y,104,54,10); x.fill(); x.textAlign='center'; x.font=`800 24px ${FNT}`; x.fillStyle='#fff'; x.fillText(j===0?"AUJ.":j===1?'DEMAIN':'J−'+j,82,Y+36);
+      x.textAlign='left'; fitTxt(x,nm,400,26,700); x.fillStyle='#2f343c'; x.fillText(nm,150,Y+24);
+      x.font=`600 19px ${FNT}`; x.fillStyle='#7a7f88'; x.fillText(cv.d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'}),150,Y+48); });
+    // séparation
+    x.fillStyle='rgba(47,52,60,.14)'; x.fillRect(592,100,3,H-130);
+    // les compteurs (jamais d'argent)
+    head('TES COMPTEURS',625,118); const j=v=>v==null?'—':String(Math.round(v*100)/100).replace('.',',')+' j';
+    const L=[['Congés payés',j(C.cp),'restants'],['COR',j(C.cor),C.cor_janvier!=null?'≈ '+j(C.cor_janvier)+' en janvier':''],['RC8',j(C.rc8),C.rc8_prochain?'prochain fin '+C.rc8_prochain:''],['CET',j(C.cet),C.cm?'+ '+j(C.cm)+' médaille':''],['Remonte',C.remonte?j(C.remonte.reste):'—',C.remonte&&C.remonte.prevu!=null?'restants sur '+j(C.remonte.prevu):'']];
+    L.forEach(([a,v,sub],i)=>{ const Y=150+i*82; x.fillStyle='rgba(255,255,255,.75)'; x.beginPath(); x.roundRect(620,Y,350,70,12); x.fill(); x.fillStyle='#B07F55'; x.fillRect(620,Y+12,6,46);
+      x.textAlign='left'; x.font=`700 22px ${FNT}`; x.fillStyle='#2f343c'; x.fillText(a,642,Y+30); if(sub){ fitTxt(x,sub,200,16,600); x.fillStyle='#7a7f88'; x.fillText(sub,642,Y+54); }
+      x.textAlign='right'; x.font=`800 32px ${FNT}`; x.fillStyle='#2f343c'; x.fillText(v,955,Y+46); });
+    x.textAlign='left'; USN.board.userData.t.needsUpdate=true; }
 }
 
 /* ---------- TA SANTÉ : la croix verte, la porte d'entrée, le tableau de la salle d'attente ---------- */
@@ -1402,7 +1448,7 @@ function buildOpenings(){
     newPanel('garage',gm,{x:wx,y:.98,zb:-2.7,ry:Math.PI/2,z0:-.08,z1:.12,w:2.3,h:1.6,kind:'slide',d:0,frame:false,thick:.12,maxD:2.6,glow:.55,draw:boardReal('garage')}); }
   // ---------- TON TRAVAIL : les portes roulantes montent, le planning est derrière ----------
   const U=PL.usine; if(U&&FDOOR.length===2){ const [d1,d2]=FDOOR;
-    buildUsine(U); U.tX=U.W/2-5.05; U.tY=1.65; U.camY=2.2; U.far=4.2+12.2; U.camDX=0; }
+    buildUsine(U); U.tX=U.W/2-5.4; U.tY=1.4; U.camY=1.75; U.far=10.2; U.camDX=0; }
   // ---------- IMPÔTS : l'avis sort de la façade entre les drapeaux ----------
   const I=PL.impots; if(I) newPanel('impots',I.mat,{x:I.W/2,y:6.75,z0:-.5,z1:.42,w:5.0,h:3.0,kind:'slide',d:0,frame:true,thick:.22,draw:boardReal('impots')});
   // ---------- TA SANTÉ ----------

@@ -293,3 +293,18 @@ p.empty{margin:0}
 .maj.on{opacity:1;transform:translate(-50%,0)}
 .maj span{font-size:18px;line-height:1}
 .maj:disabled{opacity:.7}
+
+/* fiche Travail : la semaine et les compteurs */
+.wk{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.wd{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;border-radius:12px}
+.wd.auj{background:rgba(35,28,23,.06)}
+.wd small{font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase}
+.wd b{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:16px;background:#B9BEC4}
+.wd b.pM{background:#E9A23B}.wd b.pA{background:#D96B4A}.wd b.pN{background:#3F5B8C}.wd b.pJ{background:#9581C2}.wd b.pC{background:#5FAE8C}
+.wd em{font-style:normal;font-size:10px;font-weight:700;color:#c9483a;min-height:12px}
+.cpt{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cr{display:flex;justify-content:space-between;align-items:center;gap:8px;background:rgba(35,28,23,.045);border-radius:14px;padding:10px 12px}
+.cr span{display:flex;flex-direction:column;min-width:0}
+.cr b{font-size:14px;font-weight:800}
+.cr small{font-size:11px;font-weight:600;color:var(--ink2)}
+.cr strong{font-size:18px;font-weight:800;white-space:nowrap}
