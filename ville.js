@@ -819,6 +819,7 @@ setTime(0);
 
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.2,1500);
 const controls=new OrbitControls(camera,renderer.domElement);
+controls.addEventListener('start',()=>{ TOUR=null; });   // tu reprends la main : la visite guidée s'arrête
 controls.enableDamping=true; controls.dampingFactor=.08; controls.maxPolarAngle=Math.PI*.495; controls.minDistance=1.5; controls.maxDistance=220;
 controls.touches={ONE:THREE.TOUCH.ROTATE,TWO:THREE.TOUCH.DOLLY_PAN};
 const VIEWS={rue:[V(-32,2.6,2.6),V(0,7.5,-3.5),48],facades:[V(-4,5.2,5.6),V(-4,8.2,-7),58],place:[V(2,2.4,4.0),V(2,7,22),52],ciel:[V(-45,118,92),V(18,0,-4),45]};
@@ -929,7 +930,11 @@ let FOCUS=null;
 function flyTo(pos,tgt,fov){ const p0=camera.position.clone(), t0=controls.target.clone(); const dist=Math.hypot(pos.x-p0.x,pos.z-p0.z);
   let ctrl=null; if(dist>16){ ctrl=p0.clone().lerp(pos,.5); ctrl.y=Math.max(p0.y,pos.y,24)+Math.min(14,dist*.12); }
   anim={p0,t0,f0:camera.fov,p:pos.clone(),t:tgt.clone(),f:fov,k:0,ctrl,spd:ctrl?.016:.026}; hideFor(pos,tgt); }
-function ouvrir(id){ const p=PLACES.find(q=>q.id===id); if(!p) return; SEL=p; FOCUS=null; selT=0; const v=viewFor(p); flyTo(v[0],v[1],v[2]); }
+let TOUR=null;   // petite visite guidée en cours (annulée dès que tu touches la ville)
+function ouvrir(id){ const p=PLACES.find(q=>q.id===id); if(!p) return; SEL=p; FOCUS=null; selT=0; const v=viewFor(p);
+  // chez toi : on lève d'abord les yeux vers ta fenêtre (sa lumière dit comment ça va), puis on redescend à la porte
+  if(p.viewHaut){ const h=p.viewHaut, jeton=TOUR={}; flyTo(h[0],h[1],h[2]); anim.then=()=>setTimeout(()=>{ if(TOUR===jeton&&SEL===p&&!FOCUS&&!anim){ TOUR=null; flyTo(v[0],v[1],v[2]); } },1700); return; }
+  TOUR=null; flyTo(v[0],v[1],v[2]); }
 function fermer(){ SEL=null; FOCUS=null; hideFor(null); }
 let showLbl=true;
 // toucher un médaillon ou un bâtiment
@@ -939,7 +944,11 @@ renderer.domElement.addEventListener('pointerup',e=>{ if(!downXY||Math.hypot(e.c
   const rr=canvas.getBoundingClientRect(); _ndc.set((e.clientX-rr.left)/rr.width*2-1,-((e.clientY-rr.top)/rr.height)*2+1); rc.setFromCamera(_ndc,camera);
   const h=rc.intersectObjects(pickables,false).filter(i=>{let o=i.object; while(o){ if(!o.visible) return false; o=o.parent;} return true;});
   if(h.length){ const u=h[0].object.userData;
-    if(u.act){ if(SEL!==u.place&&u.act==='fenetre'){HK.pick&&HK.pick(u.place.id);return;} HK.action&&HK.action(u.place.id,u.act); return; }
+    if(u.act){ if(SEL!==u.place&&u.act==='fenetre'){HK.pick&&HK.pick(u.place.id);return;}
+      // un détail trop petit vu de loin (la porte de chez toi) : le premier appui rapproche la caméra, le second agit
+      if(u.zoom&&SEL===u.place&&FOCUS!==u.zoom){ FOCUS=u.zoom; flyTo(u.zoom[0],u.zoom[1],u.zoom[2]); return; }
+      if(u.act==='fenetre'&&FOCUS){ FOCUS=null; const v=viewFor(SEL); flyTo(v[0],v[1],v[2]); }
+      HK.action&&HK.action(u.place.id,u.act); return; }
     // bouton dessiné sur un panneau (ex. « Prendre rendez-vous ») : un appui dessus lance l'action
     if(u.panel&&u.panel.o.hit&&h[0].uv&&h[0].face&&h[0].face.normal.z>.5){ const P=u.panel, b=P.o.hit, Hc=P.c.height/(P.c.width/1000);
       const px=h[0].uv.x*1000, py=(1-h[0].uv.y)*Hc;
@@ -1120,32 +1129,44 @@ function engrave(id){ return (x,t,c)=>{ const S=c.width/1000; x.setTransform(S,0
     x.fillStyle='#c9483a'; x.font=`800 34px ${FNT}`; const tt=al.t.length>38?al.t.slice(0,37)+'…':al.t; x.fillText('●  '+tt,116,yy); x.restore(); });
   x.globalAlpha=1; }; }
 
-/* ---------- CHEZ TOI : ce qui est déjà là parle (boîte aux lettres, interphone, fenêtre du 4e) ---------- */
+/* ---------- CHEZ TOI : la porte en bois avec sa fente à lettres en laiton, la platine d'interphone, et ta fenêtre au 4e ----------
+   La vue d'ensemble montre l'immeuble de la porte jusqu'à ta fenêtre (sa lumière dit comment ça va chez toi).
+   Un appui sur la porte, la fente ou l'interphone rapproche la caméra ; un second appui ouvre le courrier ou le gestionnaire. */
 const HOME={};
-function buildHome(L){ const P=PLACES.find(q=>q.id==='home'); const mk=(geo,mat,x,y,z,act)=>{ const m=new THREE.Mesh(geo,mat); m.matrixAutoUpdate=false; m.matrix.copy(L.mat).multiply(M(x,y,z)); m.castShadow=true; scene.add(m);
-    if(act){ m.userData.place=P; m.userData.act=act; pickables.push(m);} return m; };
-  // boîte aux lettres, à droite de la porte
-  const boxM=new THREE.MeshStandardMaterial({color:0xd9d5ce,roughness:.45,metalness:.25}), darkM=new THREE.MeshStandardMaterial({color:0x3a3f47,roughness:.6});
-  const bx=3.3, by=1.35, bz=.2;
-  HOME.box=mk(new THREE.BoxGeometry(.62,.78,.26),boxM,bx,by,bz,'courrier');
-  mk(new THREE.BoxGeometry(.66,.06,.3),boxM,bx,by+.42,bz);                       // petit toit
-  mk(new THREE.BoxGeometry(.44,.035,.02),darkM,bx,by+.22,bz+.135);               // fente
-  const tagC=document.createElement('canvas'); tagC.width=256; tagC.height=64; const tx=tagC.getContext('2d'); tx.fillStyle='#fbfaf7'; tx.fillRect(0,0,256,64); tx.fillStyle='#2f343c'; tx.font="800 30px 'Plus Jakarta Sans',Helvetica,Arial"; tx.textAlign='center'; tx.fillText('COURRIER',128,43);
-  const tagT=new THREE.CanvasTexture(tagC); tagT.colorSpace=THREE.SRGBColorSpace; mk(new THREE.PlaneGeometry(.36,.09),new THREE.MeshBasicMaterial({map:tagT,toneMapped:false}),bx,by-.12,bz+.132);
-  // l'enveloppe qui dépasse de la fente quand il y a du nouveau
-  const envC=document.createElement('canvas'); envC.width=256; envC.height=160; const ex=envC.getContext('2d'); ex.fillStyle='#ffffff'; ex.fillRect(0,0,256,160); ex.fillStyle='#C9705A'; ex.fillRect(0,0,256,26);
-  ex.strokeStyle='rgba(47,52,60,.25)'; ex.lineWidth=5; ex.beginPath(); ex.moveTo(0,26); ex.lineTo(128,110); ex.lineTo(256,26); ex.stroke();
-  const envT=new THREE.CanvasTexture(envC); envT.colorSpace=THREE.SRGBColorSpace;
-  HOME.env=mk(new THREE.BoxGeometry(.48,.3,.014),[boxM,boxM,boxM,boxM,new THREE.MeshBasicMaterial({map:envT,toneMapped:false}),boxM],bx,by+.3,bz+.12,'courrier'); HOME.envY=by+.36; HOME.envX=bx; HOME.envZ=bz+.15; HOME.L=L;
-  // interphone, entre la porte et la boîte
-  const ix=.66, iy=1.45, iz=.16;
-  mk(new THREE.BoxGeometry(.26,.44,.06),new THREE.MeshStandardMaterial({color:0xb8b2a8,roughness:.35,metalness:.55}),ix,iy,iz,'interphone');
-  mk(new THREE.CircleGeometry(.055,20),darkM,ix,iy+.1,iz+.032);
-  for(let k=0;k<3;k++) mk(new THREE.BoxGeometry(.15,.035,.012),darkM,ix,iy-.05-k*.06,iz+.032);
-  HOME.led=mk(new THREE.CircleGeometry(.018,12),new THREE.MeshBasicMaterial({color:0x5FAE8C,toneMapped:false}),ix+.08,iy+.18,iz+.033);
-  // ta fenêtre au 4e étage : le voyant de la maison
+function buildHome(L){ const P=PLACES.find(q=>q.id==='home'); const DX=1.8;   // milieu de la porte (battants en retrait à z = -0,13)
+  const porte=[V(DX+.25,1.55,3.3).applyMatrix4(L.mat),V(DX,1.25,-1).applyMatrix4(L.mat),48];
+  const mk=(geo,mat,x,y,z,act,ry=0)=>{ const m=new THREE.Mesh(geo,mat); m.matrixAutoUpdate=false; m.matrix.copy(L.mat).multiply(M(x,y,z,0,ry,0)); m.castShadow=true; scene.add(m);
+    if(act){ m.userData.place=P; m.userData.act=act; m.userData.zoom=porte; pickables.push(m);} return m; };
+  const laiton=new THREE.MeshStandardMaterial({color:0xC9A25E,roughness:.32,metalness:.85,envMapIntensity:1}), fer=ironM, noir=new THREE.MeshStandardMaterial({color:0x14171b,roughness:.7});
+  // fente à lettres en laiton sur le battant droit de la porte
+  const sx=DX+.33, sy=1.0, sz=-.124;   // posée sur le battant droit
+  mk(new THREE.BoxGeometry(.36,.12,.012),laiton,sx,sy,sz,'courrier');
+  mk(new THREE.BoxGeometry(.26,.026,.004),noir,sx,sy+.005,sz+.008);
+  const gC=document.createElement('canvas'); gC.width=256; gC.height=40; const g=gC.getContext('2d'); g.fillStyle='#5a4320'; g.font=`700 26px ${SERIF}`; g.textAlign='center'; try{g.letterSpacing='6px';}catch(e){} g.fillText('LETTRES',128,30);
+  const gT=new THREE.CanvasTexture(gC); gT.colorSpace=THREE.SRGBColorSpace; mk(new THREE.PlaneGeometry(.2,.03),new THREE.MeshBasicMaterial({map:gT,transparent:true}),sx,sy-.04,sz+.007);
+  // l'enveloppe crème qui sort à moitié de la fente quand il y a du nouveau courrier (cachet de cire de la couleur du lieu)
+  const eC=document.createElement('canvas'); eC.width=256; eC.height=150; const e=eC.getContext('2d'); e.fillStyle='#FBF7EE'; e.fillRect(0,0,256,150);
+  e.strokeStyle='rgba(43,49,56,.22)'; e.lineWidth=4; e.beginPath(); e.moveTo(0,0); e.lineTo(128,84); e.lineTo(256,0); e.stroke(); e.fillStyle='#C9705A'; e.beginPath(); e.arc(128,84,17,0,7); e.fill();
+  const eT=new THREE.CanvasTexture(eC); eT.colorSpace=THREE.SRGBColorSpace; const crem=new THREE.MeshStandardMaterial({color:0xFBF7EE,roughness:.8});
+  const eg=new THREE.BoxGeometry(.2,.003,.13); eg.translate(0,0,.065);   // pivot sur le bord coincé dans la fente
+  HOME.env=mk(eg,[crem,crem,new THREE.MeshStandardMaterial({map:eT,roughness:.8}),crem,crem,crem],sx,sy+.005,sz,'courrier');
+  HOME.env.visible=false; HOME.envP={x:sx,y:sy+.005,z:sz}; HOME.L=L; HOME.envK=0;
+  // platine d'interphone en laiton, à gauche de la porte : plaque émaillée gravée, 4 boutons, voyant
+  const ix=.62, iy=1.45, iz=.066;   // vissée sur le mur (face du mur à z = 0,05)
+  mk(new THREE.BoxGeometry(.24,.44,.03),laiton,ix,iy,iz,'interphone');
+  mk(new THREE.BoxGeometry(.27,.47,.015),fer,ix,iy,iz-.02);
+  const nC=document.createElement('canvas'); nC.width=256; nC.height=110; const n=nC.getContext('2d'); n.fillStyle='#F6F2EA'; n.fillRect(0,0,256,110); n.strokeStyle='#2B3138'; n.lineWidth=5; n.strokeRect(6,6,244,98);
+  n.fillStyle='#2B3138'; n.textAlign='center'; n.font=`700 40px ${SERIF}`; try{n.letterSpacing='5px';}catch(e){} n.fillText('4ᵉ ÉTAGE',128,52); n.font=`600 22px ${FNT}`; try{n.letterSpacing='0px';}catch(e){} n.fillStyle='#6b7079'; n.fillText('gestionnaire : Foncia',128,86);
+  const nT=new THREE.CanvasTexture(nC); nT.colorSpace=THREE.SRGBColorSpace; mk(new THREE.PlaneGeometry(.19,.082),new THREE.MeshBasicMaterial({map:nT}),ix,iy+.12,iz+.017,'interphone');
+  mk(new THREE.CircleGeometry(.02,16),noir,ix,iy+.035,iz+.017);
+  for(let k=0;k<4;k++){ mk(new THREE.CircleGeometry(.019,18),fer,ix+(k%2?.045:-.045),iy-.06-Math.floor(k/2)*.07,iz+.016); mk(new THREE.CircleGeometry(.014,18),laiton,ix+(k%2?.045:-.045),iy-.06-Math.floor(k/2)*.07,iz+.018); }
+  // le voyant de ta fenêtre, recopié sur la platine : même couleur que la lumière du 4e
+  mk(new THREE.CircleGeometry(.024,18),fer,ix,iy+.19,iz+.016); HOME.led=mk(new THREE.CircleGeometry(.019,18),new THREE.MeshBasicMaterial({color:0xffcf8a,toneMapped:false}),ix,iy+.19,iz+.018);
+  // ta fenêtre au 4e étage : le voyant de la maison, avec un halo pour qu'on la voie de la rue
   HOME.winM=new THREE.MeshBasicMaterial({color:0xffcf8a,toneMapped:false,transparent:true,opacity:.92});
-  HOME.win=mk(new THREE.PlaneGeometry(1.02,1.62),HOME.winM,4.45,14.25+.84,-.12,'fenetre');
+  HOME.win=mk(new THREE.PlaneGeometry(1.02,1.62),HOME.winM,4.45,14.25+.84,-.12,'fenetre'); HOME.win.userData.zoom=null;
+  HOME.halo=new THREE.Sprite(new THREE.SpriteMaterial({map:DOT,color:0xffcf8a,transparent:true,opacity:.55,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false}));
+  HOME.halo.position.copy(V(4.45,15.09,.25).applyMatrix4(L.mat)); HOME.halo.scale.set(3.4,3.6,1); scene.add(HOME.halo); NOAO.push(HOME.halo);
 }
 const _wc=new THREE.Color();
 function updateHome(dt){ if(!HOME.win) return; const D=DATA.home||{}, e=D.etat||'ok', t=performance.now()/1000;
@@ -1154,9 +1175,11 @@ function updateHome(dt){ if(!HOME.win) return; const D=DATA.home||{}, e=D.etat||
   else if(e==='coupure'){ col=0x262b33; op=.96; }
   else if(e==='veille'){ col=0xffbf5e; op=.45+.25*(.5+.5*Math.sin(t*1.6)); }
   _wc.set(col); HOME.winM.color.lerp(_wc,Math.min(1,dt*3)); HOME.winM.opacity+= (op-HOME.winM.opacity)*Math.min(1,dt*3);
-  // l'enveloppe : visible et qui frétille quand il y a du nouveau courrier
-  const n=D.nouveau||0; HOME.env.visible=n>0; if(n>0){ const L=HOME.L; const up=.04*Math.sin(t*3)+.02; HOME.env.matrix.copy(L.mat).multiply(M(HOME.envX,HOME.envY+up,HOME.envZ,0,0,.05*Math.sin(t*2.2))); }
-  HOME.led.material.color.set(D.gest?0x5FAE8C:0x9aa0a8);
+  HOME.halo.material.color.copy(HOME.winM.color); HOME.halo.material.opacity=e==='coupure'?0:.5*HOME.winM.opacity;
+  // l'enveloppe : elle sort doucement de la fente (moitié dehors), respire un peu, et rentre quand le courrier est vu
+  const n=D.nouveau||0; HOME.envK+=((n>0?1:0)-HOME.envK)*Math.min(1,dt*1.2); const k=HOME.envK; HOME.env.visible=k>.02;
+  if(HOME.env.visible){ const o=HOME.envP, a=1.15*k+.05*Math.sin(t*1.3)*k; HOME.env.matrix.copy(HOME.L.mat).multiply(M(o.x,o.y,o.z+.008,a,0,0)); }   // elle pend de la fente, face à toi, et bouge à peine
+  HOME.led.material.color.copy(HOME.winM.color).multiplyScalar(e==='coupure'?.35:1);
 }
 
 /* ---------- GAZ ET ÉLECTRICITÉ : la boutique Plenitude et, derrière, l'enclos des générateurs ---------- */
@@ -1478,7 +1501,7 @@ function boardReal(id,o={}){ return (x,t,c)=>{ const H=begin(x,c); const D=dOf(i
 function buildOpenings(){
   // ---------- CHEZ TOI : quatre grandes cartes sortent de la façade ----------
   // CHEZ TOI : les infos apparaissent gravées en relief dans le mur, à droite du porche du garage
-  const H0=PL.home; if(H0){ buildHome(H0); H0.tX=2.07; H0.tY=1.55; H0.camY=1.75; H0.far=7.8; H0.camDX=0; }
+  const H0=PL.home; if(H0){ buildHome(H0); }
   // ---------- TA VOITURE : un panneau émaillé sur le trottoir, à gauche du porche ; la voiture se voit au bout de la rampe ----------
   if(GATE) buildGarage(GATE.userData.mat,GATE.userData.cx);
   // ---------- TON TRAVAIL : les portes roulantes montent, le planning est derrière ----------
@@ -1504,7 +1527,9 @@ const MAXD={home:13.2,usine:26,impots:13.2,clinique:13.2,mairie:15,medecin:13.2,
 PLACES.forEach(p=>{ if(MAXD[p.id]) p.maxD=MAXD[p.id]; });
 for(const p of PLACES){ const L=PL[p.id]; if(p.id!=='garage'&&L&&L.mat){ const far=L.far||9.6, tx=L.tX??L.W/2; p.view=[V(tx+(L.camDX??L.W*.08),L.camY||2.3,far).applyMatrix4(L.mat),V(tx,L.tY||Math.min(L.H*.42,6.2),-1).applyMatrix4(L.mat)]; } }
 { const E=PLACES.find(q=>q.id==='energie'); if(PL.energie) E.view=PL.energie.view; }
-{ const Hm=PLACES.find(q=>q.id==='home'); if(Hm) Hm.fov=55; }
+{ const Hm=PLACES.find(q=>q.id==='home'); if(Hm&&PL.home){ const Lm=PL.home.mat; Hm.fov=55;
+  Hm.view=[V(1.8,1.75,7.8).applyMatrix4(Lm),V(1.8,1.5,-1).applyMatrix4(Lm)];                 // la porte, l'interphone, la fente à lettres
+  Hm.viewHaut=[V(3.9,1.8,6.8).applyMatrix4(Lm),V(4.45,12.6,-.2).applyMatrix4(Lm),60]; } }   // en levant les yeux : ta fenêtre du 4e
 { const Og=PLACES.find(q=>q.id==='orange'); if(Og) Og.fov=78; }
 { const Us=PLACES.find(q=>q.id==='usine'); if(Us){ Us.fov=55; if(PL.usine) Us.cadre={w:5.4,c:V(PL.usine.W/2-5.4,1.3,4.35).applyMatrix4(PL.usine.mat)}; } }
 { const Cl=PLACES.find(q=>q.id==='clinique'); if(Cl) Cl.fov=70; }
@@ -1577,7 +1602,7 @@ function frame(){
   const _now=performance.now(), _fdt=Math.min(.1,(_now-(frame.t||_now))/1000); frame.t=_now;
   if(anim){anim.k=Math.min(1,anim.k+(anim.spd||.025)*60*_fdt); const e=anim.k*anim.k*(3-2*anim.k);
     if(anim.ctrl){ const u=1-e; camera.position.set(u*u*anim.p0.x+2*u*e*anim.ctrl.x+e*e*anim.p.x,u*u*anim.p0.y+2*u*e*anim.ctrl.y+e*e*anim.p.y,u*u*anim.p0.z+2*u*e*anim.ctrl.z+e*e*anim.p.z); }
-    else camera.position.lerpVectors(anim.p0,anim.p,e); controls.target.lerpVectors(anim.t0,anim.t,e); camera.fov=anim.f0+(anim.f-anim.f0)*e; camera.updateProjectionMatrix(); if(anim.k>=1)anim=null;}
+    else camera.position.lerpVectors(anim.p0,anim.p,e); controls.target.lerpVectors(anim.t0,anim.t,e); camera.fov=anim.f0+(anim.f-anim.f0)*e; camera.updateProjectionMatrix(); if(anim.k>=1){ const cb=anim.then; anim=null; cb&&cb(); } }
   sky.position.copy(camera.position);
   shift+=(shiftGoal-shift)*.08; if(shift>.001) camera.setViewOffset(innerWidth,innerHeight,0,innerHeight*.2*shift,innerWidth,innerHeight); else camera.clearViewOffset();
   controls.update(); update3D(); composer.render(); if(HK.frame) HK.frame(); requestAnimationFrame(frame);
