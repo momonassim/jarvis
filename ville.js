@@ -587,9 +587,9 @@ function energy(x,z){
   const W=7,D=5; const sp={bays:2,bayW:2.6,floors:0,gf:3.6,fh:3,gfType:'rustic',win:'cornice',doorBay:0};
   facade(sp,W,{noReturns:false}); box(0,W,0,3.6,-D,-.32); roof({roof:'hip'},W,D,3.6,{ops:[]},CUR.clone());
   sign('PLENITUDE',W/2,3.32,.035,3.4,.3,{size:66,font:'"Helvetica Neue",Arial,sans-serif',weight:700});
-  box(W+.4,W+6.8,0,.12,-D-.2,-.3,'asphalt');   // dalle du poste
+  box(-7.6,-1.2,0,.12,-D-.2,-.3,'asphalt');   // dalle du poste (au nord de la boutique, hors du mur de l'usine)
   CUR=new THREE.Matrix4();
-  PL.energie={anchor:V(x+3.5,9,z-2),view:[V(x-16,4.4,z+1.5),V(x-4,2.7,z+3.5)],sub:{x,z},W,D};
+  PL.energie={anchor:V(x+3.5,9,z-2),view:[V(x-17,5.2,z+3.5),V(x+1,2.2,z-1.5)],sub:{x,z},W,D};
 }
 const scene_late=[];
 // petits ajouts propres à chaque lieu
@@ -733,7 +733,7 @@ const mats={
 };
 for(const k of ['clay','canvas','wood','tyre']) mats[k].envMapIntensity=.3; for(const k of ['roof','metal','car']) mats[k].envMapIntensity=.5;
 const city=new THREE.Group();
-for(const k in B){ const base=k.includes('|')?k.split('|')[1]:k; const g=mergeGeometries(B[k],false); const mesh=new THREE.Mesh(g,mats[base]||mats.clay); mesh.castShadow=base!=='glass'&&base!=='glassLit'&&base!=='water'; mesh.receiveShadow=true; city.add(mesh); MESH[k]=mesh;
+for(const k in B){ const base=k.includes('|')?k.split('|')[1]:k; const g=mergeGeometries(B[k],false); const mesh=new THREE.Mesh(g,mats[base]||mats.clay); mesh.name='M_'+k.replace('|','_'); mesh.castShadow=base!=='glass'&&base!=='glassLit'&&base!=='water'; mesh.receiveShadow=true; city.add(mesh); MESH[k]=mesh;
   if(k.includes('|')){ const o=OBST[+k.split('|')[0].slice(2)]; mesh.matrixAutoUpdate=false; o.meshes.push(mesh);} }
 const scene=new THREE.Scene(); scene.add(city);
 for(const g of scene_late) scene.add(g);
@@ -752,7 +752,7 @@ for(const sg of SIGNS){
 if(GATE){ const gm=GATE.userData.mat, lp=V(GATE.userData.cx,-.8,-GATE.userData.Dt+3).applyMatrix4(gm); const gl=new THREE.PointLight(0xffe0b0,18,14,1.4); gl.position.copy(lp); scene.add(gl); }
 // chaussée pavée, trottoirs, place, sol
 const road=new THREE.Mesh(new THREE.PlaneGeometry(124,7.2),new THREE.MeshStandardMaterial({map:cobble.c,normalMap:cobble.n,normalScale:new THREE.Vector2(1,1),roughness:.85,envMapIntensity:.3}));
-road.material.map.repeat.set(41,2.4); road.material.normalMap.repeat.set(41,2.4); road.rotation.x=-Math.PI/2; road.receiveShadow=true; scene.add(road);
+road.material.map.repeat.set(41,2.4); road.material.normalMap.repeat.set(41,2.4); road.rotation.x=-Math.PI/2; road.receiveShadow=true; road.name='Rue_pavee'; scene.add(road);
 const paveM=new THREE.MeshStandardMaterial({map:paving.c,normalMap:paving.n,roughness:.9,envMapIntensity:.3});
 paveM.map.repeat.set(1,1);
 function slab(x0,x1,z0,z1,y){const g=new THREE.BoxGeometry(x1-x0,y,z1-z0); const uv=g.attributes.uv; const p=g.attributes.position;
@@ -1418,7 +1418,7 @@ function buildOpenings(){
   // ---------- ABONNEMENTS : les vitrines deviennent des affiches ----------
   const Or=PL.orange; if(Or){ buildShop(Or); Or.tX=4.0; Or.tY=1.3; Or.camY=1.5; Or.far=9.4; Or.camDX=0; }
   // ---------- GAZ ET ÉLECTRICITÉ : un écran sort du sol devant le poste ----------
-  const E=PL.energie; if(E){ const sub=E.sub, em=M(sub.x,0,sub.z,0,-Math.PI/2,0);
+  const E=PL.energie; if(E){ const sub=E.sub, em=M(sub.x,0,sub.z-15,0,-Math.PI/2,0);
     buildEnergy(em,E); }
 }
 
@@ -1513,6 +1513,42 @@ function setDonnees(list){ for(const d of list){ const old=DATA[d.id]; DATA[d.id
 function orbit(a){ const s=new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)); let th=s.theta,r=s.radius,ph=s.phi;
   if(a.tourner) th+=(Number(a.tourner)||0)*Math.PI/180; if(a.zoom==='avant') r*=.6; else if(a.zoom==='arriere') r*=1.6; if(a.vue==='dessus') ph=.35; else if(a.vue==='rasante') ph=1.2;
   r=Math.max(3,Math.min(220,r)); s.set(r,ph,th); const p=new THREE.Vector3().setFromSpherical(s).add(controls.target); flyTo(p,controls.target.clone(),camera.fov); }
+
+/* ---------- La ville retravaillée dans Blender (ville.glb) ----------
+   L'app construit toujours sa ville (lieux cliquables, infos du décor, animations) ; ce fichier
+   remplace ensuite les formes par les versions corrigées (toits fermés, bancs, cour de l'énergie…)
+   et ajoute les nouvelles voitures, le feuillage des arbres et le mobilier. S'il ne charge pas,
+   la ville d'origine reste affichée. */
+const AJOUTS=/^(Voiture_\d+|M_ob\d+_feuilles|Marquage_sol|Jardinieres_|Colonne_Morris|Parasol_cafe)/;
+async function chargerVilleBlender(url){
+  const draco=new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/');
+  const gl=new GLTFLoader(); gl.setDRACOLoader(draco);
+  const g=await gl.loadAsync(url); draco.dispose(); g.scene.updateMatrixWorld(true);
+  const parNom={}; for(const k in MESH) parNom[MESH[k].name]=MESH[k]; parNom['Rue_pavee']=road;
+  const ajouts=[]; let n=0;
+  g.scene.traverse(o=>{
+    if(o.isMesh && parNom[o.name]){ const cible=parNom[o.name];
+      const geo=o.geometry.clone().applyMatrix4(o.matrixWorld); cible.updateMatrixWorld(true);
+      geo.applyMatrix4(new THREE.Matrix4().copy(cible.matrixWorld).invert());
+      if(!cible.material.vertexColors) geo.deleteAttribute('color');
+      cible.geometry.dispose(); cible.geometry=geo; n++; return; }
+    if(AJOUTS.test(o.name) && !ajouts.some(a=>{ let p=o.parent; while(p){ if(p===a) return true; p=p.parent; } return false; })) ajouts.push(o);
+  });
+  if(n<10) throw new Error('ville.glb : '+n+' formes reconnues seulement');
+  for(const k of ['car','tyre']) if(MESH[k]) MESH[k].visible=false;     // anciennes voitures, remplacées
+  const lampes={Material_5:mats.lamp,Material_9:mats.lampRed};
+  for(const a of ajouts){
+    const w=a.matrixWorld.clone(); a.removeFromParent(); a.matrix.copy(w); a.matrix.decompose(a.position,a.quaternion,a.scale);
+    a.traverse(m=>{ if(!m.isMesh) return; m.castShadow=true; m.receiveShadow=true;
+      const mt=m.material; if(lampes[mt.name]) m.material=lampes[mt.name]; else { mt.envMapIntensity=.6; mt.vertexColors=!!m.geometry.attributes.color; } });
+    const f=/^M_ob(\d+)_feuilles/.exec(a.name);
+    if(f && OBST[+f[1]]){ a.updateMatrix(); a.matrixAutoUpdate=false; OBST[+f[1]].meshes.push(a); }   // le feuillage se replie avec son arbre
+    scene.add(a);
+  }
+  OBST.forEach(o=>{ o.done=false; });
+  return n;
+}
+chargerVilleBlender('ville.glb?v=1').then(n=>console.log('Ville Blender :',n,'formes remplacées')).catch(e=>console.warn('Ville Blender non chargée, ville d’origine gardée :',e));
 
 /* ---------- Ta voiture : la vraie DS5 (Blanc Nacré), chargée depuis le coffre privé ---------- */
 let ds5=null;
