@@ -55,11 +55,11 @@ async function empreinte(nom: string) {
 
 // ---------- les données ----------
 type Row = { source: string; kind: string; label: string; date: string | null; amount: number | null; data: any; updated_at: string };
-// Les données restent 20 secondes en mémoire : plusieurs questions d'affilée répondent tout de suite
+// Les données restent 60 secondes en mémoire : plusieurs questions d'affilée répondent tout de suite
 let CACHE: { rows: Row[]; t: number } | null = null;
 const oublier = () => { CACHE = null; };
 async function lignes(): Promise<Row[]> {
-  if (CACHE && Date.now() - CACHE.t < 20_000) return CACHE.rows;
+  if (CACHE && Date.now() - CACHE.t < 60_000) return CACHE.rows;
   const [r1, r2, r3] = await Promise.all([
     admin.from("jarvis_items").select("source,kind,label,date,amount,data,updated_at").not("kind", "in", "(debug,reperage,page,api,document)").limit(5000),
     // Orange : seulement les blocs de données utiles (offre, options, factures, conso)
@@ -266,8 +266,10 @@ async function robot(body: Record<string, unknown>) {
   return await r.json().catch(() => ({ ok: false, message: "Le robot MédinLyon ne répond pas." }));
 }
 // ---------- l'écran : Claude pilote l'app Jarvis ouverte (iPhone ou Mac) ----------
+let menageEcran = 0;
 async function ecran(action: string, args: Record<string, unknown> = {}) {
-  await admin.from("jarvis_ecran").delete().lt("created_at", new Date(Date.now() - 864e5).toISOString());
+  if (Date.now() - menageEcran > 3_600_000) { menageEcran = Date.now();
+    admin.from("jarvis_ecran").delete().lt("created_at", new Date(Date.now() - 864e5).toISOString()).then(() => {}, () => {}); }
   const { error } = await admin.from("jarvis_ecran").insert({ action, args });
   return !error;
 }
@@ -309,7 +311,7 @@ const TOOLS = [
 async function appel(nom: string, a: Record<string, any>): Promise<string> {
   switch (nom) {
     case "jarvis_resume": return await resume();
-    case "jarvis_lieu": { if (!LIEUX[a.lieu]) return "Domaine inconnu. Choix : " + Object.keys(LIEUX).join(", "); const rows = await lignes(); await ecran("lieu", { lieu: a.lieu }).catch(() => false); return `${LIEUX[a.lieu].nom} (affiché aussi dans l'app Jarvis)\n${lieu(rows, a.lieu, true)}`; }
+    case "jarvis_lieu": { if (!LIEUX[a.lieu]) return "Domaine inconnu. Choix : " + Object.keys(LIEUX).join(", "); const [rows] = await Promise.all([lignes(), ecran("lieu", { lieu: a.lieu }).catch(() => false)]); return `${LIEUX[a.lieu].nom} (affiché aussi dans l'app Jarvis)\n${lieu(rows, a.lieu, true)}`; }
     case "jarvis_ecran": return await montrer(a);
     case "jarvis_planning": return postes(await lignes(), a);
     case "jarvis_pdf": return await documents(String(a.recherche ?? ""));
@@ -379,7 +381,24 @@ async function traiter(m: any) {
   }
 }
 
+// Les données sont en Irlande (eu-west-1). Un appel qui arrive ailleurs (Claude passe par les États-Unis)
+// ferait plusieurs allers-retours transatlantiques : on le relaie une seule fois vers l'Irlande.
+const ICI = Deno.env.get("SB_REGION") ?? "";
+const REGION_DONNEES = "eu-west-1";
+async function relayer(req: Request): Promise<Response | null> {
+  if (!ICI || ICI === REGION_DONNEES || req.headers.get("x-jv-relais") || req.method !== "POST") return null;
+  try {
+    const h = new Headers(req.headers); h.set("x-region", REGION_DONNEES); h.set("x-jv-relais", "1"); h.delete("host"); h.delete("content-length");
+    const cible = URL_SB + "/functions/v1/jarvis-mcp" + new URL(req.url).search;
+    const r = await fetch(cible, { method: "POST", headers: h, body: await req.clone().arrayBuffer(), signal: AbortSignal.timeout(20000) });
+    if (r.status >= 500) return null;
+    const rh = new Headers(r.headers); rh.delete("content-encoding"); rh.delete("content-length"); rh.delete("transfer-encoding");
+    return new Response(r.body, { status: r.status, headers: rh });
+  } catch { return null; } // relais en panne : on répond quand même d'ici
+}
+
 Deno.serve(async (req) => {
+  const relais = await relayer(req); if (relais) return relais;
   if (req.method === "GET" || req.method === "DELETE") return new Response("Méthode non prise en charge", { status: 405, headers: { Allow: "POST" } });
   if (req.method !== "POST") return new Response(null, { status: 405 });
   if (!(await autorise(req))) return json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Clé du connecteur Jarvis absente ou fausse." } }, 401, { "WWW-Authenticate": 'Bearer realm="jarvis"' });
