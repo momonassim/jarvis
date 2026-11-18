@@ -1517,8 +1517,8 @@ function orbit(a){ const s=new THREE.Spherical().setFromVector3(camera.position.
 /* ---------- Ta voiture : la vraie DS5 (Blanc Nacré), chargée depuis le coffre privé ---------- */
 let ds5=null;
 async function chargerVoiture(url){
-  if(ds5||!DS5_SPOT||!url) return false;
-  const draco=new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+  if(ds5) return true; if(!DS5_SPOT) throw new Error('place du garage introuvable'); if(!url) throw new Error('pas de lien');
+  const draco=new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/');
   const gl=new GLTFLoader(); gl.setDRACOLoader(draco);
   const g=await gl.loadAsync(url); draco.dispose();
   const car=g.scene;

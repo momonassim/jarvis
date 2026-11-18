@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ds5a";
+import { creerVille } from "./ville.js?v=ds5b";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -1040,10 +1040,17 @@ $("sOut").addEventListener("click", async () => { closeSettings(); await sb.auth
    ========================================================= */
 
 /* ---------- Ta voiture : la vraie DS5, gardée dans le coffre privé « modeles » (jamais dans le dépôt public) ---------- */
-async function chargerDS5() {
-  const { data } = await sb.storage.from("modeles").createSignedUrl("ds5.glb", 3600);
-  if (!data) return;
-  try { await V.chargerVoiture(data.signedUrl); } catch (e) { console.warn("DS5 :", e); }
+async function chargerDS5(essai = 1) {
+  try {
+    const { data, error } = await sb.storage.from("modeles").createSignedUrl("ds5.glb", 3600);
+    if (error || !data) throw new Error("coffre : " + (error ? error.message : "pas de lien"));
+    await V.chargerVoiture(data.signedUrl);
+    window.__ds5 = "ok";
+  } catch (e) {
+    window.__ds5 = "erreur : " + (e && e.message || e); console.warn("DS5", e);
+    if (essai < 3) setTimeout(() => chargerDS5(essai + 1), 2500 * essai);
+    else toast("Ta DS5 n’a pas pu se charger (" + window.__ds5 + ")");
+  }
 }
 const gate = $("gate"), gmsg = $("gmsg");
 function showGate(msg) { gate.hidden = false; if (msg) gmsg.textContent = msg; }
@@ -1052,8 +1059,8 @@ async function enter(session) {
   const { data: ok } = await sb.rpc("jarvis_is_owner");
   if (ok !== true) { showGate(session.user && !session.user.email_confirmed_at ? "Confirme d’abord ton e-mail (lien reçu), puis reviens ici." : "Cette ville est privée."); return; }
   gate.hidden = true;
+  chargerDS5(); // la voiture se charge tout de suite, sans attendre le reste
   await loadAll(); goLive(); goTelecommande();
-  chargerDS5();
   // Le bandeau du haut a pris sa vraie taille : on recadre si tu n’as encore rien touché
   if (!userMoved && !S.sel) overview();
 }
