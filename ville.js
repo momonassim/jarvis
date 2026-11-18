@@ -12,6 +12,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+const FNT="'Plus Jakarta Sans',Helvetica,Arial,sans-serif";
+// style de la ville : les titres en capitales espacées sont gravés à empattements (comme sur les façades)
+const SERIF="'Cormorant Garamond',Georgia,'Times New Roman',serif";
+const fontDe=(w,size,ls)=>ls>=3?`700 ${size*1.12}px ${SERIF}`:`${w} ${size}px ${FNT}`;
 
 export async function creerVille(canvas, HK = {}) {
 
@@ -862,28 +866,38 @@ function iconGeo(id){ const data=svgLoader.parse(`<svg xmlns="http://www.w3.org/
   const gs=[]; for(const path of data.paths){ const st=path.userData.style; for(const sp of path.subPaths){ const g=SVGLoader.pointsToStroke(sp.getPoints(24),st); if(g) gs.push(g);} }
   const g=mergeGeometries(gs.map(x=>{x.deleteAttribute('uv'); if(x.attributes.normal)x.deleteAttribute('normal'); return x;}),false); g.translate(-12,-12,0); g.scale(1/24,-1/24,1); return g; }
 const poleM=new THREE.MeshStandardMaterial({color:0xe7e4de,roughness:.5,metalness:.35,envMapIntensity:.5});
+const ironM=new THREE.MeshStandardMaterial({color:0x2B3138,roughness:.42,metalness:.55,envMapIntensity:.6});   // fer forgé des enseignes
 const whiteM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.45,emissive:0xffffff,emissiveIntensity:.12,side:THREE.DoubleSide});
-function plateTex(p,D){ const c=document.createElement('canvas'),x=c.getContext('2d'); const fs=58, pad=34; const st=D&&D.status?String(D.status).slice(0,34):''; x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){}
-  let tw=Math.ceil(x.measureText(p.n.toUpperCase()).width); if(st){ x.font=`700 44px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='0px';}catch(e){} tw=Math.max(tw,Math.ceil(x.measureText(st).width)); x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){} } c.width=tw+pad*2+26; c.height=st?170:104; x.font=`700 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='7px';}catch(e){}
-  x.fillStyle='#fbfaf7'; x.beginPath(); x.roundRect(0,0,c.width,c.height,22); x.fill(); x.fillStyle=p.c; x.beginPath(); x.roundRect(0,0,22,c.height,[22,0,0,22]); x.fill();
-  x.fillStyle='#2f343c'; x.textBaseline='middle'; x.fillText(p.n.toUpperCase(),22+pad,st?58:c.height/2+3);
-  if(st){ x.font=`700 44px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing='0px';}catch(e){} x.fillStyle=D.urgent?'#C9483A':'#6b7079'; x.fillText(st,22+pad,124); }
+function plateTex(p,D){ const c=document.createElement('canvas'),x=c.getContext('2d'); const fs=64, pad=40; const st=D&&D.status?String(D.status).slice(0,34):'';
+  const NOM=`700 ${fs}px ${SERIF}`, SOUS=`700 40px ${FNT}`; x.font=NOM; try{x.letterSpacing='8px';}catch(e){}
+  let tw=Math.ceil(x.measureText(p.n.toUpperCase()).width); if(st){ x.font=SOUS; try{x.letterSpacing='0px';}catch(e){} tw=Math.max(tw,Math.ceil(x.measureText(st).width)); }
+  c.width=tw+pad*2+12; c.height=st?178:112;
+  // plaque émaillée crème, double filet de fer, petite pastille de couleur du lieu
+  x.fillStyle='#F6F2EA'; x.beginPath(); x.roundRect(0,0,c.width,c.height,16); x.fill();
+  x.strokeStyle='#2B3138'; x.lineWidth=7; x.beginPath(); x.roundRect(4,4,c.width-8,c.height-8,13); x.stroke();
+  x.lineWidth=2; x.beginPath(); x.roundRect(14,14,c.width-28,c.height-28,8); x.stroke();
+  x.font=NOM; try{x.letterSpacing='8px';}catch(e){} x.fillStyle='#2B3138'; x.textBaseline='middle'; x.textAlign='center'; x.fillText(p.n.toUpperCase(),c.width/2+4,st?66:c.height/2+4);
+  if(st){ x.fillStyle=p.c; x.fillRect(c.width/2-40,104,80,3); x.font=SOUS; try{x.letterSpacing='0px';}catch(e){} x.fillStyle=D.urgent?'#C9483A':'#5d636c'; x.fillText(st,c.width/2,140); }
   const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8; return {t,ar:c.width/c.height}; }
 const masts=[], pickables=[]; const iconM=new THREE.MeshBasicMaterial({color:0xfdfcf9,side:THREE.DoubleSide});
 function makeMast(p,base,top,R){
   const g=new THREE.Group(); scene.add(g);
-  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.09,top-base.y,10),poleM); pole.position.set(base.x,(base.y+top)/2,base.z); pole.castShadow=true; g.add(pole);
-  const foot=new THREE.Mesh(new THREE.CylinderGeometry(.22,.3,.25,14),poleM); foot.position.set(base.x,base.y+.12,base.z); g.add(foot);
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.09,top-base.y,10),ironM); pole.position.set(base.x,(base.y+top)/2,base.z); pole.castShadow=true; g.add(pole);
+  const foot=new THREE.Mesh(new THREE.CylinderGeometry(.22,.3,.25,14),ironM); foot.position.set(base.x,base.y+.12,base.z); g.add(foot);
   const head=new THREE.Group(); head.position.set(base.x,top+R,base.z); g.add(head);
   const spin=new THREE.Group(); head.add(spin);
-  const col=new THREE.MeshStandardMaterial({color:p.c,roughness:.55,metalness:.05,envMapIntensity:.6});
+  // médaillon d'émail crème cerclé de fer forgé ; l'icône prend la couleur du lieu
+  const col=new THREE.MeshStandardMaterial({color:0xF3EEE4,roughness:.32,metalness:0,envMapIntensity:.7});
   const disc=new THREE.Mesh(new THREE.CylinderGeometry(R,R,.2,48),col); disc.rotation.x=Math.PI/2; disc.castShadow=true; spin.add(disc);
-  const rim=new THREE.Mesh(new THREE.TorusGeometry(R,.075,10,56),whiteM); spin.add(rim);
-  const ig=iconGeo(p.id); for(const sd of [1,-1]){ const ic=new THREE.Mesh(ig,iconM); ic.scale.set(R*1.15,R*1.15,1); ic.position.z=sd*.115; if(sd<0) ic.rotation.y=Math.PI; spin.add(ic); }
-  const nub=new THREE.Mesh(new THREE.SphereGeometry(.13,12,8),poleM); nub.position.y=R+.12; spin.add(nub);
+  const rim=new THREE.Mesh(new THREE.TorusGeometry(R,.075,10,56),ironM); spin.add(rim);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(R*.84,.018,6,56),new THREE.MeshBasicMaterial({color:p.c,toneMapped:false})); ring.position.z=.105; spin.add(ring);
+  const ring2=ring.clone(); ring2.position.z=-.105; spin.add(ring2);
+  const icM=new THREE.MeshBasicMaterial({color:p.c,side:THREE.DoubleSide,toneMapped:false});
+  const ig=iconGeo(p.id); for(const sd of [1,-1]){ const ic=new THREE.Mesh(ig,icM); ic.scale.set(R*1.15,R*1.15,1); ic.position.z=sd*.115; if(sd<0) ic.rotation.y=Math.PI; spin.add(ic); }
+  const nub=new THREE.Mesh(new THREE.SphereGeometry(.13,12,8),ironM); nub.position.y=R+.12; spin.add(nub);
   const {t,ar}=plateTex(p); const ph=R*.52, pm=new THREE.MeshStandardMaterial({map:t,roughness:.7,transparent:true,envMapIntensity:.3});
   const plate=new THREE.Group(); plate.position.y=-R-ph*.9; spin.add(plate);
-  for(const sd of [1,-1]){ const pl=new THREE.Mesh(new THREE.PlaneGeometry(ph*ar,ph),pm); pl.position.z=sd*.02; if(sd<0) pl.rotation.y=Math.PI; plate.add(pl); pl.userData.place=p; pickables.push(pl);}
+  for(const sd of [1,-1]){ const pl=new THREE.Mesh(new THREE.PlaneGeometry(ph*ar,ph),pm); pl.position.z=sd*.11; if(sd<0) pl.rotation.y=Math.PI; plate.add(pl); pl.userData.place=p; pickables.push(pl);}
   plate.scale.setScalar(.001);
   const wave=new THREE.Mesh(new THREE.RingGeometry(R*.98,R*1.1,48),new THREE.MeshBasicMaterial({color:p.c,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false,toneMapped:false})); spin.add(wave);
   disc.userData.place=p; pickables.push(disc);
@@ -980,7 +994,6 @@ for(const F of FLAGS){ const g=new THREE.PlaneGeometry(F.w,F.h,30,14); g.transla
 /* =========================================================
    LES AUTRES LIEUX QUI S'OUVRENT (données fictives pour le test)
    ========================================================= */
-const FNT="'Plus Jakarta Sans',Helvetica,Arial,sans-serif";
 const PANELS={};   // id -> [{group, place(k), canvas, tex, draw, d}]
 const openK={};
 const panSide=new THREE.MeshStandardMaterial({color:0xece8e1,roughness:.85,envMapIntensity:.3});
@@ -1017,7 +1030,7 @@ function f0(p){ return p.fov||55; }
 function begin(x,c){ const S=c.width/1000; x.setTransform(S,0,0,S,0,0); x.globalAlpha=1; x.setLineDash([]); const H=c.height/S; x.clearRect(0,0,1000,H); x.fillStyle='#f7f3ec'; x.fillRect(0,0,1000,H);
   x.strokeStyle='rgba(47,52,60,.16)'; x.lineWidth=4; x.strokeRect(14,14,972,H-28); return H; }
 const A=(t,k,d=.3)=>cl((t-k)/d);
-function txt(x,s,px,y,size,w=600,col=PAL.ink,al='left',ls=0){ x.font=`${w} ${size}px ${FNT}`; try{x.letterSpacing=ls+'px';}catch(e){} x.textAlign=al; x.fillStyle=col; x.fillText(s,px,y); x.textAlign='left'; try{x.letterSpacing='0px';}catch(e){} }
+function txt(x,s,px,y,size,w=600,col=PAL.ink,al='left',ls=0){ x.font=fontDe(w,size,ls); try{x.letterSpacing=ls+'px';}catch(e){} x.textAlign=al; x.fillStyle=col; x.fillText(s,px,y); x.textAlign='left'; try{x.letterSpacing='0px';}catch(e){} }
 function phead(x,t,title,sub,col,y=86){ x.globalAlpha=A(t,0); x.fillStyle=col; x.beginPath(); x.arc(78,y-12,26,0,7); x.fill(); txt(x,title,124,y,40,700,PAL.ink,'left',6); txt(x,sub,126,y+38,25,500,PAL.soft); x.globalAlpha=1; }
 function card(x,px,py,w,h,col){ x.fillStyle='rgba(255,255,255,.8)'; x.beginPath(); x.roundRect(px,py,w,h,18); x.fill(); x.fillStyle=col; x.beginPath(); x.roundRect(px,py,10,h,[18,0,0,18]); x.fill(); }
 function prog(x,px,py,w,frac,col){ x.fillStyle='rgba(47,52,60,.08)'; x.beginPath(); x.roundRect(px,py,w,18,9); x.fill(); x.fillStyle=col; x.beginPath(); x.roundRect(px,py,Math.max(18,w*frac),18,9); x.fill(); }
@@ -1094,7 +1107,7 @@ function engrave(id){ return (x,t,c)=>{ const S=c.width/1000; x.setTransform(S,0
     x.shadowColor=lo; x.shadowOffsetX=d; x.shadowOffsetY=d; x.shadowBlur=d; draw(stone);
     x.shadowColor=hi; x.shadowOffsetX=-d; x.shadowOffsetY=-d; x.shadowBlur=d; draw(stone);
     x.shadowColor='transparent'; draw(stone); x.restore(); };
-  const T=(s2,px,py,size,w,al='left',ls=0,col)=>(c0)=>{ x.font=`${w} ${size}px ${FNT}`; try{x.letterSpacing=ls+'px';}catch(e){} x.textAlign=al; x.fillStyle=col||c0; x.fillText(s2,px,py); x.textAlign='left'; try{x.letterSpacing='0px';}catch(e){} };
+  const T=(s2,px,py,size,w,al='left',ls=0,col)=>(c0)=>{ x.font=fontDe(w,size,ls); try{x.letterSpacing=ls+'px';}catch(e){} x.textAlign=al; x.fillStyle=col||c0; x.fillText(s2,px,py); x.textAlign='left'; try{x.letterSpacing='0px';}catch(e){} };
   // cadre en creux
   const k=A(t,0,.4); x.save(); x.globalAlpha=k; x.lineWidth=14; x.strokeStyle=stone; x.shadowColor=lo; x.shadowOffsetX=-4; x.shadowOffsetY=-4; x.shadowBlur=8; x.beginPath(); x.roundRect(36,36,928,H-72,46); x.stroke();
   x.shadowColor=hi; x.shadowOffsetX=4; x.shadowOffsetY=4; x.stroke(); x.restore();
@@ -1150,20 +1163,21 @@ function updateHome(dt){ if(!HOME.win) return; const D=DATA.home||{}, e=D.etat||
 const NRG={gens:[],arcs:[],nums:{},k:1};
 function dotTex(){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d'); const g=x.createRadialGradient(32,32,0,32,32,32); g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(.5,'rgba(255,255,255,.95)'); g.addColorStop(1,'rgba(255,255,255,0)'); x.fillStyle=g; x.fillRect(0,0,64,64); const t=new THREE.CanvasTexture(c); return t; }
 const DOT=dotTex();
+const NOAO=[];   // objets légers (fumée, particules) exclus du calcul d'ombre GTAO
 // un texte dessiné en particules (points) : renvoie les positions dans un plan de largeur w
 function textPoints(str,w,step=3){ const c=document.createElement('canvas'); c.width=640; c.height=150; const x=c.getContext('2d'); x.fillStyle='#fff'; x.font=`800 112px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; x.textAlign='center'; x.textBaseline='middle';
   let fs=112; while(x.measureText(str).width>610&&fs>40){ fs-=6; x.font=`800 ${fs}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; } x.fillText(str,320,78);
   const d=x.getImageData(0,0,640,150).data, pts=[]; const sc=w/640; for(let y=0;y<150;y+=step) for(let i=0;i<640;i+=step){ if(d[(y*640+i)*4+3]>140) pts.push((i-320)*sc,(75-y)*sc); } return pts; }
-function numCloud(key,str,col,w){ const old=NRG.nums[key]; if(old&&old.str===str) return old; if(old){ old.pts.geometry.dispose(); old.g.remove(old.pts); }
+function numCloud(key,str,col,w){ const old=NRG.nums[key]; if(old&&old.str===str) return old; if(old){ old.pts.geometry.dispose(); old.g.remove(old.pts); const k=NOAO.indexOf(old.pts); if(k>=0) NOAO.splice(k,1); }
   const P=textPoints(str,w), n=P.length/2, pos=new Float32Array(n*3), base=new Float32Array(n*3), cols=new Float32Array(n*3), cc=new THREE.Color(col);
   for(let i=0;i<n;i++){ base[i*3]=P[i*2]; base[i*3+1]=P[i*2+1]; base[i*3+2]=(Math.random()-.5)*.05; pos.set([base[i*3],base[i*3+1],base[i*3+2]],i*3); cols[i*3]=cc.r; cols[i*3+1]=cc.g; cols[i*3+2]=cc.b; }
   const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3)); geo.setAttribute('color',new THREE.BufferAttribute(cols,3));
   const pts=new THREE.Points(geo,new THREE.PointsMaterial({size:w/78,map:DOT,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false}));
-  const g=old?old.g:NRG.slots[key]; g.add(pts); const o={str,pts,base,n,col:cc,g}; NRG.nums[key]=o; return o; }
+  const g=old?old.g:NRG.slots[key]; g.add(pts); NOAO.push(pts); const o={str,pts,base,n,col:cc,g}; NRG.nums[key]=o; return o; }
 function labelPlane(lines,w,h,opt={}){ const c=document.createElement('canvas'); const ppu=opt.ppu||220; c.width=Math.round(w*ppu); c.height=Math.round(h*ppu); const x=c.getContext('2d');
   const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:t,transparent:true,toneMapped:false,side:THREE.DoubleSide}));
   m.userData.draw=(L)=>{ x.clearRect(0,0,c.width,c.height); if(opt.bg){ x.fillStyle=opt.bg; x.beginPath(); x.roundRect(4,4,c.width-8,c.height-8,18); x.fill(); if(opt.edge){ x.strokeStyle=opt.edge; x.lineWidth=6; x.stroke(); } }
-    L.forEach((l,i)=>{ x.font=`${l.w||800} ${l.s}px 'Plus Jakarta Sans',Helvetica,Arial,sans-serif`; try{x.letterSpacing=(l.ls||0)+'px';}catch(e){} x.fillStyle=l.c||'#fff'; x.textAlign='center'; x.fillText(l.t,c.width/2,l.y); }); t.needsUpdate=true; };
+    L.forEach((l,i)=>{ x.font=fontDe(l.w||800,l.s,l.ls||0); try{x.letterSpacing=(l.ls||0)+'px';}catch(e){} x.fillStyle=l.c||'#fff'; x.textAlign='center'; x.fillText(l.t,c.width/2,l.y); }); t.needsUpdate=true; };
   m.userData.draw(lines); return m; }
 function buildEnergy(em,E){ const P=PLACES.find(q=>q.id==='energie'); const W=E.W||7, D=E.D||5; const root=new THREE.Group(); root.matrixAutoUpdate=false; root.matrix.copy(em); scene.add(root); NRG.root=root; NRG.slots={};
   const add=(m,x,y,z,act)=>{ m.position.set(x,y,z); root.add(m); m.castShadow=true; m.receiveShadow=true; if(act){ m.userData.place=P; m.userData.act=act; pickables.push(m);} return m; };
@@ -1322,13 +1336,13 @@ function buildUsine(U){ const P=PLACES.find(q=>q.id==='usine'); const root=new T
   glass.position.set(tcx,ty0+th/2,tz+.09); root.add(glass);
   // fumée de la cheminée du four (en poste) et sommet qui rougeoie la nuit
   const chx=U.W*.78, chz=-U.D-5, top=3.3+33.1; USN.smoke=[]; const smM=()=>new THREE.SpriteMaterial({map:DOT,color:0xeeebe6,transparent:true,opacity:0,depthWrite:false});
-  for(let i=0;i<18;i++){ const sp=new THREE.Sprite(smM()); sp.userData.ph=i/18; root.add(sp); USN.smoke.push(sp); } USN.top=V(chx,top,chz);
+  for(let i=0;i<18;i++){ const sp=new THREE.Sprite(smM()); sp.userData.ph=i/18; root.add(sp); USN.smoke.push(sp); NOAO.push(sp); } USN.top=V(chx,top,chz);
   USN.glow=new THREE.Mesh(new THREE.TorusGeometry(.98,.12,8,40),new THREE.MeshBasicMaterial({color:0xff6a2a,transparent:true,opacity:0,toneMapped:false})); USN.glow.rotation.x=Math.PI/2; USN.glow.position.copy(USN.top); root.add(USN.glow);
   USN.k=0;
 }
 function updateUsine(dt){ if(!USN.root) return; const D=DATA.usine||{}, t=performance.now()/1000;
   const on=!!D.enPoste; USN.k+=((on?1:0)-USN.k)*Math.min(1,dt*.8);
-  USN.smoke.forEach(sp=>{ const f=(sp.userData.ph+t*.06)%1; sp.position.set(USN.top.x+f*5+Math.sin(t*.5+sp.userData.ph*9)*.6,USN.top.y+.4+f*11,USN.top.z+f*2); const sc=1.6+f*6; sp.scale.set(sc,sc,1); sp.material.opacity=USN.k*.55*(1-f)*Math.min(1,f*6); });
+  USN.smoke.forEach(sp=>{ const f=(sp.userData.ph+t*.06)%1; sp.position.set(USN.top.x+f*5+Math.sin(t*.5+sp.userData.ph*9)*.6,USN.top.y+.4+f*11,USN.top.z+f*2); const sc=1.6+f*6; sp.scale.set(sc,sc,1); sp.material.opacity=USN.k*.55*(1-f)*Math.min(1,f*6); sp.visible=sp.material.opacity>.005; });
   USN.glow.material.opacity=USN.k*(NIGHT?.9:.25)*(.8+.2*Math.sin(t*3));
   // la pointeuse
   const sem=D.semaine||[], J0=jourU(sem[0]), J1=jourU(sem[1]), key=JSON.stringify([J0,J1]);
@@ -1530,6 +1544,8 @@ gtao.updateGtaoMaterial({radius:.9,distanceExponent:1.4,thickness:1.5,scale:1.15
 gtao.updatePdMaterial({lumaPhi:10,depthPhi:2,normalPhi:3,radius:MOBILE?4:6,rings:2,samples:MOBILE?8:16});
 gtao.blendIntensity=1.0;
 composer.addPass(gtao);
+// la fumée et les chiffres en particules ne doivent pas passer dans le calcul d'ombre (sinon : grosse tache noire au-dessus de la cheminée)
+{ const ro=gtao.renderOverride.bind(gtao); gtao.renderOverride=(...a)=>{ const h=NOAO.filter(o=>o.visible); h.forEach(o=>o.visible=false); ro(...a); h.forEach(o=>o.visible=true); }; }
 composer.addPass(new OutputPass());
 
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false);composer.setSize(innerWidth,innerHeight);});
@@ -1549,7 +1565,7 @@ frame();
 window.VILLE.ready=true;
 
 function setDonnees(list){ for(const d of list){ const old=DATA[d.id]; DATA[d.id]=d; (PANELS[d.id]||[]).forEach(P=>P.last=-1);
-    const p=PLACES.find(q=>q.id===d.id); if(p&&p.mast&&(!old||old.status!==d.status||old.urgent!==d.urgent)){ const {t,ar}=plateTex(p,d); const ph=p.mast.R*.52*(d.status?170/104:1);
+    const p=PLACES.find(q=>q.id===d.id); if(p&&p.mast&&(!old||old.status!==d.status||old.urgent!==d.urgent)){ const {t,ar}=plateTex(p,d); const ph=p.mast.R*.52*(d.status?178/112:1);
       p.mast.plate.children.forEach(pl=>{ pl.material.map&&pl.material.map.dispose(); pl.material.map=t; pl.material.needsUpdate=true; pl.geometry.dispose(); pl.geometry=new THREE.PlaneGeometry(ph*ar,ph); }); } } if(bankWall) bankWall.userData.last=-1; }
 function orbit(a){ const s=new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)); let th=s.theta,r=s.radius,ph=s.phi;
   if(a.tourner) th+=(Number(a.tourner)||0)*Math.PI/180; if(a.zoom==='avant') r*=.6; else if(a.zoom==='arriere') r*=1.6; if(a.vue==='dessus') ph=.35; else if(a.vue==='rasante') ph=1.2;

@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ville5";
+import { creerVille } from "./ville.js?v=ville6";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -48,6 +48,8 @@ const S = { sel: null, night: false, prenom: "", profil: "", patients: [], rdv: 
    ========================================================= */
 const canvas = $("c");
 let viewShiftGoal = 0, userMoved = false, V = null;
+// les polices des plaques et des panneaux 3D doivent être prêtes avant de dessiner la ville (2 s au plus)
+await Promise.race([Promise.all(["700 64px 'Cormorant Garamond'", "700 40px 'Plus Jakarta Sans'", "600 40px 'Plus Jakarta Sans'", "800 40px 'Plus Jakarta Sans'"].map(f => document.fonts.load(f))).catch(() => {}), new Promise(r => setTimeout(r, 2000))]);
 V = await creerVille(canvas, {
   pick: id => { userMoved = true; if (id === "jarvis") openTalk(null); else if (byId[id]) select(byId[id]); },
   action: (id, a) => { userMoved = true; if (a === "rdv") { openBook(); return; }

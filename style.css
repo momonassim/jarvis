@@ -308,3 +308,53 @@ p.empty{margin:0}
 .cr b{font-size:14px;font-weight:800}
 .cr small{font-size:11px;font-weight:600;color:var(--ink2)}
 .cr strong{font-size:18px;font-weight:800;white-space:nowrap}
+
+/* =========================================================
+   STYLE DE LA VILLE : émail et fer forgé (une seule règle pour toutes les fenêtres et tous les boutons)
+   - une seule matière : l'émail crème des plaques de rue, bordé d'un filet de fer
+   - deux arrondis seulement : 16 px (fenêtres, barres) et 12 px (boutons, icônes, lignes)
+   - les noms et titres gravés en capitales à empattements, comme sur les façades
+   ========================================================= */
+:root{ --iron:#2B3138; --enamel:rgba(246,242,234,.96); --rim:rgba(43,49,56,.17); --serif:"Cormorant Garamond",Georgia,"Times New Roman",serif;
+  --ombre:0 1px 0 rgba(255,255,255,.75) inset,0 12px 30px -14px rgba(30,36,44,.42); --r1:16px; --r2:12px; --ink:#2B3138; --card:var(--enamel); --line:var(--rim) }
+.brief,.round,.ask,.lieubar,.card,.paper,.gcard,.pin .bub{background:var(--enamel);border:1px solid var(--rim);box-shadow:var(--ombre)}
+.brief,.ask,.lieubar,.card,.paper,.gcard{border-radius:var(--r1)}
+.round{border-radius:var(--r2);width:46px;height:46px;color:var(--iron)}
+.round svg{width:21px;height:21px}
+.col{gap:8px}
+.ask{padding:7px 8px;font-weight:700}
+.toast{border-radius:var(--r2);background:var(--iron)}
+.maj{border-radius:var(--r2);background:var(--iron)}
+/* titres gravés */
+.brief small,.head .nm small,.paper small,.lbtx small{font-family:var(--sans)}
+.brief strong{font-family:var(--serif);font-size:21px;font-weight:700;letter-spacing:.01em;line-height:1.1}
+.head .nm b,.lbtx b{font-family:var(--serif);font-size:18px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.lbtx b{font-size:16px}
+.paper h3,.gcard h1{font-family:var(--serif);font-weight:700;letter-spacing:.01em}
+.paper h3{font-size:24px}
+.dh b{font-family:var(--serif);font-size:15px;font-weight:700;letter-spacing:.1em;color:var(--iron)}
+.pin .tx b{font-family:var(--serif);font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+/* icônes : petites plaques carrées, jamais de rond (sauf l'orbe de Jarvis) */
+.head .ic,.lbic,.alertItem .aic{border-radius:var(--r2)}
+.head .ic{width:40px;height:40px}
+.pin .bub{border-radius:var(--r2);padding:5px 12px 5px 5px}
+.pin .ic{border-radius:9px}
+.pin .ic::after{border-color:#f6f2ea}
+.pin .stem{background:var(--iron);opacity:.55}
+.pin .foot{background:var(--iron)}
+.x,.lbn{border-radius:var(--r2)}
+.lbn{width:42px;height:42px;background:rgba(43,49,56,.06);color:var(--iron)}
+.lbn.x{background:transparent}
+.lbgo{border-radius:10px}
+.lbdot{border-color:#f6f2ea}
+/* boutons et lignes */
+.btn,.doc,.opt,.slot,.set,.alertItem,.empty,.dsearch,.cr,.fact,.recap{border-radius:var(--r2)}
+.btn.soft,.x{background:rgba(43,49,56,.06)}
+.doc,.alertItem,.opt,.slot,.set,.cr,.dsearch,.chip,.compose input,.gcard input{background:#fbf8f2;border:1px solid var(--rim)}
+.chip{border-radius:10px}
+.compose input{border-radius:var(--r2)}
+.mic,.send{border-radius:var(--r2)}
+.m{border-radius:14px}
+.wd{border-radius:10px}
+.wd b{border-radius:8px}
+.night .brief,.night .round,.night .ask,.night .lieubar,.night .card,.night .pin .bub{box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 32px -12px rgba(0,0,0,.65)}
