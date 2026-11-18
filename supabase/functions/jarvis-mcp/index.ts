@@ -327,8 +327,11 @@ async function appel(nom: string, a: Record<string, any>): Promise<string> {
     case "jarvis_chercher": {
       const [r] = await Promise.all([chercher(admin, a), montre("recherche", { texte: "Je cherche « " + String(a.recherche ?? "") + " »" })]);
       // on emmène l'écran là où se trouve la première trouvaille
-      const m = r.match(/\n- \[([a-z]+) · ([a-z]+) · ([^\]·]+)/); const src = m?.[1], kind = m?.[2], label = (m?.[3] ?? "").trim();
-      const lieu = src && (SOURCE_LIEU[src] ?? (src === "mac" && kind === "lieu" ? APP_LIEU[label] : undefined));
+      // la trouvaille la plus parlante d'abord (fiche d'un lieu, note, papier), les données techniques brutes en dernier
+      const hits = [...r.matchAll(/\n- \[([a-z]+) · ([a-z]+) · ([^\]·]+)/g)].map((m) => ({ src: m[1], kind: m[2], label: m[3].trim() }));
+      const lieuDe = (h: { src: string; kind: string; label: string }) => h.src === "mac" && h.kind === "lieu" ? APP_LIEU[h.label] : SOURCE_LIEU[h.src];
+      const h = hits.find((x) => x.kind !== "api" && x.kind !== "page" && lieuDe(x)) ?? hits.find((x) => x.kind !== "api" && lieuDe(x)) ?? hits.find((x) => lieuDe(x));
+      const lieu = h && lieuDe(h);
       if (lieu) await montre("lieu", { lieu });
       return r;
     }
