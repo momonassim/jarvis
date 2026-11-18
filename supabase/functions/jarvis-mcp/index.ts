@@ -244,21 +244,22 @@ async function resume() {
   const boites = comptes.length ? `## Mails Outlook\nBoîtes branchées (lecture seule) : ${comptes.map((c: any) => `${c.compte} (${c.statut}${c.derniere_sync ? ", relue le " + new Date(c.derniere_sync).toLocaleString("fr-FR", { timeZone: "Europe/Paris" }) : ""})`).join(", ")}. Pour une question sur un mail : jarvis_mails_chercher, jarvis_mail_lire, jarvis_memoire.\n\n` : "";
   return `Jarvis — situation au ${now}.\n${prof}\n\n` + alertes + boites + Object.entries(LIEUX).map(([id, l]) => `## ${l.nom}\n${lieu(rows, id, false)}`).join("\n\n");
 }
-async function documents(q: string) {
+async function documents(q: string, ecranAussi = false) {
   const rows = await lignes(); const mots = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter(Boolean);
   const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const cands: { titre: string; chemin: string; date: string }[] = [];
-  rows.filter((r) => r.source === "foncia" && r.kind === "document" && r.data?.path).forEach((r) => cands.push({ titre: "Foncia · " + r.label.replace(/\.pdf$/i, ""), chemin: "foncia/" + r.data.path, date: r.date ?? "" }));
-  rows.filter((r) => r.source === "mac" && r.kind === "lieu").forEach((r) => (r.data?.docs ?? []).filter((x: any) => x.path).forEach((x: any) => cands.push({ titre: `${x.t} ${x.d ?? ""}`.trim(), chemin: x.path, date: "" })));
-  rows.filter((r) => r.source === "orange" && r.kind === "facture" && r.data?.path).forEach((r) => cands.push({ titre: `Facture Orange ${r.data.contrat === "9097042479" ? "Livebox Up (Villeurbanne) " : ""}${MOIS[+r.date!.slice(5, 7) - 1]} ${r.date!.slice(0, 4)}`, chemin: r.data.path, date: r.date ?? "" }));
-  rows.filter((r) => r.source === "medinlyon" && r.kind === "rdv" && r.data?.chemin).forEach((r) => cands.push({ titre: `MédinLyon · justificatif ${r.data.patient} du ${frd(r.data.date)}`, chemin: r.data.chemin, date: r.data.date }));
+  const cands: { titre: string; chemin: string; date: string; lieu?: string }[] = [];
+  rows.filter((r) => r.source === "foncia" && r.kind === "document" && r.data?.path).forEach((r) => cands.push({ titre: "Foncia · " + r.label.replace(/\.pdf$/i, ""), chemin: "foncia/" + r.data.path, date: r.date ?? "", lieu: "logement" }));
+  rows.filter((r) => r.source === "mac" && r.kind === "lieu").forEach((r) => (r.data?.docs ?? []).filter((x: any) => x.path).forEach((x: any) => cands.push({ titre: `${x.t} ${x.d ?? ""}`.trim(), chemin: x.path, date: "", lieu: APP_LIEU[r.label] })));
+  rows.filter((r) => r.source === "orange" && r.kind === "facture" && r.data?.path).forEach((r) => cands.push({ titre: `Facture Orange ${r.data.contrat === "9097042479" ? "Livebox Up (Villeurbanne) " : ""}${MOIS[+r.date!.slice(5, 7) - 1]} ${r.date!.slice(0, 4)}`, chemin: r.data.path, date: r.date ?? "", lieu: "abonnements" }));
+  rows.filter((r) => r.source === "medinlyon" && r.kind === "rdv" && r.data?.chemin).forEach((r) => cands.push({ titre: `MédinLyon · justificatif ${r.data.patient} du ${frd(r.data.date)}`, chemin: r.data.chemin, date: r.data.date, lieu: "sante" }));
   const hits = cands.filter((c) => mots.every((m) => norm(c.titre + " " + c.date).includes(m))).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   if (!hits.length) return `Aucun PDF trouvé pour « ${q} ». ${cands.length} PDF rangés au total (Foncia, MédinLyon, papiers du Mac).`;
-  const out: string[] = [];
-  for (const h of hits) {
-    const { data } = await admin.storage.from("papiers").createSignedUrl(h.chemin, 3600);
-    out.push(`- ${h.titre}${h.date ? " (" + frd(h.date) + ")" : ""} : ${data?.signedUrl ?? "lien indisponible"}`);
-  }
+  const premier = hits[0];
+  const [liens] = await Promise.all([
+    Promise.all(hits.map((h) => admin.storage.from("papiers").createSignedUrl(h.chemin, 3600))),
+    ecranAussi && premier.lieu ? montre("document", { lieu: premier.lieu, titre: premier.titre, path: premier.chemin }) : null,
+  ]);
+  const out = hits.map((h, i) => `- ${h.titre}${h.date ? " (" + frd(h.date) + ")" : ""} : ${liens[i]?.data?.signedUrl ?? "lien indisponible"}`);
   return "PDF trouvés (liens valables 1 heure) :\n" + out.join("\n");
 }
 async function robot(body: Record<string, unknown>) {
@@ -273,13 +274,18 @@ async function ecran(action: string, args: Record<string, unknown> = {}) {
   const { error } = await admin.from("jarvis_ecran").insert({ action, args });
   return !error;
 }
+// L'écran suit tout seul ce que fait l'assistant : l'ordre part en même temps que le travail de l'outil
+const montre = (action: string, args: Record<string, unknown> = {}) => ecran(action, args).catch(() => false);
+const SOURCE_LIEU: Record<string, string> = { orange: "abonnements", foncia: "logement", plenitude: "energie", medinlyon: "sante" };
+const APP_LIEU = Object.fromEntries(Object.entries(LIEU_APP).map(([k, v]) => [v, k]));
 async function montrer(a: Record<string, any>) {
   const act = String(a.action ?? "");
   if (act === "lieu" || act === "document") { if (!LIEUX[a.lieu]) return "Lieu inconnu. Choix : " + Object.keys(LIEUX).join(", "); }
   if (act === "document" && !a.titre) return "Donne le titre du papier à ouvrir.";
   const args: Record<string, unknown> = {};
   for (const k of ["lieu", "titre", "tourner", "zoom", "vue", "mode", "texte"]) if (a[k] !== undefined) args[k] = a[k];
-  if (!["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message"].includes(act)) return "Action inconnue.";
+  for (const k of ["pour", "centre", "date", "heure", "etape"]) if (a[k] !== undefined) args[k] = a[k];
+  if (!["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message", "rdv"].includes(act)) return "Action inconnue.";
   return (await ecran(act, args)) ? "C'est affiché dans l'app Jarvis (si elle est ouverte sur l'iPhone ou le Mac)." : "Je n'ai pas pu envoyer l'ordre à l'écran.";
 }
 const CENTRES: Record<string, string> = { villeurbanne: "1", brotteaux: "2", "lyon 6": "2", lyon: "2", "1": "1", "2": "2" };
@@ -292,7 +298,7 @@ const TOOLS = [
   { name: "jarvis_lieu", title: "Détail d'un domaine (Jarvis)", description: "Détail complet d'un domaine de Jarvis, avec l'historique et la liste des papiers rangés.", inputSchema: { type: "object", properties: { lieu: { type: "string", enum: Object.keys(LIEUX), description: "Le domaine à détailler." } }, required: ["lieu"] }, annotations: { readOnlyHint: true } },
   { name: "jarvis_pdf", title: "Retrouver un PDF (Jarvis)", description: "Cherche un PDF rangé dans Jarvis (quittances, avis d'échéance, régularisations Foncia, justificatifs MédinLyon, avis d'impôt, contrôle technique, assurance auto…) et donne un lien pour l'ouvrir. Exemple de recherche : « quittance octobre 2026 ».", inputSchema: { type: "object", properties: { recherche: { type: "string" } }, required: ["recherche"] }, annotations: { readOnlyHint: true } },
   { name: "jarvis_planning", title: "Mon planning de travail (5x8)", description: "Postes de travail de l'utilisateur jour par jour (matin 4h-12h, après-midi 12h-20h, nuit 20h-4h, repos, remonte, jours sup, congés), envoyés par son app Mon Planning. À utiliser dès qu'il demande s'il travaille ou s'il est libre à une date, et AVANT de lui proposer un rendez-vous (médecin, démarche) : ne propose que des moments où il ne travaille pas. Une nuit compte pour le jour où elle commence.", inputSchema: { type: "object", properties: { date: { type: "string", description: "« aujourd'hui », « demain », « après-demain » ou AAAA-MM-JJ (début)" }, jusqu_au: { type: "string", description: "Optionnel, AAAA-MM-JJ : fin de la période (62 jours max)" } } }, annotations: { readOnlyHint: true } },
-  { name: "jarvis_ecran", title: "Piloter l'écran de Jarvis", description: "Pilote l'app Jarvis ouverte sur l'iPhone ou le Mac de l'utilisateur (une ville 3D où chaque bâtiment est un domaine de sa vie). Utilise-le pour MONTRER ce dont tu parles : aller à un lieu et ouvrir sa fiche (action lieu), ouvrir un papier précis (action document, avec lieu + titre, ex. « avis d'impôt 2026 », « contrôle technique »), revenir à la vue de toute la ville (ensemble), bouger la caméra (camera : tourner en degrés, + vers la droite / - vers la gauche ; zoom « avant » ou « arriere » ; vue « dessus » ou « rasante »), passer en jour ou nuit (ciel : mode « jour » / « nuit »), tout fermer (fermer), ou afficher une courte phrase à l'écran (message : texte). Quand tu parles d'un domaine, montre-le en même temps.", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message"] }, lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string", description: "Pour document : quelques mots du titre du papier" }, tourner: { type: "number", description: "Pour camera : degrés (ex. 90 ou -45)" }, zoom: { type: "string", enum: ["avant", "arriere"] }, vue: { type: "string", enum: ["dessus", "rasante"] }, mode: { type: "string", enum: ["jour", "nuit"] }, texte: { type: "string", description: "Pour message : une phrase courte" } }, required: ["action"] }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
+  { name: "jarvis_ecran", title: "Piloter l'écran de Jarvis", description: "Pilote l'app Jarvis ouverte sur l'iPhone ou le Mac de l'utilisateur (une ville 3D où chaque bâtiment est un domaine de sa vie). Utilise-le pour MONTRER ce dont tu parles : aller à un lieu et ouvrir sa fiche (action lieu), ouvrir un papier précis (action document, avec lieu + titre, ex. « avis d'impôt 2026 », « contrôle technique »), revenir à la vue de toute la ville (ensemble), bouger la caméra (camera : tourner en degrés, + vers la droite / - vers la gauche ; zoom « avant » ou « arriere » ; vue « dessus » ou « rasante »), passer en jour ou nuit (ciel : mode « jour » / « nuit »), tout fermer (fermer), afficher une courte phrase à l'écran (message : texte), ou montrer la prise de rendez-vous médical en train de se remplir (rdv : pour, centre, date, heure, etape). L'utilisateur doit VOIR ce que tu fais pendant que tu lui parles : à chaque étape d'une prise de rendez-vous (dès qu'il dit pour qui, puis où, puis quand, puis l'heure choisie avant sa confirmation), appelle jarvis_ecran action rdv avec ce que tu sais déjà. Les autres outils de Jarvis mettent l'écran à jour tout seuls.", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message", "rdv"] }, pour: { type: "string", description: "Pour rdv : prénom de la personne" }, centre: { type: "string", description: "Pour rdv : « Villeurbanne » ou « Brotteaux »" }, date: { type: "string", description: "Pour rdv : « aujourd'hui », « demain » ou AAAA-MM-JJ" }, heure: { type: "string", description: "Pour rdv : HH:MM choisi" }, etape: { type: "string", enum: ["qui", "ou", "quand", "confirmer"], description: "Pour rdv : l'étape à montrer" }, lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string", description: "Pour document : quelques mots du titre du papier" }, tourner: { type: "number", description: "Pour camera : degrés (ex. 90 ou -45)" }, zoom: { type: "string", enum: ["avant", "arriere"] }, vue: { type: "string", enum: ["dessus", "rasante"] }, mode: { type: "string", enum: ["jour", "nuit"] }, texte: { type: "string", description: "Pour message : une phrase courte" } }, required: ["action"] }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
   { name: "jarvis_ranger_papier", title: "Ranger un papier dans Jarvis", description: "Range dans Jarvis un papier trouvé dans les mails de l'utilisateur (Outlook) : facture, quittance, avis d'échéance, régularisation, amende, avis d'impôt, attestation, contrat, compte rendu médical, convocation… À utiliser quand il demande de retrouver un document dans ses mails (même ancien, ex. « la régularisation Foncia de 2024 ») ou de ranger ses mails importants. Envoie le fichier joint de préférence : pdf_base64 (le PDF encodé en base64) ou pdf_url (lien https direct vers le PDF). Si tu ne peux pas transmettre le fichier, envoie contenu_texte : tout le texte du document (ou du mail), Jarvis en fera un PDF propre. Choisis le lieu le plus logique. Ne range JAMAIS une pièce d'identité, ni un papier qui montre un IBAN ou un n° de sécurité sociale complet (sauf bulletin de paie). Une fois rangé, montre-le avec jarvis_ecran (action document).", inputSchema: { type: "object", properties: { lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string", description: "Titre court et clair en français, ex. « Régularisation des charges 2024 », « Facture Orange »" }, sous_titre: { type: "string", description: "Organisme · période ou date · montant, ex. « Foncia · 2024 »" }, de: { type: "string", description: "Expéditeur du mail" }, date_mail: { type: "string", description: "Date du mail, AAAA-MM-JJ" }, resume: { type: "string", description: "Une ou deux phrases : ce que dit le papier, ce qu'il faut faire" }, pdf_base64: { type: "string" }, pdf_url: { type: "string" }, contenu_texte: { type: "string" } }, required: ["lieu", "titre"] }, annotations: { readOnlyHint: false, destructiveHint: false } },
   { name: "jarvis_alerte", title: "Poser une alerte dans Jarvis", description: "Met un lieu de la ville Jarvis en rouge, avec une notification, quand un mail important demande l'attention de l'utilisateur : facture ou amende à payer, échéance proche, rendez-vous ou convocation, courrier de la régie, des impôts, de la CAF, de la santé… Pas pour la pub ni les newsletters. Une alerte par sujet. Utilise-le par exemple quand il demande de faire le point sur ses mails de la semaine.", inputSchema: { type: "object", properties: { lieu: { type: "string", enum: Object.keys(LIEUX) }, titre: { type: "string", description: "Très court, ex. « Amende à payer avant le 30/11 »" }, texte: { type: "string", description: "Ce qu'il faut savoir et faire, en 1 à 3 phrases simples" }, de: { type: "string" }, date_mail: { type: "string", description: "AAAA-MM-JJ" } }, required: ["lieu", "titre", "texte"] }, annotations: { readOnlyHint: false, destructiveHint: false } },
   { name: "jarvis_alerte_vue", title: "Retirer une alerte Jarvis", description: "Retire une alerte (le lieu n'est plus rouge) quand l'utilisateur dit que c'est réglé ou vu. Numéro donné par jarvis_resume.", inputSchema: { type: "object", properties: { numero: { type: "string" } }, required: ["numero"] }, annotations: { readOnlyHint: false, destructiveHint: false } },
@@ -302,7 +308,7 @@ const TOOLS = [
   { name: "jarvis_mail_lire", title: "Lire un mail Outlook", description: "Lit un mail en entier (expéditeur, date, objet, texte, pièces jointes, lien pour l'ouvrir dans Outlook) et ce que Jarvis en a retenu. Numéro donné par jarvis_mails_chercher ou jarvis_memoire, ou référence « outlook:… » d'un vieux mail. Les IBAN et n° de sécu sont masqués.", inputSchema: { type: "object", properties: { numero: { type: "string" } }, required: ["numero"] }, annotations: { readOnlyHint: true } },
   { name: "jarvis_memoire", title: "Mémoire de Jarvis", description: "Ce que Jarvis a retenu et rangé : les infos utiles tirées des mails (chacune avec le n° du mail source), les notes rangées et les alertes (en cours ou vues). Filtrable par mots, domaine et date. À utiliser pour « qu'est-ce que je dois savoir / faire », « qu'est-ce que la régie m'a envoyé », « où en est … ».", inputSchema: { type: "object", properties: { recherche: { type: "string" }, lieu: { type: "string", enum: Object.keys(LIEUX) }, depuis: { type: "string", description: "AAAA-MM-JJ" }, limite: { type: "number" } } }, annotations: { readOnlyHint: true } },
   { name: "jarvis_mails_synchroniser", title: "Relire mes mails maintenant", description: "Relit tout de suite les boîtes Outlook branchées (sinon c'est fait toutes les 15 minutes) : nouveaux mails, tri, rangement dans la ville. Lecture seule : rien n'est envoyé ni modifié dans Outlook.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "medinlyon_creneaux", title: "Créneaux libres MédinLyon", description: "Créneaux de consultation libres chez MédinLyon (centres Villeurbanne et Lyon 6 Brotteaux), seulement aujourd'hui ou demain. Les créneaux marqués supplément (soir, week-end) coûtent environ 23 € de dépassement : le dire à l'utilisateur.", inputSchema: { type: "object", properties: { centre: { type: "string", description: "« Villeurbanne » ou « Brotteaux »" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" } }, required: ["centre"] }, annotations: { readOnlyHint: true } },
+  { name: "medinlyon_creneaux", title: "Créneaux libres MédinLyon", description: "Créneaux de consultation libres chez MédinLyon (centres Villeurbanne et Lyon 6 Brotteaux), seulement aujourd'hui ou demain. Les créneaux marqués supplément (soir, week-end) coûtent environ 23 € de dépassement : le dire à l'utilisateur.", inputSchema: { type: "object", properties: { pour: { type: "string", description: "Prénom de la personne, s'il est connu (pour l'afficher à l'écran)" }, centre: { type: "string", description: "« Villeurbanne » ou « Brotteaux »" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" } }, required: ["centre"] }, annotations: { readOnlyHint: true } },
   { name: "medinlyon_reserver", title: "Réserver un rendez-vous MédinLyon", description: "Réserve un rendez-vous MédinLyon pour une personne de la famille. Avant d'appeler cet outil, récapitule à l'utilisateur pour qui, où, quand et le tarif, et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { pour: { type: "string", description: "Nom ou prénom de la personne (famille sur le compte)" }, centre: { type: "string" }, date: { type: "string", description: "« aujourd'hui », « demain » ou AAAA-MM-JJ" }, heure: { type: "string", description: "HH:MM, un créneau libre" }, confirme: { type: "boolean", description: "true seulement après le oui explicite de l'utilisateur" } }, required: ["pour", "centre", "date", "heure", "confirme"] }, annotations: { destructiveHint: false, readOnlyHint: false } },
   { name: "medinlyon_annuler", title: "Annuler un rendez-vous MédinLyon", description: "Annule un rendez-vous MédinLyon à venir (numéro donné par jarvis_resume). Avant d'appeler, rappelle le rendez-vous à l'utilisateur et attends son « oui » explicite ; alors seulement mets confirme à true.", inputSchema: { type: "object", properties: { numero: { type: "string" }, confirme: { type: "boolean" } }, required: ["numero", "confirme"] }, annotations: { destructiveHint: true, readOnlyHint: false } },
   { name: "medinlyon_mettre_a_jour", title: "Relire MédinLyon", description: "Relit le compte MédinLyon (rendez-vous, justificatifs PDF, famille, créneaux) et met Jarvis à jour.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false, destructiveHint: false } },
@@ -310,25 +316,33 @@ const TOOLS = [
 
 async function appel(nom: string, a: Record<string, any>): Promise<string> {
   switch (nom) {
-    case "jarvis_resume": return await resume();
+    case "jarvis_resume": { const [t] = await Promise.all([resume(), montre("ensemble")]); return t; }
     case "jarvis_lieu": { if (!LIEUX[a.lieu]) return "Domaine inconnu. Choix : " + Object.keys(LIEUX).join(", "); const [rows] = await Promise.all([lignes(), ecran("lieu", { lieu: a.lieu }).catch(() => false)]); return `${LIEUX[a.lieu].nom} (affiché aussi dans l'app Jarvis)\n${lieu(rows, a.lieu, true)}`; }
     case "jarvis_ecran": return await montrer(a);
-    case "jarvis_planning": return postes(await lignes(), a);
-    case "jarvis_pdf": return await documents(String(a.recherche ?? ""));
-    case "jarvis_ranger_papier": oublier(); return await rangerPapier(admin, a, Object.keys(LIEUX));
-    case "jarvis_alerte": oublier(); return await poserAlerte(admin, a, Object.keys(LIEUX));
+    case "jarvis_planning": { const [rows] = await Promise.all([lignes(), montre("lieu", { lieu: "travail" })]); return postes(rows, a); }
+    case "jarvis_pdf": return await documents(String(a.recherche ?? ""), true);
+    case "jarvis_ranger_papier": { oublier(); const r = await rangerPapier(admin, a, Object.keys(LIEUX)); if (LIEUX[a.lieu]) await montre("document", { lieu: a.lieu, titre: String(a.titre ?? "") }); return r; }
+    case "jarvis_alerte": { oublier(); const [r] = await Promise.all([poserAlerte(admin, a, Object.keys(LIEUX)), LIEUX[a.lieu] ? montre("lieu", { lieu: a.lieu }) : null]); return r; }
     case "jarvis_alerte_vue": oublier(); return await alerteVue(admin, a.numero);
-    case "jarvis_chercher": return await chercher(admin, a);
-    case "jarvis_mails_chercher": return await mailsChercher(admin, a);
-    case "jarvis_mail_lire": return await mailLire(admin, a);
-    case "jarvis_memoire": return await memoire(admin, a);
+    case "jarvis_chercher": {
+      const [r] = await Promise.all([chercher(admin, a), montre("recherche", { texte: "Je cherche « " + String(a.recherche ?? "") + " »" })]);
+      // on emmène l'écran là où se trouve la première trouvaille
+      const m = r.match(/\n- \[([a-z]+) · ([a-z]+) · ([^\]·]+)/); const src = m?.[1], kind = m?.[2], label = (m?.[3] ?? "").trim();
+      const lieu = src && (SOURCE_LIEU[src] ?? (src === "mac" && kind === "lieu" ? APP_LIEU[label] : undefined));
+      if (lieu) await montre("lieu", { lieu });
+      return r;
+    }
+    case "jarvis_mails_chercher": { const [r] = await Promise.all([mailsChercher(admin, a), montre("recherche", { texte: "Je cherche dans tes mails" + (a.recherche ? " : « " + String(a.recherche) + " »" : ""), lieu: LIEUX[a.lieu] ? a.lieu : undefined })]); return r; }
+    case "jarvis_mail_lire": { const [r] = await Promise.all([mailLire(admin, a), montre("message", { texte: "📩 Je lis le mail n° " + String(a.numero ?? a.id ?? "") })]); return r; }
+    case "jarvis_memoire": { const [r] = await Promise.all([memoire(admin, a), LIEUX[a.lieu] ? montre("lieu", { lieu: a.lieu }) : montre("message", { texte: "Je regarde ce que j'ai retenu de tes mails" })]); return r; }
     case "jarvis_mails_synchroniser": oublier(); return await mailsSynchroniser(admin);
     case "jarvis_noter": { oublier(); const r = await noter(admin, a, Object.keys(LIEUX)); if (r.startsWith("Rangé")) await ecran("lieu", { lieu: a.lieu }).catch(() => false); return r; }
     case "medinlyon_creneaux": {
       const c = centreId(a.centre); if (!c) return "Centre inconnu : Villeurbanne ou Brotteaux.";
       const d = dateDe(a.date); if (d !== today() && d !== today(1)) return "MédinLyon ne propose que le jour même et le lendemain.";
-      const r = await robot({ action: "creneaux", centre: c, date: d });
+      const [r] = await Promise.all([robot({ action: "creneaux", centre: c, date: d }), montre("rdv", { pour: a.pour, centre: c, date: d, etape: "quand" })]);
       if (!r.ok) return r.message ?? "Créneaux indisponibles.";
+      await montre("rdv", { pour: a.pour, centre: c, date: d, etape: "creneaux", creneaux: r.creneaux });
       if (!r.creneaux.length) return `Aucun créneau libre à ${c === "1" ? "Villeurbanne" : "Lyon 6 Brotteaux"} ${jour(d)}.`;
       return `Créneaux libres à ${c === "1" ? "Villeurbanne" : "Lyon 6 Brotteaux"}, ${jour(d)} : ` + r.creneaux.map((x: any) => x.heure + (x.supplement ? " (+≈23 €)" : "")).join(", ") + ".";
     }
@@ -342,17 +356,19 @@ async function appel(nom: string, a: Record<string, any>): Promise<string> {
       const libres = await robot({ action: "creneaux", centre: c, date: d });
       const h = String(a.heure ?? "").replace(/h/i, ":").padStart(5, "0");
       const cr = (libres.creneaux ?? []).find((x: any) => x.heure === h);
-      if (!cr) return `Le créneau de ${h} n'est plus libre. Libres : ` + (libres.creneaux ?? []).map((x: any) => x.heure).join(", ");
+      if (!cr) { await montre("rdv", { pour: p[0].nom, centre: c, date: d, etape: "creneaux", creneaux: libres.creneaux ?? [] }); return `Le créneau de ${h} n'est plus libre. Libres : ` + (libres.creneaux ?? []).map((x: any) => x.heure).join(", "); }
+      await montre("rdv", { pour: p[0].nom, centre: c, date: d, heure: h, supplement: !!cr.supplement, etape: "reservation" });
       const r = await robot({ action: "reserver", patient: p[0].id, centre: c, date: d, creneau: cr.id });
+      await montre("rdv", { pour: p[0].nom, centre: c, date: d, heure: h, etape: "fait", resultat: { ok: !!r.ok, message: r.message ?? "", rdv: r.rdv?.chemin ? { chemin: r.rdv.chemin } : null } });
       if (!r.ok) return "Pas réservé : " + (r.message ?? "");
       return `Réservé : ${p[0].nom}, ${jour(d)} à ${h.replace(":", "h")}, centre ${c === "1" ? "Villeurbanne" : "Lyon 6 Brotteaux"}.` + (r.rdv?.chemin ? " Le justificatif PDF est rangé dans Jarvis." : "");
     }
     case "medinlyon_annuler": {
       if (a.confirme !== true) return "Pas annulé : demande d'abord confirmation à l'utilisateur, puis rappelle l'outil avec confirme à true.";
-      const r = await robot({ action: "annuler", id: String(a.numero ?? "") });
+      const [r] = await Promise.all([robot({ action: "annuler", id: String(a.numero ?? "") }), montre("lieu", { lieu: "sante" })]);
       return (r.ok ? "" : "Pas annulé : ") + (r.message ?? "");
     }
-    case "medinlyon_mettre_a_jour": { const r = await robot({ action: "sync" }); return r.ok ? `MédinLyon relu : ${r.a_venir} rendez-vous à venir, ${r.rdv} au total, ${r.pdf} justificatifs PDF.` : (r.message ?? "Échec."); }
+    case "medinlyon_mettre_a_jour": { const [r] = await Promise.all([robot({ action: "sync" }), montre("lieu", { lieu: "sante" })]); return r.ok ? `MédinLyon relu : ${r.a_venir} rendez-vous à venir, ${r.rdv} au total, ${r.pdf} justificatifs PDF.` : (r.message ?? "Échec."); }
   }
   throw new Error("outil inconnu");
 }
@@ -367,7 +383,7 @@ async function traiter(m: any) {
     case "initialize": {
       const v = VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : VERSIONS[0];
       return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jarvis", title: "Jarvis", version: "1.0.0" },
-        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte : avec jarvis_ecran, montre-lui à l'écran ce dont tu parles (le lieu, le papier). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple et COURT (une ou deux phrases, surtout à l'oral) : donne juste l'info demandée, sans tout réciter. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement. Pour un détail précis (un code RIO, une option, une date…), fouille avec jarvis_chercher, et range ce qui est utile avec jarvis_noter. Ses mails Outlook sont lus par Jarvis (lecture seule) : pour toute question sur un mail ou un courrier, utilise jarvis_mails_chercher puis jarvis_mail_lire ; pour ce que Jarvis a retenu (avec le mail source), jarvis_memoire. Tu peux ranger un papier joint avec jarvis_ranger_papier et signaler ce qui est important avec jarvis_alerte." });
+        instructions: "Jarvis est l'assistant personnel de l'utilisateur. Appelle jarvis_resume pour connaître sa situation (loyer, énergie, santé, impôts, papiers…). L'utilisateur a souvent l'app Jarvis ouverte et doit VOIR ce que tu fais pendant que tu lui parles : les outils de Jarvis mettent l'écran à jour tout seuls, et avec jarvis_ecran tu montres le reste (un lieu, un papier, et pendant une prise de rendez-vous l'action rdv à chaque étape : pour qui, où, quand, l'heure). Pour savoir s'il travaille ou s'il est libre un jour, appelle jarvis_planning (son planning 5x8), et vérifie-le avant de proposer un rendez-vous. Réponds en français simple et COURT (une ou deux phrases, surtout à l'oral) : donne juste l'info demandée, sans tout réciter. Ne réserve et n'annule jamais sans son oui explicite. Pour l'argent, conseille seulement. Pour un détail précis (un code RIO, une option, une date…), fouille avec jarvis_chercher, et range ce qui est utile avec jarvis_noter. Ses mails Outlook sont lus par Jarvis (lecture seule) : pour toute question sur un mail ou un courrier, utilise jarvis_mails_chercher puis jarvis_mail_lire ; pour ce que Jarvis a retenu (avec le mail source), jarvis_memoire. Tu peux ranger un papier joint avec jarvis_ranger_papier et signaler ce qui est important avec jarvis_alerte." });
     }
     case "ping": return ok({});
     case "tools/list": return ok({ tools: TOOLS });

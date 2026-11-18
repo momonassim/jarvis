@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=maj1";
+import { creerVille } from "./ville.js?v=ecran1";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -577,10 +577,14 @@ async function ordreEcran(o) {
   if (o.action === "lieu") { const p = byId[LIEU_APP[a.lieu] || a.lieu]; if (p) { $("paperwrap").classList.remove("open"); select(p); } }
   else if (o.action === "document") {
     const p = byId[LIEU_APP[a.lieu] || a.lieu]; if (!p) return;
-    select(p); openDetails(); const q = sansAccent(a.titre).split(/\s+/).filter(Boolean);
-    const d = (p.docs || []).find(x => q.every(m => sansAccent(x.t + " " + x.d).includes(m))) || (p.docs || []).find(x => q.some(m => sansAccent(x.t + " " + x.d).includes(m)));
+    select(p); openDetails(); const q = sansAccent(a.titre || "").split(/\s+/).filter(m => m.length > 1);
+    // le papier exact (par son chemin) s'il est connu, sinon par les mots du titre
+    const d = (a.path && ((p.docs || []).find(x => x.path === a.path) || { t: a.titre || "Papier", d: a.d || "", path: a.path }))
+      || (p.docs || []).find(x => q.every(m => sansAccent(x.t + " " + x.d).includes(m))) || (p.docs || []).find(x => q.some(m => sansAccent(x.t + " " + x.d).includes(m)));
     if (d) setTimeout(() => openDoc(p, d), 700); else toast("Je ne trouve pas « " + a.titre + " » ici.");
   }
+  else if (o.action === "rdv") montrerRdv(a);
+  else if (o.action === "recherche") { const p = a.lieu && byId[LIEU_APP[a.lieu] || a.lieu]; if (p && S.sel !== p) select(p); toast("🔎 " + String(a.texte || "Je cherche…").slice(0, 120)); }
   else if (o.action === "ensemble") { fermerTout(); overview(); }
   else if (o.action === "camera") bougerCamera(a);
   else if (o.action === "ciel") applySky(a.mode === "nuit");
@@ -680,6 +684,32 @@ function stepConfirm() {
     stepDone(r);
   });
   back(o, stepSlot);
+}
+function montrerCreneaux(list) {
+  const o = bookStep("À quelle heure ?", (B.patient ? B.patient.nom + " · " : "") + jour(B.date) + " · " + CENTRES[B.centre]);
+  if (!list.length) { o.innerHTML = '<p class="empty">Plus aucun créneau libre ce jour-là.</p>'; back(o, stepWhen); return; }
+  const g = document.createElement("div"); g.className = "slots"; o.append(g);
+  list.forEach(s => { const b = document.createElement("button"); b.className = "slot" + (s.supplement ? " plus" : ""); b.innerHTML = "<b></b>" + (s.supplement ? "<span>+≈23 €</span>" : "");
+    b.querySelector("b").textContent = hh(s.heure); b.addEventListener("click", () => { B.slot = s; if (B.patient) stepConfirm(); else stepWho(); }); g.append(b); });
+  back(o, stepWhen);
+}
+/* L'assistant (Claude ou ChatGPT) parle : l'écran de prise de rendez-vous suit la conversation, étape par étape */
+function montrerRdv(a) {
+  const sansA = t => sansAccent(String(t || ""));
+  if (!bookOpen) { openBook(); }
+  if (a.pour) { const q = sansA(a.pour).split(/\s+/)[0]; const fam = S.patients.length ? S.patients : [...new Set(S.rdv.map(r => r.patient))].map(n => ({ id: "", nom: n }));
+    const p = fam.find(x => sansA(x.nom).includes(q)); if (p) B.patient = p; }
+  if (a.centre) { const c = /brott|lyon/i.test(a.centre) ? "2" : /villeur/i.test(a.centre) ? "1" : (CENTRES[a.centre] ? a.centre : null); if (c) B.centre = c; }
+  if (a.date) B.date = /demain/i.test(a.date) ? parisDay(1) : /aujourd/i.test(a.date) ? parisDay() : a.date;
+  const e = a.etape || (a.resultat ? "fait" : a.heure ? "confirmer" : a.creneaux ? "creneaux" : B.date ? "quand" : B.centre ? "quand" : B.patient ? "ou" : "qui");
+  if (e === "creneaux" && B.centre && B.date) return montrerCreneaux(a.creneaux || []);
+  if (e === "qui" || !B.patient) return stepWho();
+  if (e === "ou" || !B.centre) return stepWhere();
+  if (e === "quand" || !B.date) return stepWhen();
+  if (a.heure) B.slot = { id: a.creneau || "", heure: String(a.heure).replace(/h/i, ":").padStart(5, "0"), supplement: !!a.supplement };
+  if (e === "confirmer" && B.slot) return stepConfirm();
+  if (e === "fait") { if (!B.slot && a.heure) B.slot = { heure: a.heure }; return stepDone(a.resultat || { ok: false }); }
+  if (e === "reservation") { const o = bookStep("Je réserve…", (B.patient ? B.patient.nom : "") + " · " + jour(B.date) + (B.slot ? " à " + hh(B.slot.heure) : "")); o.innerHTML = '<p class="empty">Je réserve sur MédinLyon…</p>'; }
 }
 function stepDone(r) {
   const ok = r && r.ok;
