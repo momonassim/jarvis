@@ -910,7 +910,7 @@ function makeMast(p,base,top,R){
 for(const p of PLACES){
   const L=PL[p.id];
   if(p.id==='garage'&&GATE){ const gm=GATE.userData.mat, cx=GATE.userData.cx;
-    p.view=[V(cx+3.2,2.0,9).applyMatrix4(gm),V(cx,-1.2,-6).applyMatrix4(gm)]; makeHalo(p,gm,cx,1.6,3.0,2.6);
+    p.view=[V(cx-.15,1.55,4.8).applyMatrix4(gm),V(cx,1.05,-4).applyMatrix4(gm)]; p.fov=55; p.cadre={w:3.6,c:V(cx,2.7,-1).applyMatrix4(gm)}; makeHalo(p,gm,cx,1.6,3.0,2.6);
     const b0=V(cx+2.3,.15,.9).applyMatrix4(gm); makeMast(p,b0,b0.y+2.6,.6); }
   else if(L&&L.mat){ const far=L.far||9.6;
     p.view=[V(L.W/2+L.W*.08,L.camY||2.3,far).applyMatrix4(L.mat),V(L.W/2,L.tY||Math.min(L.H*.42,6.2),-1).applyMatrix4(L.mat)]; makeHalo(p,L.mat,L.W/2,-L.D/2,L.W,L.D);
@@ -1022,8 +1022,8 @@ function frameInfos(infos,maxD,margin=1.18){ const n=infos[0].n.clone(), r=infos
 function viewFor(p){ const list=PANELS[p.id]; if(p.id==='banque') return frameInfos([BANKINFO],15);
   if(list&&list.length) return frameInfos(list.map(P=>P.info),p.maxD||13); const v=p.view;
   // l'entrée de l'usine : on recule sur un écran étroit (téléphone) pour voir la vitrine et la pointeuse en entier
-  if(p.id==='usine'&&PL.usine){ const f=p.fov||55, L=PL.usine, dt=L.far+1, df=L.far-4.35, nf=5.4/(2*Math.tan(f*Math.PI/360)*Math.max(.3,camera.aspect));
-    if(nf>df){ const k=(nf+dt-df)/dt, e=v[1].clone().add(v[0].clone().sub(v[1]).multiplyScalar(k)); return [e,v[1],f]; } }
+  if(p.cadre){ const f=p.fov||55, dir=v[1].clone().sub(v[0]).normalize(), dPlan=p.cadre.c.clone().sub(v[0]).dot(dir), need=p.cadre.w/(2*Math.tan(f*Math.PI/360)*Math.max(.3,camera.aspect));
+    if(need>dPlan){ const e=v[0].clone().addScaledVector(dir,dPlan-need); return [e,v[1].clone().addScaledVector(dir,dPlan-need),f]; } }
   return [v[0],v[1],f0(p)]; }
 function f0(p){ return p.fov||55; }
 // --- petits outils de dessin (espace de 1000 px de large) ---
@@ -1305,6 +1305,33 @@ function shopExtras(L,root,P){
   const lab=labelPlane([{t:'—',s:40,y:60}],1.3,.38,{bg:'#fbfaf7',edge:'#ff7a1f',ppu:320}); lab.position.set(x1+.72,.36,z+.02); root.add(lab); lab.userData.place=P; lab.userData.act='details'; pickables.push(lab);
   SHOP.fib={x0,x1,y,z,lit,tip,pulse,lab};
 }
+/* ---------- TA VOITURE : un panneau suspendu sous le porche du parking (comme un vrai panneau d'entrée de parking) ---------- */
+const GAR={};
+function buildGarage(gm,cx){ const P=PLACES.find(q=>q.id==='garage'); const root=new THREE.Group(); root.matrixAutoUpdate=false; root.matrix.copy(gm); scene.add(root); GAR.root=root;
+  const bw=2.4, bh=1.0, by=2.78, bz=-1.0;
+  // deux tiges de fer qui le pendent au plafond de la rampe (plafond à 3,62 m)
+  for(const dx of [-bw/2+.18,bw/2-.18]){ const r=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,3.62-(by+bh/2)+.02,6),ironM); r.position.set(cx+dx,(3.62+by+bh/2)/2,bz); root.add(r); }
+  const fr=new THREE.Mesh(new THREE.BoxGeometry(bw+.08,bh+.08,.05),ironM); fr.position.set(cx,by,bz); fr.castShadow=true; root.add(fr);
+  GAR.board=canvasPlane(bw,bh,460); GAR.board.position.set(cx,by,bz+.027); root.add(GAR.board);
+  for(const m of [fr,GAR.board]){ m.userData.place=P; m.userData.act='details'; pickables.push(m); }
+  // une lampe au fond du parking pour bien voir la voiture
+  const lp=new THREE.PointLight(0xfff1dc,6,9,1.6); lp.position.set(cx,-.4,-8.4); root.add(lp);
+}
+function updateGarage(){ if(!GAR.board) return; const D=DATA.garage||{}; const key=JSON.stringify([D.facts,D.alerts,D.say,D.status,D.place]);
+  if(GAR.board.userData.k===key) return; GAR.board.userData.k=key;
+  const c=GAR.board.userData.c, x=c.getContext('2d'), S=c.width/1000, H=GAR.board.userData.H; x.setTransform(S,0,0,S,0,0);
+  x.fillStyle='#F6F2EA'; x.fillRect(0,0,1000,H); x.strokeStyle='#2B3138'; x.lineWidth=4; x.strokeRect(16,16,968,H-32);
+  x.fillStyle='#5AA5C6'; x.fillRect(16,16,968,96); x.textAlign='left'; x.font=`700 54px ${SERIF}`; x.fillStyle='#fff'; try{x.letterSpacing='8px';}catch(e){} x.fillText('TA VOITURE',44,82); try{x.letterSpacing='0px';}catch(e){}
+  if(D.place){ x.textAlign='right'; fitTxt(x,D.place,420,28,700); x.fillStyle='rgba(255,255,255,.9)'; x.fillText(D.place,956,78); x.textAlign='left'; }
+  let y=150; const al=(D.alerts||[]).slice(0,2);
+  al.forEach(a=>{ x.fillStyle='rgba(201,72,58,.1)'; x.fillRect(40,y,920,72); x.fillStyle='#C9483A'; x.fillRect(40,y,8,72); fitTxt(x,a.t,880,32,700); x.fillStyle='#C9483A'; x.fillText(a.t,66,y+47); y+=86; });
+  const F=(D.facts||[]).slice(0,al.length?2:4);
+  if(F.length){ const cw=(920-20)/2; F.forEach(([a,b],i)=>{ const X=40+(i%2)*(cw+20), Y=y+Math.floor(i/2)*124; x.fillStyle='#fbf8f2'; x.fillRect(X,Y,cw,108); x.strokeStyle='rgba(43,49,56,.16)'; x.lineWidth=2; x.strokeRect(X,Y,cw,108);
+      x.fillStyle='#5AA5C6'; x.fillRect(X,Y+18,6,72); fitTxt(x,String(a),cw-50,26,600); x.fillStyle='#6b7079'; x.fillText(String(a),X+26,Y+40); fitTxt(x,String(b),cw-50,38,800); x.fillStyle='#2B3138'; x.fillText(String(b),X+26,Y+86); }); }
+  else { const t=D.say||D.status||'Contrôle technique, assurance et entretien : je les range ici dès que je les trouve.'; x.font=`600 34px ${FNT}`; x.fillStyle='#3d434c';
+    const mots=t.split(/\s+/); let l='', yy=y+40; for(const m of mots){ const tt=l?l+' '+m:m; if(x.measureText(tt).width>900&&l){ x.fillText(l,50,yy); yy+=46; l=m; if(yy>H-60) break; } else l=tt; } if(yy<=H-60&&l) x.fillText(l,50,yy); }
+  GAR.board.userData.t.needsUpdate=true; }
+
 /* ---------- TON TRAVAIL : la pointeuse, le panneau sécurité et la cheminée du four ---------- */
 const USN={};
 function dateFr(t){ const m=String(t).match(/(\d{1,2})(?:er)?\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)/i); if(!m) return null;
@@ -1452,16 +1479,11 @@ function buildOpenings(){
   // ---------- CHEZ TOI : quatre grandes cartes sortent de la façade ----------
   // CHEZ TOI : les infos apparaissent gravées en relief dans le mur, à droite du porche du garage
   const H0=PL.home; if(H0){ buildHome(H0); H0.tX=2.07; H0.tY=1.55; H0.camY=1.75; H0.far=7.8; H0.camDX=0; }
-  // ---------- TA VOITURE : une niche dans le mur de la rampe, le panneau s'avance et s'éclaire ----------
-  if(GATE){ const gm=GATE.userData.mat, cx=GATE.userData.cx, wx=cx-1.42;
-    box2(gm,[wx-.03,wx+.03,2.0,2.06,-4.0,-1.4],'lamp');
-    const niche=new THREE.MeshStandardMaterial({color:0xd9d4cc,roughness:.9});
-    const nb=new THREE.Mesh(new THREE.BoxGeometry(.04,1.75,2.5),niche); nb.matrixAutoUpdate=false; nb.matrix.copy(gm).multiply(M(wx-.05,.98,-2.7)); scene.add(nb);
-    const frM=new THREE.MeshStandardMaterial({color:0xeae6df,roughness:.85}); for(const [dy,dz,h,d] of [[.92,0,.08,2.62],[-.92,0,.08,2.62],[0,1.29,1.9,.08],[0,-1.29,1.9,.08]]){ const f=new THREE.Mesh(new THREE.BoxGeometry(.12,h,d),frM); f.matrixAutoUpdate=false; f.matrix.copy(gm).multiply(M(wx+.04,.98+dy,-2.7+dz)); f.castShadow=true; scene.add(f); }
-    newPanel('garage',gm,{x:wx,y:.98,zb:-2.7,ry:Math.PI/2,z0:-.08,z1:.12,w:2.3,h:1.6,kind:'slide',d:0,frame:false,thick:.12,maxD:2.6,glow:.55,draw:boardReal('garage')}); }
+  // ---------- TA VOITURE : un panneau émaillé sur le trottoir, à gauche du porche ; la voiture se voit au bout de la rampe ----------
+  if(GATE) buildGarage(GATE.userData.mat,GATE.userData.cx);
   // ---------- TON TRAVAIL : les portes roulantes montent, le planning est derrière ----------
   const U=PL.usine; if(U&&FDOOR.length===2){ const [d1,d2]=FDOOR;
-    buildUsine(U); U.tX=U.W/2-5.4; U.tY=1.4; U.camY=1.75; U.far=10.2; U.camDX=0; }
+    buildUsine(U); U.tX=U.W/2-5.4; U.tY=1.4; U.camY=1.75; U.far=10.2; U.camDX=0;  }
   // ---------- IMPÔTS : l'avis sort de la façade entre les drapeaux ----------
   const I=PL.impots; if(I) newPanel('impots',I.mat,{x:I.W/2,y:6.75,z0:-.5,z1:.42,w:5.0,h:3.0,kind:'slide',d:0,frame:true,thick:.22,draw:boardReal('impots')});
   // ---------- TA SANTÉ ----------
@@ -1484,7 +1506,7 @@ for(const p of PLACES){ const L=PL[p.id]; if(p.id!=='garage'&&L&&L.mat){ const f
 { const E=PLACES.find(q=>q.id==='energie'); if(PL.energie) E.view=PL.energie.view; }
 { const Hm=PLACES.find(q=>q.id==='home'); if(Hm) Hm.fov=55; }
 { const Og=PLACES.find(q=>q.id==='orange'); if(Og) Og.fov=78; }
-{ const Us=PLACES.find(q=>q.id==='usine'); if(Us) Us.fov=55; }
+{ const Us=PLACES.find(q=>q.id==='usine'); if(Us){ Us.fov=55; if(PL.usine) Us.cadre={w:5.4,c:V(PL.usine.W/2-5.4,1.3,4.35).applyMatrix4(PL.usine.mat)}; } }
 { const Cl=PLACES.find(q=>q.id==='clinique'); if(Cl) Cl.fov=70; }
 function updateOpenings(dt){
   for(const id in PANELS){ const want=(SEL&&SEL.id===id&&!anim)?1:0; const k0=openK[id]; openK[id]=cl(k0+(want?1:-1)*dt/2.4); const K=openK[id];
@@ -1513,7 +1535,7 @@ let lastT=performance.now();
 function update3D(){
   const now=performance.now(), dt=Math.min(.05,(now-lastT)/1000); lastT=now; selT+=dt;
   for(const m of flagMats) m.userData.U.uT.value=now/1000;
-  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt); updateUsine(dt); updateClinic(dt);
+  updateObst(dt); updateHome(dt); updateEnergy(dt); updateShop(dt); updateUsine(dt); updateGarage(); updateClinic(dt);
   // mâts : face à la caméra (autour de l'axe vertical), nom qui s'ouvre de près ; trop près, ils se replient
   for(const p of masts){ const M2=p.mast, hp=M2.head.position; M2.spin.rotation.y=Math.atan2(camera.position.x-hp.x,camera.position.z-hp.z);
     const d=camera.position.distanceTo(hp), sel=p===SEL; const want=(sel||d<150)?1:0; M2.open+=(want-M2.open)*Math.min(1,dt*6);
