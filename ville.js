@@ -1175,10 +1175,7 @@ function buildEnergy(em,E){ const P=PLACES.find(q=>q.id==='energie'); const W=E.
     const arc=new THREE.Line(ag,new THREE.LineBasicMaterial({color:col,transparent:true,blending:THREE.AdditiveBlending,toneMapped:false})); root.add(arc); NRG.arcs.push({arc,ins,col});
     // l'emplacement du chiffre en particules, au-dessus du générateur
     const slot=new THREE.Group(); slot.position.set(gx,4.2,-2.4); root.add(slot); NRG.slots[k]=slot;
-    const lab=labelPlane([{t:'ÉLECTRICITÉ',s:54,y:66,ls:8},{t:'par mois',s:40,y:120,w:600,c:'rgba(255,255,255,.75)'}],2.4,.62); lab.position.set(0,-.72,0); slot.add(lab); slot.userData.lab=lab;
-    // plaque du générateur : le montant lisible tout de suite, de jour comme de nuit
-    const pl=labelPlane([{t:'ÉLECTRICITÉ',s:40,y:58,ls:6,c:'#2f343c'},{t:'—',s:84,y:150,c:'#1b86c9'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}],1.5,1.0,{bg:'#fbfaf7',edge:'#1b86c9'});
-    pl.position.set(gx,1.5,-1.29); root.add(pl); pl.userData.place=P; pl.userData.act='details'; pickables.push(pl); NRG.elecPlate=pl;
+    const lab=labelPlane([{t:'ÉLECTRICITÉ',s:54,y:66,ls:8},{t:'par mois',s:40,y:120,w:600,c:'rgba(255,255,255,.75)'}],2.4,.62); lab.position.set(0,-.72,0); slot.add(lab); slot.userData.lab=lab; slot.userData.titre='ÉLECTRICITÉ';
   });
   // ----- LE GAZ : une cuve couchée sur ses berceaux, la conduite jaune, le compteur et la flamme bleue -----
   { const tx=W+5.1, tz=-2.7; const tankM=new THREE.MeshStandardMaterial({color:0xf1efea,roughness:.35,metalness:.2}), yel=new THREE.MeshStandardMaterial({color:0xf2c230,roughness:.45,metalness:.2});
@@ -1193,9 +1190,9 @@ function buildEnergy(em,E){ const P=PLACES.find(q=>q.id==='energie'); const W=E.
     const fl=new THREE.Group(); fl.position.set(tx+.4,2.68,tz); root.add(fl);
     const mkF=(r,h,c,o)=>{ const m=new THREE.Mesh(new THREE.ConeGeometry(r,h,20,1,true),new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:o,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,side:THREE.DoubleSide})); m.position.y=h/2; fl.add(m); return m; };
     NRG.flame={g:fl,parts:[mkF(.2,.75,0x2f6dff,.55),mkF(.12,.5,0x7fc3ff,.7),mkF(.06,.28,0xe8f6ff,.9)]};
-    // plaque de la cuve : le montant du gaz
-    const gp=labelPlane([{t:'GAZ',s:44,y:60,ls:10,c:'#2f343c'},{t:'—',s:84,y:150,c:'#d9661a'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}],1.3,.95,{bg:'#fbfaf7',edge:'#f2c230'});
-    gp.position.set(tx,1.4,tz+.86); gp.rotation.x=-.12; root.add(gp); gp.userData.place=P; gp.userData.act='details'; pickables.push(gp); NRG.gasPlate=gp; }
+    // le montant du gaz en particules, au-dessus de la cuve (comme l'électricité)
+    const gs=new THREE.Group(); gs.position.set(tx,4.2,tz); root.add(gs); NRG.slots.gaz=gs;
+    const glab=labelPlane([{t:'GAZ',s:54,y:66,ls:8},{t:'par mois',s:40,y:120,w:600,c:'rgba(255,255,255,.75)'}],2.4,.62); glab.position.set(0,-.72,0); gs.add(glab); gs.userData.lab=glab; gs.userData.titre='GAZ'; }
   // le grillage tout autour de l'enclos
   const gc=document.createElement('canvas'); gc.width=gc.height=64; const gx2=gc.getContext('2d'); gx2.strokeStyle='rgba(205,208,212,1)'; gx2.lineWidth=3; gx2.beginPath(); gx2.moveTo(0,0); gx2.lineTo(64,64); gx2.moveTo(64,0); gx2.lineTo(0,64); gx2.stroke();
   const gt=new THREE.CanvasTexture(gc); gt.wrapS=gt.wrapT=THREE.RepeatWrapping; const fenceM=new THREE.MeshStandardMaterial({map:gt,transparent:true,alphaTest:.3,side:THREE.DoubleSide,roughness:.5,metalness:.5});
@@ -1210,11 +1207,10 @@ function buildEnergy(em,E){ const P=PLACES.find(q=>q.id==='energie'); const W=E.
 function updateEnergy(dt){ if(!NRG.root) return; const D=DATA.energie||{}, F=D.facts||[], t=performance.now()/1000;
   const val=(re)=>{ const f=F.find(r=>re.test(r[0])); return f?String(f[1]).replace(/\s*par mois/,''):'—'; };
   const mode=NIGHT?'n':'j'; if(NRG.mode!==mode){ NRG.mode=mode; for(const key in NRG.nums){ NRG.nums[key].pts.geometry.dispose(); NRG.nums[key].g.remove(NRG.nums[key].pts); } NRG.nums={};
-    for(const key in NRG.slots){ const lab=NRG.slots[key].userData.lab, dark=!NIGHT; lab.userData.draw([{t:'ÉLECTRICITÉ',s:54,y:66,ls:8,c:dark?'#2f343c':'#fff'},{t:'par mois',s:40,y:120,w:600,c:dark?'#6b7079':'rgba(255,255,255,.75)'}]); } }
-  numCloud('elec',val(/électri/i),NIGHT?'#8fe0ff':'#0f6fae',2.6);
-  const ve=val(/électri/i), vg=val(/gaz/i);
-  if(NRG.elecPlate.userData.v!==ve){ NRG.elecPlate.userData.v=ve; NRG.elecPlate.userData.draw([{t:'ÉLECTRICITÉ',s:40,y:58,ls:6,c:'#2f343c'},{t:ve,s:ve.length>8?70:84,y:150,c:'#1b86c9'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}]); }
-  if(NRG.gasPlate.userData.v!==vg){ NRG.gasPlate.userData.v=vg; NRG.gasPlate.userData.draw([{t:'GAZ',s:44,y:60,ls:10,c:'#2f343c'},{t:vg,s:vg.length>8?66:80,y:150,c:'#d9661a'},{t:'par mois',s:34,y:200,w:600,c:'#6b7079'}]); }
+    for(const key in NRG.slots){ const lab=NRG.slots[key].userData.lab, dark=!NIGHT; lab.userData.draw([{t:NRG.slots[key].userData.titre,s:54,y:66,ls:8,c:dark?'#2f343c':'#fff'},{t:'par mois',s:40,y:120,w:600,c:dark?'#6b7079':'rgba(255,255,255,.75)'}]); } }
+  // couleurs « électriques » : cyan éclatant pour l'électricité, orange flamme pour le gaz
+  numCloud('elec',val(/électri/i),NIGHT?'#7ff4ff':'#00b8ff',2.6);
+  numCloud('gaz',val(/gaz/i),NIGHT?'#ffb35c':'#ff7a12',2.6);
   // la flamme : calme quand tout va bien, elle vacille quand il y a une alerte
   if(NRG.flame){ const alerte=(D.alerts||[]).length>0, w=alerte?.35:.08; NRG.flame.parts.forEach((m,i)=>{ const f=1+Math.sin(t*(7+i*3))*w*.6+(Math.random()-.5)*w; m.scale.set(1+(Math.random()-.5)*w*.4,f,1+(Math.random()-.5)*w*.4); });
     NRG.flame.g.rotation.z=alerte?Math.sin(t*5)*.12:Math.sin(t*1.3)*.02; }

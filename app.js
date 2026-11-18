@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ville2";
+import { creerVille } from "./ville.js?v=ville3";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -410,7 +410,13 @@ function applyPlanning(rows) {
   if (auj && auj.rem) { const fin = fut.find(o => !o.rem && o.poste !== "R" && !["conge", "rc", "maladie"].includes(o.g)); if (fin) { say += ` Tu es en remonte, reprise ${jour(fin.d)}.`; facts.push(["Reprise", jour(fin.d) + " · " + lc(ditJ(fin))]); } }
   else { const rem = fut.find(o => o.rem); if (rem) facts.push(["Prochaine remonte", "à partir du " + jour(rem.d)]); }
   const sup = fut.filter(o => o.sup); if (sup.length) facts.push(["Jours sup prévus", sup.slice(0, 4).map(o => frd(o.d).slice(0, 5)).join(", ")]);
-  // pas de paye ni de compteurs à l’écran : il les demande dans le chat s’il les veut
+  // les compteurs en jours (jamais d’argent à l’écran : la paye, il la demande dans le chat)
+  { const c = P.compteurs || {}, j = v => v == null ? null : String(Math.round(v * 100) / 100).replace(".", ",") + " j";
+    if (j(c.cp)) facts.push(["Congés payés (CP)", j(c.cp) + " restants"]);
+    if (j(c.cor)) facts.push(["COR", j(c.cor) + (c.cor_janvier != null ? ` · ≈ ${j(c.cor_janvier)} en janvier` : "")]);
+    if (j(c.rc8)) facts.push(["RC8", j(c.rc8) + (c.rc8_prochain ? ` · prochain fin ${c.rc8_prochain}` : "")]);
+    if (j(c.cet)) facts.push(["CET", j(c.cet) + (c.cm ? ` + ${j(c.cm)} médaille` : "")]);
+    if (c.remonte && c.remonte.reste != null) facts.push(["Remonte", `${j(c.remonte.reste)} restants sur ${j(c.remonte.prevu)}`]); }
   p.status = "Aujourd’hui : " + lc(ditJ(auj).split(" · ")[0]);
   const mc = { say: m.say, facts: m.facts || [] }; cacheArgent(mc); (mc.prive || []).forEach(t => garde(p, t));
   p.say = say + (mc.say ? " " + mc.say : "");

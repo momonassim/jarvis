@@ -67,14 +67,22 @@ export function planningTexte(rows: Row[], d1: string, d2: string) {
   return out.join("\n");
 }
 
-/** l'état envoyé à l'app Jarvis (fiche Travail) : les postes, sans aucun montant ni compteur */
+/** l'état envoyé à l'app Jarvis (fiche Travail) : les postes et les compteurs en jours, sans aucun montant */
 export function etatApp(P: Planning) {
   const jours = []; const td = today();
   for (let d = plus(td, -60); d <= plus(td, 400); d = plus(d, 1)) {
     const [p, g] = P.info(d); const f = ferie(d);
     jours.push({ d, g, p: p === "T" ? "J" : p, poste: p === "T" ? "J" : p, ...(g === "sup" ? { sup: true } : {}), ...(P.debutRemonte(d) ? { rem: true } : {}), ...(f ? { ferie: f } : {}) });
   }
-  return { v: 2, moteur: "jarvis", maj: new Date().toISOString(), jours };
+  return { v: 2, moteur: "jarvis", maj: new Date().toISOString(), jours, compteurs: compteursApp(P) };
+}
+/** les compteurs en jours pour la fiche Travail (aucun montant) */
+function compteursApp(P: Planning) {
+  const c = P.horsys?.compteurs ?? {}, n = (v: any) => v === undefined || v === null || isNaN(Number(v)) ? null : Number(v);
+  const o: Record<string, any> = { cp: n(congesRestants(P)), cor: n(c.cor?.solde), cor_janvier: n(estimationCOR(P)), rc8: n(c.rc8?.solde), rc8_prochain: MOIS[prochainRC8(today()) - 1], cet: n(c.cet?.total ?? P.R.soldeCET), cm: n(c.cm?.solde) };
+  if (c.remonte) o.remonte = { reste: n(c.remonte.reste), prevu: n(c.remonte.prevu) };
+  if (P.horsys?.extrait) o.extrait = P.horsys.extrait;
+  return o;
 }
 export async function publierEtat(admin: any, P: Planning) {
   const data = etatApp(P);
