@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=sante1";
+import { creerVille } from "./ville.js?v=ds5a";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -1038,6 +1038,13 @@ $("sOut").addEventListener("click", async () => { closeSettings(); await sb.auth
 /* =========================================================
    La porte d'entrée
    ========================================================= */
+
+/* ---------- Ta voiture : la vraie DS5, gardée dans le coffre privé « modeles » (jamais dans le dépôt public) ---------- */
+async function chargerDS5() {
+  const { data } = await sb.storage.from("modeles").createSignedUrl("ds5.glb", 3600);
+  if (!data) return;
+  try { await V.chargerVoiture(data.signedUrl); } catch (e) { console.warn("DS5 :", e); }
+}
 const gate = $("gate"), gmsg = $("gmsg");
 function showGate(msg) { gate.hidden = false; if (msg) gmsg.textContent = msg; }
 async function enter(session) {
@@ -1046,6 +1053,7 @@ async function enter(session) {
   if (ok !== true) { showGate(session.user && !session.user.email_confirmed_at ? "Confirme d’abord ton e-mail (lien reçu), puis reviens ici." : "Cette ville est privée."); return; }
   gate.hidden = true;
   await loadAll(); goLive(); goTelecommande();
+  chargerDS5();
   // Le bandeau du haut a pris sa vraie taille : on recadre si tu n’as encore rien touché
   if (!userMoved && !S.sel) overview();
 }

@@ -10,6 +10,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 export async function creerVille(canvas, HK = {}) {
 
@@ -468,9 +470,8 @@ function fountainAt(x,z){
   for(let i=0;i<4;i++){const a=i/4*Math.PI*2+Math.PI/4; put(lathe([[0,0],[.18,0],[.18,.06],[.1,.12],[.14,.3],[0,.48]],12),'clay',M(x+Math.cos(a)*3.0,.77,z+Math.sin(a)*3.0));}
 }
 // petite voiture ancienne (inventée)
-function carAt(x,z,rot,y=0,modern=false){
+function carAt(x,z,rot,y=0){
   CUR=M(x,y,z,0,rot,0);
-  if(modern) return carModern();
   const loft=(x0,x1,nU,sec,key)=>{const NV=28,pos=[],idx=[],uv=[];
     for(let i=0;i<=nU;i++){const u=i/nU, X=x0+(x1-x0)*u, s=sec(u*2-1); for(let j=0;j<=NV;j++){const a=j/NV*Math.PI*2,c=Math.cos(a),sn=Math.sin(a),e=2/s.n;
       pos.push(X, s.yc+s.hh*Math.sign(sn)*Math.pow(Math.abs(sn),e), s.w*Math.sign(c)*Math.pow(Math.abs(c),e)); uv.push(u,j/NV);}}
@@ -497,22 +498,6 @@ function carAt(x,z,rot,y=0,modern=false){
 /* ============================================================
    LES LIEUX JARVIS — nouvelle construction
    ============================================================ */
-function carModern(){
-  const loft=(x0,x1,nU,sec,key)=>{const NV=28,pos=[],idx=[],uv=[];
-    for(let i=0;i<=nU;i++){const u=i/nU, X=x0+(x1-x0)*u, s=sec(u*2-1); for(let j=0;j<=NV;j++){const a=j/NV*Math.PI*2,c=Math.cos(a),sn=Math.sin(a),e=2/s.n;
-      pos.push(X, s.yc+s.hh*Math.sign(sn)*Math.pow(Math.abs(sn),e), s.w*Math.sign(c)*Math.pow(Math.abs(c),e)); uv.push(u,j/NV);}}
-    for(let i=0;i<nU;i++)for(let j=0;j<NV;j++){const A=i*(NV+1)+j,Bq=A+NV+1; idx.push(A,Bq,A+1,Bq,Bq+1,A+1);}
-    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.setIndex(idx); g.computeVertexNormals(); put(g,key);};
-  const close=(u,p=7,q=.3)=>Math.pow(Math.max(0,1-Math.pow(Math.abs(u),p)),q);
-  loft(-2.25,2.25,56,u=>{const f=close(u,8,.25); const yb=.3+.06*sstep(.8,1,Math.abs(u)), yt=.92-.2*sstep(.35,1,u)-.06*sstep(.7,1,-u);
-    return {yc:(yb+yt)/2,hh:(yt-yb)/2*f,w:.9*(1-.1*sstep(.8,1,Math.abs(u)))*f,n:4.5};},'car');
-  loft(-1.75,.85,34,u=>{const f=close(u*1.0,4,.45); const lean=sstep(-.2,1,u); return {yc:1.12-.06*lean,hh:.3*f,w:(.78-.06*lean),n:5};},'glass');
-  loft(-1.6,.55,30,u=>{const f=close(u,5,.4); return {yc:1.38,hh:.07*f,w:.76*Math.pow(f,.3),n:6};},'car');
-  for(const wx of [-1.4,1.42]) for(const sd of [-1,1]){put(new THREE.TorusGeometry(.24,.1,12,30),'tyre',M(wx,.34,sd*.8)); put(lathe([[0,0],[.22,0],[.2,.05],[.08,.08],[0,.09]],24),'car',M(wx,.34,sd*.84,sd*Math.PI/2,0,0));}
-  for(const sd of [-1,1]) put(UB,'glass',M(2.2,.72,sd*.55,0,0,-.5,.12,.08,.32));
-  for(const sd of [-1,1]) put(UB,'lampRed',M(-2.24,.82,sd*.6,0,0,.3,.06,.1,.3));
-  CUR=new THREE.Matrix4();
-}
 
 // La Banque (Ton argent) : temple à colonnes, en retrait derrière son portique
 const COLSHAFT=(()=>{const g=new THREE.CylinderGeometry(.33,.38,7.08,40,6,true); const p=g.attributes.position;
@@ -687,7 +672,8 @@ factory(M(66,.15,-17,0,-Math.PI/2,0));
 PL.mairie&&(PL.mairie.far=12,PL.mairie.camY=2.6);
 energy(84,-26);
 // la voiture au sous-sol de chez toi
-if(GATE){ const gm=GATE.userData.mat, p=V(GATE.userData.cx,-2.6,-GATE.userData.Dt+2.6).applyMatrix4(gm); carAt(p.x,p.z,-Math.PI/2,p.y,true); }
+// (la vraie DS5 arrive plus tard depuis le coffre privé, une fois connecté : voir chargerVoiture)
+let DS5_SPOT=null; if(GATE){ const gm=GATE.userData.mat; DS5_SPOT={p:V(GATE.userData.cx,-2.6,-GATE.userData.Dt+2.6).applyMatrix4(gm), rot:-Math.PI/2}; }
 load.textContent='Construction de la rue…'; await new Promise(r=>setTimeout(r,10));
 
 // trottoirs, bordures, place
@@ -1527,7 +1513,24 @@ function setDonnees(list){ for(const d of list){ const old=DATA[d.id]; DATA[d.id
 function orbit(a){ const s=new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)); let th=s.theta,r=s.radius,ph=s.phi;
   if(a.tourner) th+=(Number(a.tourner)||0)*Math.PI/180; if(a.zoom==='avant') r*=.6; else if(a.zoom==='arriere') r*=1.6; if(a.vue==='dessus') ph=.35; else if(a.vue==='rasante') ph=1.2;
   r=Math.max(3,Math.min(220,r)); s.set(r,ph,th); const p=new THREE.Vector3().setFromSpherical(s).add(controls.target); flyTo(p,controls.target.clone(),camera.fov); }
-return { camera, controls, renderer, scene, ouvrir, fermer, setDonnees, orbit,
+
+/* ---------- Ta voiture : la vraie DS5 (Blanc Nacré), chargée depuis le coffre privé ---------- */
+let ds5=null;
+async function chargerVoiture(url){
+  if(ds5||!DS5_SPOT||!url) return false;
+  const draco=new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+  const gl=new GLTFLoader(); gl.setDRACOLoader(draco);
+  const g=await gl.loadAsync(url); draco.dispose();
+  const car=g.scene;
+  car.traverse(o=>{ if(!o.isMesh) return; o.castShadow=true; o.receiveShadow=true;
+    const m=o.material; if(m&&m.transmission>0){ // vitres et verres de phares : transparence simple, légère sur téléphone
+      const sombre=m.color.getHSL({}).l<.3; m.transmission=0; m.transparent=true; m.opacity=sombre?.72:.28; m.depthWrite=false; m.roughness=.05; m.metalness=.1; }
+    if(m) m.envMapIntensity=m.metalness>.5?1.1:.8; });
+  // le modèle regarde vers +Z ; l'ancienne voiture regardait vers +X dans son repère
+  car.position.copy(DS5_SPOT.p); car.rotation.y=DS5_SPOT.rot+Math.PI/2; car.name='DS5';
+  scene.add(car); ds5=car; return true;
+}
+return { camera, controls, renderer, scene, ouvrir, fermer, setDonnees, orbit, chargerVoiture,
   ensemble(){ fermer(); const [p,t,f]=VIEWS.ciel; flyTo(p,t,f); },
   setNuit(n){ setTime(n?2:0); }, decalage(k){ shiftGoal=k; },
   arreteVol(){ anim=null; },
