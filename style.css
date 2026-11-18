@@ -309,6 +309,22 @@ p.empty{margin:0}
 .cr small{font-size:11px;font-weight:600;color:var(--ink2)}
 .cr strong{font-size:18px;font-weight:800;white-space:nowrap}
 
+/* fiche Travail : la semaine et les compteurs */
+.wk{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.wd{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;border-radius:12px}
+.wd.auj{background:rgba(35,28,23,.06)}
+.wd small{font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase}
+.wd b{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:16px;background:#B9BEC4}
+.wd b.pM{background:#E9A23B}.wd b.pA{background:#D96B4A}.wd b.pN{background:#3F5B8C}.wd b.pJ{background:#9581C2}.wd b.pC{background:#5FAE8C}
+.wd em{font-style:normal;font-size:10px;font-weight:700;color:#c9483a;min-height:12px}
+.cpt{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cr{display:flex;justify-content:space-between;align-items:center;gap:8px;background:rgba(35,28,23,.045);border-radius:14px;padding:10px 12px}
+.cr span{display:flex;flex-direction:column;min-width:0}
+.cr b{font-size:14px;font-weight:800}
+.cr small{font-size:11px;font-weight:600;color:var(--ink2)}
+.cr strong{font-size:18px;font-weight:800;white-space:nowrap}
+
+
 /* =========================================================
    STYLE DE LA VILLE : émail et fer forgé (une seule règle pour toutes les fenêtres et tous les boutons)
    - une seule matière : l'émail crème des plaques de rue, bordé d'un filet de fer
@@ -358,3 +374,88 @@ p.empty{margin:0}
 .wd{border-radius:10px}
 .wd b{border-radius:8px}
 .night .brief,.night .round,.night .ask,.night .lieubar,.night .card,.night .pin .bub{box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 32px -12px rgba(0,0,0,.65)}
+
+/* =====================================================================
+   CHARTE DE LA VILLE — une seule règle pour toute l'interface
+   Tirée de la ville elle-même : pierre crème, plaques émaillées, fer forgé, lettres gravées.
+   1. Matière    : émail crème, bordé d'un double filet de fer (comme les plaques 3D et les enseignes).
+   2. Formes     : ANGLES DROITS partout. Seule exception : l'orbe de Jarvis (une sphère de lumière).
+   3. Lettres    : titres et noms gravés (capitales à empattements, espacées) ; libellés en petites
+                   capitales ; texte courant simple.
+   4. Couleurs   : fer #2B3138, émail #F5F1E8, la couleur de chaque lieu en filet, le rouge pour l'alerte.
+   5. Mouvement  : un seul tempo (260 ms, départ franc, arrivée douce), pas de rebond.
+   ===================================================================== */
+:root{
+  --iron:#2B3138; --iron2:rgba(43,49,56,.62); --enamel:#F5F1E8; --enamel2:#FBF8F1; --rim:rgba(43,49,56,.24); --soft:#6E737B; --red:#C9483A;
+  --serif:"Cormorant Garamond",Georgia,"Times New Roman",serif;
+  --plaque:inset 0 0 0 3px var(--enamel),inset 0 0 0 4px rgba(43,49,56,.2),0 14px 30px -16px rgba(18,22,28,.55);
+  --plaque-plate:inset 0 0 0 2px var(--enamel2),inset 0 0 0 3px rgba(43,49,56,.14);
+  --t:.26s; --ease:cubic-bezier(.2,.7,.2,1);
+  --ink:var(--iron); --ink2:var(--soft); --card:var(--enamel); --line:var(--rim);
+}
+/* 2. angles droits : partout, sans exception… */
+*,*::before,*::after{border-radius:0!important}
+/* …sauf l'orbe de Jarvis */
+.orb,.orb.big,.orb.huge{border-radius:50%!important}
+
+/* 1. matière : les fenêtres et barres flottantes */
+.brief,.round,.ask,.lieubar,.card,.paper,.gcard,.toast,.maj{background:var(--enamel);border:1px solid var(--iron2);box-shadow:var(--plaque);color:var(--iron)}
+.toast,.maj{background:var(--iron);color:var(--enamel);border-color:var(--iron);box-shadow:inset 0 0 0 3px var(--iron),inset 0 0 0 4px rgba(245,241,232,.25),0 14px 30px -16px rgba(0,0,0,.6)}
+.sheet .card{border-bottom:0}
+.grab{background:var(--iron2)!important;height:3px!important;width:42px!important}
+
+/* 3. lettres */
+.brief small,.head .nm small,.paper small,.lbtx small,.dh span,.wd small,.cr small,.doc small{font-family:var(--sans);font-weight:700;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--soft)}
+.lbtx small{text-transform:none;letter-spacing:0;font-size:12px;font-weight:600}
+.brief strong,.paper h3,.gcard h1,.head .nm b,.lbtx b,.dh b,.pin .tx b,.alerts h3{font-family:var(--serif);font-weight:700;color:var(--iron)}
+.brief strong{font-size:21px;letter-spacing:.01em;line-height:1.1}
+.head .nm b,.lbtx b,.dh b,.pin .tx b{text-transform:uppercase;letter-spacing:.09em}
+.head .nm b{font-size:19px}.lbtx b{font-size:16px}.dh b{font-size:15px}
+.paper h3{font-size:25px;letter-spacing:.01em}
+.cinesub{font-family:var(--serif)}
+
+/* les commandes : tous les boutons de la même famille */
+.round{width:46px;height:46px;color:var(--iron)}
+.round svg{width:21px;height:21px}
+.col{gap:8px}
+.x,.lbn{width:40px;height:40px;background:transparent;border:1px solid var(--rim);color:var(--iron);box-shadow:none}
+.lbn.x{border-color:transparent}
+.btn{font-family:var(--sans);font-weight:700;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--iron);box-shadow:none}
+.btn.main{background:var(--iron);color:var(--enamel);box-shadow:inset 0 0 0 2px var(--iron),inset 0 0 0 3px rgba(245,241,232,.28)}
+.btn.soft{background:transparent;color:var(--iron);border-color:var(--iron2)}
+.lbgo,.chip{font-family:var(--sans);font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;background:transparent;border:1px solid var(--iron2);color:var(--iron)}
+.ask{font-family:var(--sans);font-weight:700;letter-spacing:.02em;padding:7px 14px 7px 8px}
+.mic,.send{border:1px solid var(--iron)}
+.send{background:var(--iron);color:var(--enamel)}
+.compose input,.gcard input,.dsearch{background:var(--enamel2);border:1px solid var(--rim);box-shadow:none}
+/* les icônes de lieu : petites plaques carrées de la couleur du lieu, filet crème */
+.head .ic,.lbic,.pin .ic,.alertItem .aic{box-shadow:inset 0 0 0 2px rgba(245,241,232,.55);border:1px solid rgba(43,49,56,.35)}
+.head .ic{width:40px;height:40px}.lbic{width:38px;height:38px}
+/* pastilles d'alerte : petits carrés rouges bordés d'émail */
+.lbdot,.brief strong .dot,.pin .ic::after{width:9px!important;height:9px!important;background:var(--red)!important;border:2px solid var(--enamel)!important;box-shadow:0 0 0 1px rgba(43,49,56,.35)}
+.brief strong .dot{border:0!important;box-shadow:none;width:8px!important;height:8px!important}
+/* les lignes des listes : plaques plus fines, posées sur l'émail */
+.doc,.alertItem,.opt,.slot,.set,.cr,.empty,.fact,.recap{background:var(--enamel2);border:1px solid var(--rim);box-shadow:var(--plaque-plate)}
+.doc:active,.alertItem:active,.opt:active,.slot:active,.set:active{background:#EFEADF}
+.m{border:1px solid var(--rim)}
+.wd.auj{background:rgba(43,49,56,.06);box-shadow:inset 0 0 0 1px var(--rim)}
+.wd b{box-shadow:inset 0 0 0 2px rgba(245,241,232,.45)}
+.pin .bub{background:var(--enamel);border:1px solid var(--iron2);box-shadow:var(--plaque)}
+.pin .stem,.pin .foot{background:var(--iron)}
+
+/* 5. mouvement : un seul tempo */
+.sheet,.lieubar,.toast,.maj,.paperwrap,.paper,.round,.btn,.doc,.opt,.slot,.set,.chip,.lbgo,.lbn,.x,.ask{transition-duration:var(--t)!important;transition-timing-function:var(--ease)!important}
+.round:active,.btn:active,.lbn:active,.x:active,.lbgo:active,.chip:active,.ask:active{transform:translateY(1px)}
+
+/* nuit : l'émail reste crème, l'ombre s'approfondit */
+.night .brief,.night .round,.night .ask,.night .lieubar,.night .card,.night .pin .bub{box-shadow:inset 0 0 0 3px var(--enamel),inset 0 0 0 4px rgba(43,49,56,.2),0 16px 36px -14px rgba(0,0,0,.75)}
+
+/* ---------- mode documentaire : seule l'image reste, avec les sous-titres ---------- */
+body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!important;transition:opacity .6s var(--ease)!important}
+.cinesub{position:fixed;left:50%;bottom:calc(14vh + var(--safe-b));transform:translate(-50%,8px);z-index:50;max-width:min(86vw,780px);text-align:center;
+  font-style:italic;font-weight:600;font-size:clamp(19px,2.6vw,27px);line-height:1.25;color:#F5F1E8;text-shadow:0 1px 2px rgba(0,0,0,.7),0 0 18px rgba(0,0,0,.45);
+  opacity:0;pointer-events:none;transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.cinesub.on{opacity:1;transform:translate(-50%,0)}
+.dh{flex-wrap:wrap;row-gap:2px}
+.dh b{white-space:nowrap}
+.wd small{white-space:nowrap;font-size:9.5px;letter-spacing:.06em}

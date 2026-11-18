@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ville7";
+import { creerVille } from "./ville.js?v=ville8";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -61,12 +61,16 @@ V = await creerVille(canvas, {
         : e.etat === "veille" ? "Coupure d’électricité demain" + (c ? " à " + c.d0.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "")
         : e.etat === "rouge" ? "Il reste un montant à régler chez Foncia" : "Tout va bien chez toi" + (p.status ? " · " + p.status : "")); } },
   progress: t => { const b = $("briefTxt"); if (b && !S.loaded) b.textContent = t; },
+  // mode documentaire : l'interface s'efface, seuls restent l'image, les bandes noires et les sous-titres
+  cine: e => { document.body.classList.toggle("cine", !!e); const st = $("cineSub");
+    if (e) { st.textContent = e.sous_titre || ""; st.classList.toggle("on", !!e.sous_titre); } else { st.classList.remove("on"); overview(); } },
   frame: () => V && V.decalage(viewShiftGoal),
 });
 V.controls.addEventListener("start", () => { userMoved = true; });
 PLACES.forEach(p => { p.color = V.couleur(p.id) || p.color; });
 const icone = (el, p) => { el.innerHTML = V.icone(p.id); el.classList.add("svgic"); };
 function overview() { V.ensemble(); }
+canvas.addEventListener("pointerdown", () => { if (V && V.cinemaEnCours && V.cinemaEnCours()) V.cinemaStop(); }, true);
 
 /* ---------- Jour et nuit ---------- */
 const SKY = {
@@ -642,6 +646,8 @@ async function ordreEcran(o) {
   else if (o.action === "ciel") applySky(a.mode === "nuit");
   else if (o.action === "fermer") fermerTout();
   else if (o.action === "message" && a.texte) toast(String(a.texte).slice(0, 160));
+  else if (o.action === "cinema") { if (a.mode !== "enchainer") fermerTout(); V.cinema(a.plans || [], a.mode); }
+  else if (o.action === "cinema_fin") V.cinemaStop();
 }
 let ecranCh = null;
 function goTelecommande() {
