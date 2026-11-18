@@ -189,6 +189,29 @@ export async function synchroniser(seul?: string) {
   return { comptes: bilan, tries: t };
 }
 
+// ---------- le même sujet = le même lieu et la même date d'événement (jamais deux alertes pour une seule coupure) ----------
+const MOIS_EV = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"];
+/** la date de l'événement dont parle un texte (« 26 novembre », « 26/11 », « 4 décembre 2026 »), au plus près après le mail */
+function dateEvenement(texte: string, ref?: string | null): string | null {
+  const t = String(texte ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const r = ref && /^\d{4}-\d{2}-\d{2}/.test(ref) ? new Date(ref.slice(0, 10) + "T12:00:00Z") : new Date();
+  const mk = (j: number, m: number, a?: number) => { if (!(j >= 1 && j <= 31 && m >= 0 && m <= 11)) return null; let y = a ?? r.getUTCFullYear(); let d = new Date(Date.UTC(y, m, j, 12));
+    if (!a && d.getTime() < r.getTime() - 20 * 864e5) d = new Date(Date.UTC(y + 1, m, j, 12)); return d.toISOString().slice(0, 10); };
+  const m1 = t.match(/\b(\d{1,2})(?:er)?\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)(?:\s+(20\d{2}))?/);
+  if (m1) return mk(+m1[1], MOIS_EV.indexOf(m1[2]), m1[3] ? +m1[3] : undefined);
+  const m2 = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
+  if (m2) return mk(+m2[1], +m2[2] - 1, m2[3] ? (m2[3].length === 2 ? 2000 + +m2[3] : +m2[3]) : undefined);
+  return null;
+}
+/** cherche une alerte déjà posée sur le même sujet (même lieu et même événement à venir, ou même titre, ou même mail).
+ *  La date ne compte que si l'événement est APRÈS le mail (une coupure, un rendez-vous) : deux mails du même jour ne sont pas forcément le même sujet. */
+async function alerteMemeSujet(admin: any, lieu: string, ev: string | null, label: string, dateMail: string | null, mailId?: number | null) {
+  const { data } = await admin.from("jarvis_items").select("id,label,data").eq("source", "mails").eq("kind", "alerte").eq("data->>lieu", lieu).limit(200);
+  const aVenir = (e: string | null, d?: string | null) => !!e && (!d || e > d);
+  return (data ?? []).find((x: any) => x.label === label || (mailId && x.data?.mail_id === mailId) ||
+    (aVenir(ev, dateMail) && (() => { const e2 = x.data?.evenement ?? dateEvenement(`${x.data?.titre ?? ""} ${x.data?.texte ?? ""}`, x.data?.date_mail); return e2 === ev && aVenir(e2, x.data?.date_mail); })())) ?? null;
+}
+
 // ---------- tri : Claude lit chaque mail et dit ce qu'il faut en retenir ----------
 const slug = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "info";
 async function trier() {
@@ -212,11 +235,14 @@ async function trier() {
     // ce qui demande d'agir : le lieu passe en rouge (une alerte par sujet, jamais remise si déjà vue)
     if (tri.importance === "alerte") {
       const label = `${tri.lieu}:${slug(String(tri.titre ?? m.objet ?? ""))}`.slice(0, 60);
-      const { data: deja } = await admin.from("jarvis_items").select("id,data").eq("source", "mails").eq("kind", "alerte").eq("label", label).limit(5);
-      const meme = (deja ?? []).find((x: any) => (x.data?.date_mail ?? null) === date || x.data?.mail_id === m.id);
-      const data = { lieu: tri.lieu, titre: String(tri.titre ?? "").slice(0, 70), texte: String(tri.resume ?? "").slice(0, 500), de: (m.de_nom || m.de || "").slice(0, 80), date_mail: date, vu: false, mail_id: m.id, web_link: m.web_link };
+      const titre = String(tri.titre ?? "").slice(0, 70), texte = String(tri.resume ?? "").slice(0, 500);
+      const evenement = (typeof tri.echeance === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tri.echeance) ? tri.echeance : null) ?? dateEvenement(`${titre} ${texte}`, date);
+      const meme = await alerteMemeSujet(admin, tri.lieu, evenement, label, date, m.id);
+      const data: Record<string, any> = { lieu: tri.lieu, titre, texte, de: (m.de_nom || m.de || "").slice(0, 80), date_mail: date, vu: false, mail_id: m.id, web_link: m.web_link, ...(evenement ? { evenement } : {}) };
+      // même sujet (même lieu, même date) : on complète l'alerte existante, jamais une deuxième
       if (!meme) await admin.from("jarvis_items").insert({ source: "mails", kind: "alerte", label, date, data });
-      else if (!meme.data?.vu) await admin.from("jarvis_items").update({ data, updated_at: new Date().toISOString() }).eq("id", meme.id);
+      else if (!meme.data?.vu) { const garde = (meme.data?.texte ?? "").length > texte.length ? { titre: meme.data.titre, texte: meme.data.texte } : {};
+        await admin.from("jarvis_items").update({ data: { ...meme.data, ...data, ...garde }, updated_at: new Date().toISOString() }).eq("id", meme.id); }
     }
   }
   return { ok: true, tries: n };

@@ -3,7 +3,7 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ville4";
+import { creerVille } from "./ville.js?v=ville5";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -507,9 +507,32 @@ function applyOrange(rows, apis) {
   o.live = stamp(rows, "relu chez Orange");
 }
 
+/* ---------- Un seul sujet = une seule ligne : même lieu + même événement à venir (une coupure, un rendez-vous…) ---------- */
+const MOIS_EV = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"];
+function dateEvenement(texte, ref) {
+  const t = String(texte || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const r = ref && /^\d{4}-\d{2}-\d{2}/.test(ref) ? new Date(ref.slice(0, 10) + "T12:00:00Z") : new Date();
+  const mk = (j, m, an) => { if (!(j >= 1 && j <= 31 && m >= 0 && m <= 11)) return null; const y = an || r.getUTCFullYear(); let d = new Date(Date.UTC(y, m, j, 12));
+    if (!an && d < r - 20 * 864e5) d = new Date(Date.UTC(y + 1, m, j, 12)); return d.toISOString().slice(0, 10); };
+  const m1 = t.match(/\b(\d{1,2})(?:er)?\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)(?:\s+(20\d{2}))?/);
+  if (m1) return mk(+m1[1], MOIS_EV.indexOf(m1[2]), m1[3] ? +m1[3] : 0);
+  const m2 = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
+  if (m2) return mk(+m2[1], +m2[2] - 1, m2[3] ? (m2[3].length === 2 ? 2000 + +m2[3] : +m2[3]) : 0);
+  return null;
+}
+/** la clé du sujet : lieu + date de l'événement, seulement s'il est après le mail (sinon : chaque mail est son propre sujet) */
+function sujet(lieu, d) { const ev = d.evenement || d.echeance || dateEvenement((d.titre || "") + " " + (d.texte || ""), d.date_mail); return ev && (!d.date_mail || ev > d.date_mail) ? lieu + "|" + ev : null; }
+const SUJETS = { cles: new Set(), mails: new Set() };
+
 /* ---------- Alertes venues des mails (posées par ChatGPT ou Claude via le connecteur) ---------- */
 function applyMails(rows) {
+  SUJETS.cles.clear(); SUJETS.mails.clear();
+  const vus = new Set();
   const ouvertes = rows.filter(r => r.kind === "alerte" && r.data && !r.data.vu)
+    .sort((a, b) => (b.data.texte || "").length - (a.data.texte || "").length || (b.data.date_mail || "").localeCompare(a.data.date_mail || ""))
+    .filter(r => { const k = sujet(r.data.lieu, r.data); if (r.data.mail_id) SUJETS.mails.add(r.data.mail_id); if (!k) return true;
+      if (k.split("|")[1] < parisDay()) return false;   // l'événement est passé (grève, photos de classe…) : plus rien à regarder
+      if (vus.has(k)) return false; vus.add(k); SUJETS.cles.add(k); return true; })
     .sort((a, b) => (b.data.date_mail || "").localeCompare(a.data.date_mail || ""));
   const parLieu = {};
   ouvertes.forEach(r => (parLieu[r.data.lieu] = parLieu[r.data.lieu] || []).push(r));
@@ -518,14 +541,23 @@ function applyMails(rows) {
     p.urgent = true;
     p.status = liste.length > 1 ? liste.length + " choses à regarder" : liste[0].data.titre;
     p.say = liste.map(r => r.data.titre + (r.data.texte ? " : " + r.data.texte : "")).join(" ") + " " + (p.say || "");
-    p.docs = [...liste.map(r => ({ t: "⚠︎ " + r.data.titre, d: r.data.date_mail ? "Mail du " + frd(r.data.date_mail) : "Nouveau", v: "Nouveau", future: true, where: "Tes mails (Outlook)",
-      lines: [["Ce qu’il faut savoir", r.data.texte || "—"], ["De", r.data.de || "—"], ["Reçu le", r.data.date_mail ? frd(r.data.date_mail) : "—"]], alerteId: r.id })), ...(p.docs || [])];
+    let reste = p.docs || [];
+    const al = liste.map(r => { const doc = { t: "⚠︎ " + r.data.titre, d: r.data.date_mail ? "Mail du " + frd(r.data.date_mail) : "Nouveau", v: "Nouveau", future: true, where: "Tes mails (Outlook)",
+      lines: [["Ce qu’il faut savoir", r.data.texte || "—"], ["De", r.data.de || "—"], ["Reçu le", r.data.date_mail ? frd(r.data.date_mail) : "—"]], alerteId: r.id, url: r.data.web_link || null };
+      // la convocation (PDF) du même événement est rattachée à l'alerte au lieu d'apparaître une deuxième fois
+      const k = sujet(id, r.data); if (k) { const ev = k.split("|")[1], pdf = reste.find(x => x.path && /convocation/i.test(x.t) && dateEvenement(x.t + " " + (x.d || ""), r.data.date_mail) === ev);
+        if (pdf) { doc.path = pdf.path; reste = reste.filter(x => x !== pdf); } }
+      return doc; });
+    p.docs = [...al, ...reste];
   });
 }
 /* ---------- Ce que Jarvis a retenu des mails Outlook (une fiche par mail, avec le lien vers le mail) ---------- */
 function applyOutlook(rows) {
+  const vus = new Set(SUJETS.cles);
   rows.filter(r => r.kind === "info" && r.data && byId[r.data.lieu])
     .sort((a, b) => (b.data.date_mail || "").localeCompare(a.data.date_mail || ""))
+    // pas de doublon : un mail déjà en alerte, ou un sujet (même événement) déjà affiché, n'est pas remis
+    .filter(r => { if (SUJETS.mails.has(r.data.mail_id)) return false; const k = sujet(r.data.lieu, r.data); if (!k) return true; if (vus.has(k)) return false; vus.add(k); return true; })
     .slice(0, 300)
     .forEach(r => {
       const p = byId[r.data.lieu], d = r.data;

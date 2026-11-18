@@ -1331,14 +1331,13 @@ function updateUsine(dt){ if(!USN.root) return; const D=DATA.usine||{}, t=perfor
   USN.smoke.forEach(sp=>{ const f=(sp.userData.ph+t*.06)%1; sp.position.set(USN.top.x+f*5+Math.sin(t*.5+sp.userData.ph*9)*.6,USN.top.y+.4+f*11,USN.top.z+f*2); const sc=1.6+f*6; sp.scale.set(sc,sc,1); sp.material.opacity=USN.k*.55*(1-f)*Math.min(1,f*6); });
   USN.glow.material.opacity=USN.k*(NIGHT?.9:.25)*(.8+.2*Math.sin(t*3));
   // la pointeuse
-  const sem=D.semaine||[], J0=jourU(sem[0]), J1=jourU(sem[1]), st=on?'EN POSTE':'REPOS', key=JSON.stringify([J0,J1,st]);
+  const sem=D.semaine||[], J0=jourU(sem[0]), J1=jourU(sem[1]), key=JSON.stringify([J0,J1]);
   if(USN.screen.userData.k!==key){ USN.screen.userData.k=key; const c=USN.screen.userData.c, x=c.getContext('2d'), S=c.width/1000, H=USN.screen.userData.H; x.setTransform(S,0,0,S,0,0);
     x.fillStyle='#10141a'; x.fillRect(0,0,1000,H); x.textAlign='center';
     const T=(t,y,size,w,col,maxW=880)=>{ if(!t) return; fitTxt(x,t,maxW,size,w); x.fillStyle=col; x.fillText(t,500,y); };
-    T('POINTEUSE',120,66,700,'#7f8a96'); T('● '+st,235,84,800,on?'#5fe0a0':'#c3cad1');
-    x.fillStyle='rgba(255,255,255,.14)'; x.fillRect(80,295,840,5);
-    const bloc=(lab,J,y)=>{ T(lab,y,58,700,'#7f8a96'); T(J.n,y+135,140,800,'#ffffff'); T([J.h,...J.tags].filter(Boolean).join(' · '),y+225,64,600,'#cfd6dd'); };
-    bloc("AUJOURD'HUI",J0,400); bloc('DEMAIN',J1,840);
+    T('POINTEUSE',130,66,700,'#7f8a96'); x.fillStyle='rgba(255,255,255,.14)'; x.fillRect(80,200,840,5);
+    const bloc=(lab,J,y)=>{ T(lab,y,62,700,'#7f8a96'); T(J.n,y+165,170,800,'#ffffff'); T([J.h,...J.tags].filter(Boolean).join(' · '),y+265,66,600,'#cfd6dd'); };
+    bloc("AUJOURD'HUI",J0,330); bloc('DEMAIN',J1,820);
     USN.screen.userData.t.needsUpdate=true; }
   // le tableau d'affichage : la semaine, les compteurs (en jours) et les rendez-vous
   const now=new Date(); now.setHours(0,0,0,0);

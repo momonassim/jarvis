@@ -102,18 +102,44 @@ export async function rangerPapier(admin: any, a: Record<string, any>, lieuxVali
   return `Rangé dans Jarvis (${a.lieu}) : « ${titre} »${doc.d ? " · " + doc.d : ""} — ${origine === "fichier joint" ? "le PDF joint au mail" : "PDF recréé à partir du contenu du mail"}. Il est visible dans l'app, et retrouvable avec jarvis_pdf.`;
 }
 
+// ---------- le même sujet = le même lieu et la même date d'événement (jamais deux alertes pour une seule coupure) ----------
+const MOIS_EV = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"];
+/** la date de l'événement dont parle un texte (« 26 novembre », « 26/11 », « 4 décembre 2026 »), au plus près après le mail */
+export function dateEvenement(texte: string, ref?: string | null): string | null {
+  const t = String(texte ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const r = ref && /^\d{4}-\d{2}-\d{2}/.test(ref) ? new Date(ref.slice(0, 10) + "T12:00:00Z") : new Date();
+  const mk = (j: number, m: number, a?: number) => { if (!(j >= 1 && j <= 31 && m >= 0 && m <= 11)) return null; let y = a ?? r.getUTCFullYear(); let d = new Date(Date.UTC(y, m, j, 12));
+    if (!a && d.getTime() < r.getTime() - 20 * 864e5) d = new Date(Date.UTC(y + 1, m, j, 12)); return d.toISOString().slice(0, 10); };
+  const m1 = t.match(/\b(\d{1,2})(?:er)?\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)(?:\s+(20\d{2}))?/);
+  if (m1) return mk(+m1[1], MOIS_EV.indexOf(m1[2]), m1[3] ? +m1[3] : undefined);
+  const m2 = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
+  if (m2) return mk(+m2[1], +m2[2] - 1, m2[3] ? (m2[3].length === 2 ? 2000 + +m2[3] : +m2[3]) : undefined);
+  return null;
+}
+/** cherche une alerte déjà posée sur le même sujet (même lieu et même événement à venir, ou même titre, ou même mail).
+ *  La date ne compte que si l'événement est APRÈS le mail (une coupure, un rendez-vous) : deux mails du même jour ne sont pas forcément le même sujet. */
+export async function alerteMemeSujet(admin: any, lieu: string, ev: string | null, label: string, dateMail: string | null, mailId?: number | null) {
+  const { data } = await admin.from("jarvis_items").select("id,label,data").eq("source", "mails").eq("kind", "alerte").eq("data->>lieu", lieu).limit(200);
+  const aVenir = (e: string | null, d?: string | null) => !!e && (!d || e > d);
+  return (data ?? []).find((x: any) => x.label === label || (mailId && x.data?.mail_id === mailId) ||
+    (aVenir(ev, dateMail) && (() => { const e2 = x.data?.evenement ?? dateEvenement(`${x.data?.titre ?? ""} ${x.data?.texte ?? ""}`, x.data?.date_mail); return e2 === ev && aVenir(e2, x.data?.date_mail); })())) ?? null;
+}
+
 // ---------- alertes rouges sur la ville ----------
 export async function poserAlerte(admin: any, a: Record<string, any>, lieuxValides: string[]) {
   if (!lieuxValides.includes(a.lieu)) return "Lieu inconnu. Choix : " + lieuxValides.join(", ");
   const titre = String(a.titre ?? "").trim().slice(0, 70); if (!titre) return "Donne un titre court à l'alerte.";
   const app = LIEU_APP[a.lieu], date = iso(a.date_mail);
   const label = `${app}:${slug(titre).slice(0, 30)}`;
-  const data = { lieu: app, titre, texte: String(a.texte ?? "").slice(0, 500), de: String(a.de ?? "").slice(0, 80), date_mail: date, vu: false };
-  const { data: deja } = await admin.from("jarvis_items").select("id,data").eq("source", "mails").eq("kind", "alerte").eq("label", label).limit(5);
-  const meme = (deja ?? []).find((x: any) => (x.data?.date_mail ?? null) === date);
+  const texte = String(a.texte ?? "").slice(0, 500), evenement = dateEvenement(`${titre} ${texte}`, date);
+  const data: Record<string, any> = { lieu: app, titre, texte, de: String(a.de ?? "").slice(0, 80), date_mail: date, vu: false, ...(evenement ? { evenement } : {}) };
+  const meme = await alerteMemeSujet(admin, app, evenement, label, date);
   if (meme) {
     if (meme.data?.vu) return `Cette alerte (« ${titre} ») a déjà été vue, je ne la remets pas.`;
-    await admin.from("jarvis_items").update({ data, updated_at: new Date().toISOString() }).eq("id", meme.id);
+    // même sujet : on complète l'alerte existante au lieu d'en créer une deuxième
+    const garde = (meme.data?.texte ?? "").length > texte.length ? { titre: meme.data.titre, texte: meme.data.texte } : {};
+    await admin.from("jarvis_items").update({ data: { ...meme.data, ...data, ...garde }, updated_at: new Date().toISOString() }).eq("id", meme.id);
+    return `Cette alerte existait déjà (« ${meme.data?.titre ?? titre} ») : je l'ai complétée, sans la mettre en double.`;
   } else {
     const { error } = await admin.from("jarvis_items").insert({ source: "mails", kind: "alerte", label, date, data });
     if (error) return "Alerte pas posée : " + error.message;
