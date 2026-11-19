@@ -646,7 +646,11 @@ async function ordreEcran(o) {
   else if (o.action === "appeler") {   // « appelle MédinLyon » : la fiche Santé s'ouvre, le bouton Appeler est prêt, il n'y a plus qu'à toucher
     $("paperwrap").classList.remove("open"); select(byId.clinique); openDetails();
     setTimeout(() => { const b = $("callMedin"); if (!b) return; b.scrollIntoView({ block: "center", behavior: "smooth" }); b.classList.add("pret"); setTimeout(() => b.classList.remove("pret"), 9000); }, 350);
-    toast("Touche « Appeler MédinLyon » pour lancer l’appel"); }
+    // sur le téléphone, Jarvis lance l'appel lui-même : l'iPhone affiche sa fenêtre « Appeler le 04 28 29 76 60 ? », il ne reste qu'à confirmer
+    // (sur le Mac, rien ne part tout seul : le bouton reste prêt). Si l'iPhone bloque, le bouton qui clignote prend le relais.
+    const tel = matchMedia("(pointer:coarse)").matches && !document.hidden;
+    if (tel) setTimeout(() => { location.href = "tel:" + MEDIN_TEL.replace(/\s/g, ""); }, 600);
+    toast(tel ? "J’appelle MédinLyon : confirme sur ton iPhone" : "Touche « Appeler MédinLyon » pour lancer l’appel"); }
   else if (o.action === "recherche") { const p = a.lieu && byId[LIEU_APP[a.lieu] || a.lieu]; if (p && S.sel !== p) select(p); toast("🔎 " + String(a.texte || "Je cherche…").slice(0, 120)); }
   else if (o.action === "ensemble") { fermerTout(); overview(); }
   else if (o.action === "camera") bougerCamera(a);
