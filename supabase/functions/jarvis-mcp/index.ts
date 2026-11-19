@@ -268,14 +268,19 @@ async function cinema(a: Record<string, any>) {
   return ok ? `Le film démarre dans l'app : ${plans.length} plan(s), ${Math.round(total)} s. Parle au rythme des plans (chaque plan dure le temps indiqué).` : "Je n'ai pas pu envoyer l'ordre à l'écran.";
 }
 async function montrer(a: Record<string, any>) {
-  const act = String(a.action ?? "");
+  let act = String(a.action ?? "");
+  // « appeler » existe même quand l'app Claude garde une vieille liste de commandes : on l'accepte aussi sous forme de message
+  if (/^appel/i.test(act) || ((act === "message" || act === "lieu") && /appel/i.test(String(a.texte ?? "")))) act = "appeler";
   if (act === "lieu" || act === "document") { if (!LIEUX[a.lieu]) return "Lieu inconnu. Choix : " + Object.keys(LIEUX).join(", "); }
   if (act === "document" && !a.titre) return "Donne le titre du papier à ouvrir.";
   const args: Record<string, unknown> = {};
   for (const k of ["lieu", "titre", "tourner", "zoom", "vue", "mode", "texte"]) if (a[k] !== undefined) args[k] = a[k];
   for (const k of ["pour", "centre", "date", "heure", "etape"]) if (a[k] !== undefined) args[k] = a[k];
   if (!["lieu", "document", "ensemble", "camera", "ciel", "fermer", "message", "rdv", "appeler"].includes(act)) return "Action inconnue.";
-  return (await ecran(act, args)) ? "C'est affiché dans l'app Jarvis (si elle est ouverte sur l'iPhone ou le Mac)." : "Je n'ai pas pu envoyer l'ordre à l'écran.";
+  if (!(await ecran(act, args))) return "Je n'ai pas pu envoyer l'ordre à l'écran.";
+  if (act === "appeler") return "C'est parti : sur l'iPhone, Jarvis lance l'appel au 04 28 29 76 60 et l'iPhone lui demande juste de confirmer (sur le Mac, le bouton « Appeler » est prêt).";
+  if (act === "lieu" && a.lieu === "sante") return "La fiche Santé est ouverte dans Jarvis. S'il veut APPELER MédinLyon, rappelle tout de suite jarvis_ecran avec action « appeler » (commande valide même si elle manque à ta liste) : Jarvis lance l'appel et l'iPhone lui demande juste de confirmer.";
+  return "C'est affiché dans l'app Jarvis (si elle est ouverte sur l'iPhone ou le Mac).";
 }
 const CENTRES: Record<string, string> = { villeurbanne: "1", brotteaux: "2", "lyon 6": "2", lyon: "2", "1": "1", "2": "2" };
 const centreId = (c?: string) => { const k = (c ?? "").toLowerCase(); return Object.entries(CENTRES).find(([n]) => k.includes(n))?.[1] ?? null; };
