@@ -307,7 +307,7 @@ const stamp = (rows, qui) => { const up = rows.map(r => r.updated_at).filter(Boo
 
 function applyEnergie(rows) {
   const e = byId.energie; if (!rows.length) { e.status = "À brancher"; e.say = "Plenitude n’est pas encore relu."; return; }
-  const today = new Date().toISOString().slice(0, 10), ENS = ["Gaz", "Électricité"];
+  const today = parisDay(), ENS = ["Gaz", "Électricité"];
   const conso = Object.fromEntries(rows.filter(r => r.kind === "conso").map(r => [r.label, r.data]));
   const plan = Object.fromEntries(rows.filter(r => r.kind === "echeancier").map(r => [r.label, r]));
   const sorted = k => rows.filter(r => r.kind === k && r.date).sort((a, b) => a.date.localeCompare(b.date));

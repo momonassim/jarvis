@@ -35,6 +35,8 @@ Deno.serve(async (req) => {
     .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
     .slice(-20)
     .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
+  // l'historique coupé aux 20 derniers peut commencer par une réponse de Jarvis : on la retire
+  while (messages.length && messages[0].role !== "user") messages.shift();
   if (!messages.length || messages[0].role !== "user") return json({ error: "messages" }, 400);
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
