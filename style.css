@@ -459,3 +459,7 @@ body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!im
 .dh{flex-wrap:wrap;row-gap:2px}
 .dh b{white-space:nowrap}
 .wd small{white-space:nowrap;font-size:9.5px;letter-spacing:.06em}
+
+/* bouton « Appeler » prêt à être touché (ordre « appelle MédinLyon ») : un filet qui respire, sans rebond */
+.btn.pret{background:var(--iron);color:var(--enamel);animation:pret 1.6s var(--ease) infinite}
+@keyframes pret{0%,100%{box-shadow:0 0 0 0 rgba(43,49,56,.35)}50%{box-shadow:0 0 0 6px rgba(43,49,56,0)}}

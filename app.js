@@ -175,6 +175,8 @@ function renderSheet(p) {
   if (p.id === "clinique") {
     mk("Prendre rendez-vous", "main", () => openBook());
     const u = mk("Mettre à jour", "soft", async () => { u.disabled = true; u.textContent = "Je regarde…"; await medin({ action: "sync" }, true); u.disabled = false; u.textContent = "Mettre à jour"; });
+    // appeler MédinLyon d'un appui (même numéro pour Villeurbanne et Brotteaux) : c'est l'iPhone qui lance l'appel
+    const t = document.createElement("a"); t.className = "btn soft wide"; t.id = "callMedin"; t.href = "tel:" + MEDIN_TEL.replace(/\s/g, ""); t.textContent = "Appeler MédinLyon · " + MEDIN_TEL; acts.append(t);
   } else mk("Demander à Jarvis", "soft wide", () => openTalk(p));
 }
 function deselect() { if (!S.sel) return; S.sel = null; sheet.classList.remove("open"); $("lieubar").classList.remove("on"); $("ask").classList.remove("away"); viewShiftGoal = 0; V.fermer(); }
@@ -379,6 +381,7 @@ function applyFoncia(rows) {
   cacheArgent(h);
 }
 
+const MEDIN_TEL = "04 28 29 76 60";
 function applySante(rows) {
   const p = byId.clinique;
   const rdv = rows.filter(r => r.kind === "rdv").map(r => r.data).filter(r => r && r.statut !== "annule")
@@ -393,7 +396,7 @@ function applySante(rows) {
   p.status = nxt ? `RDV ${nxt.date === parisDay() ? "aujourd’hui" : nxt.date === parisDay(1) ? "demain" : jour(nxt.date)} à ${hh(nxt.heure)}` : "Aucun rendez-vous prévu";
   p.say = nxt ? `Prochain rendez-vous : ${nxt.patient}, ${jour(nxt.date)} à ${hh(nxt.heure)}, centre ${ctr(nxt.centre)}.${fut.length > 1 ? ` Et ${fut.length - 1} autre${fut.length > 2 ? "s" : ""} après.` : ""}`
     : `Aucun rendez-vous prévu pour la famille.${last ? ` Le dernier, c’était ${prenomDe(last.patient)} le ${frd(last.date)}.` : ""} Touche « Prendre rendez-vous » : je te demande pour qui, où et quand, et je réserve après ta confirmation.`;
-  p.facts = [["Rendez-vous", `${fut.length} à venir · ${rdv.length - fut.length} passés`], ["Famille sur le compte", (S.patients.length || new Set(rdv.map(r => r.patient)).size) + " personnes"]];
+  p.facts = [["Rendez-vous", `${fut.length} à venir · ${rdv.length - fut.length} passés`], ["Famille sur le compte", (S.patients.length || new Set(rdv.map(r => r.patient)).size) + " personnes"], ["Téléphone", MEDIN_TEL]];
   const d = [];
   fut.forEach(r => d.push({ t: "Rendez-vous · " + r.patient, d: frd(r.date) + " à " + hh(r.heure), v: "À venir", future: true, where: "MédinLyon",
     lines: [["Pour", r.patient], ["Quand", jour(r.date) + " à " + hh(r.heure)], ["Centre", ctr(r.centre)]], path: r.chemin || null, cancelId: r.id }));
@@ -640,6 +643,10 @@ async function ordreEcran(o) {
     if (d) setTimeout(() => openDoc(p, d), 700); else toast("Je ne trouve pas « " + a.titre + " » ici.");
   }
   else if (o.action === "rdv") montrerRdv(a);
+  else if (o.action === "appeler") {   // « appelle MédinLyon » : la fiche Santé s'ouvre, le bouton Appeler est prêt, il n'y a plus qu'à toucher
+    $("paperwrap").classList.remove("open"); select(byId.clinique); openDetails();
+    setTimeout(() => { const b = $("callMedin"); if (!b) return; b.scrollIntoView({ block: "center", behavior: "smooth" }); b.classList.add("pret"); setTimeout(() => b.classList.remove("pret"), 9000); }, 350);
+    toast("Touche « Appeler MédinLyon » pour lancer l’appel"); }
   else if (o.action === "recherche") { const p = a.lieu && byId[LIEU_APP[a.lieu] || a.lieu]; if (p && S.sel !== p) select(p); toast("🔎 " + String(a.texte || "Je cherche…").slice(0, 120)); }
   else if (o.action === "ensemble") { fermerTout(); overview(); }
   else if (o.action === "camera") bougerCamera(a);
