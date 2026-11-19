@@ -331,7 +331,7 @@ p.empty{margin:0}
    - deux arrondis seulement : 16 px (fenêtres, barres) et 12 px (boutons, icônes, lignes)
    - les noms et titres gravés en capitales à empattements, comme sur les façades
    ========================================================= */
-:root{ --iron:#2B3138; --enamel:rgba(246,242,234,.96); --rim:rgba(43,49,56,.17); --serif:"Cormorant Garamond",Georgia,"Times New Roman",serif;
+:root{ --iron:#2B3138; --enamel:rgba(246,242,234,.96); --rim:rgba(43,49,56,.17); --serif:var(--sans);
   --ombre:0 1px 0 rgba(255,255,255,.75) inset,0 12px 30px -14px rgba(30,36,44,.42); --r1:16px; --r2:12px; --ink:#2B3138; --card:var(--enamel); --line:var(--rim) }
 .brief,.round,.ask,.lieubar,.card,.paper,.gcard,.pin .bub{background:var(--enamel);border:1px solid var(--rim);box-shadow:var(--ombre)}
 .brief,.ask,.lieubar,.card,.paper,.gcard{border-radius:var(--r1)}
@@ -387,7 +387,7 @@ p.empty{margin:0}
    ===================================================================== */
 :root{
   --iron:#2B3138; --iron2:rgba(43,49,56,.62); --enamel:#F5F1E8; --enamel2:#FBF8F1; --rim:rgba(43,49,56,.24); --soft:#6E737B; --red:#C9483A;
-  --serif:"Cormorant Garamond",Georgia,"Times New Roman",serif;
+  --serif:var(--sans);
   --plaque:inset 0 0 0 3px var(--enamel),inset 0 0 0 4px rgba(43,49,56,.2),0 14px 30px -16px rgba(18,22,28,.55);
   --plaque-plate:inset 0 0 0 2px var(--enamel2),inset 0 0 0 3px rgba(43,49,56,.14);
   --t:.26s; --ease:cubic-bezier(.2,.7,.2,1);
