@@ -804,7 +804,8 @@ const hemi=new THREE.HemisphereLight(0xd3dcea,0xe2d9cc,.5); scene.add(hemi);
 function envFor(zen,hor){const es=new THREE.Scene();const sg=new THREE.SphereGeometry(100,32,16);const cols=[],p=sg.attributes.position,c=new THREE.Color();
   for(let i=0;i<p.count;i++){const y=p.getY(i)/100; if(y>0)c.copy(hor).lerp(zen,Math.pow(y,.5)); else c.set(0xd8d3cb); cols.push(c.r,c.g,c.b);}
   sg.setAttribute('color',new THREE.Float32BufferAttribute(cols,3)); es.add(new THREE.Mesh(sg,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.BackSide})));
-  return new THREE.PMREMGenerator(renderer).fromScene(es,.02).texture;}
+  const gen=envFor.gen||(envFor.gen=new THREE.PMREMGenerator(renderer)); const t=gen.fromScene(es,.02).texture; sg.dispose(); es.children[0].material.dispose(); return t;}
+const ENV={};   // un éclairage par moment de la journée, gardé en mémoire (avant : refait à chaque fois, ça figeait l'iPhone)
 const TIMES=[
   {name:'☀️ Midi',dir:V(-.72,.62,.42),sun:0xfff4e6,I:2.9,hemi:.42,zen:[.12,.36,.78],hor:[.72,.8,.9],cloud:[1,1,1],lit:0,lamp:0,exp:1.0},
   {name:'🌅 Soir',dir:V(.8,.16,-.3),sun:0xffb070,I:2.8,hemi:.28,zen:[.12,.18,.42],hor:[.98,.66,.42],cloud:[1,.78,.62],lit:2.2,lamp:3.5,exp:1.05},
@@ -817,7 +818,7 @@ function setTime(i){const t=TIMES[i]; NIGHT=(i===2||i===1); const d=t.dir.clone(
   sun.position.copy(d).multiplyScalar(200).add(V(18,0,0)); sun.target.position.set(18,0,0); sun.color.setHex(t.sun); sun.intensity=t.I; hemi.intensity=t.hemi;
   skyU.uSun.value.copy(d); skyU.uZen.value.setRGB(...t.zen); skyU.uHor.value.setRGB(...t.hor); skyU.uSunCol.value.setHex(t.sun); skyU.uCloud.value.setRGB(...t.cloud);
   scene.fog.color.setRGB(...t.hor); renderer.setClearColor(scene.fog.color);
-  scene.environment=envFor(new THREE.Color(...t.zen),new THREE.Color(...t.hor));
+  scene.environment=ENV[i]||(ENV[i]=envFor(new THREE.Color(...t.zen),new THREE.Color(...t.hor)));
   mats.glassLit.emissiveIntensity=t.lit; mats.lamp.emissiveIntensity=t.lamp+ .6; mats.lampRed.emissiveIntensity=.15+t.lamp*.6; mats.lampGreen.emissiveIntensity=.15+t.lamp*.6; renderer.toneMappingExposure=t.exp;
 }
 setTime(0);
@@ -958,10 +959,10 @@ let TOUR=null;   // petite visite guidée en cours (annulée dès que tu touches
 function ouvrir(id){ const p=PLACES.find(q=>q.id===id); if(!p) return; SEL=p; FOCUS=null; selT=0; const v=viewFor(p);
   // chez toi : on lève d'abord les yeux vers ta fenêtre (sa lumière dit comment ça va), puis on redescend à la porte
   if(p.viewHaut){ const h=p.viewHaut, jeton=TOUR={}; flyTo(h[0],h[1],h[2]); anim.then=()=>setTimeout(()=>{ if(TOUR===jeton&&SEL===p&&!FOCUS&&!anim){ TOUR=null; flyTo(v[0],v[1],v[2]); } },1700); return; }
-  if(p.id==='garage'&&trajetGarage()){ TOUR=null; GARX.orbit=true; GARX.oa=null;
+  if(p.id==='garage'&&trajetGarage()){ TOUR=null; GARX.orbit=true; GARX.rk=1; GARX.w=0;
     if(GARX.k<.98){ GARX.suivi=true; flyTo(GARX.W,GARX.Wt,52); return; }   // elle est au garage : on se place devant le porche pour la voir sortir
-    GARX.suivi=false; const f=GARX.fin; const a=Math.atan2(.6,-.8); const E=f.clone().addScaledVector(GARX.hd,Math.cos(a)*8.6).addScaledVector(GARX.out,Math.sin(a)*4.6); E.y=f.y+2.9;
-    flyTo(E,f.clone().add(new THREE.Vector3(0,1.5,0)),50); return; }
+    GARX.suivi=false; GARX.w=1; GARX.a=0; const dp=placerDalle(), b0=.4*Math.sign(dp.clone().sub(GARX.fin).dot(GARX.hd)||1), c=GARX.fin.clone().lerp(dp,.5); c.y=GARX.fin.y+.3; const E=c.clone().addScaledVector(GARX.out,Math.cos(b0)*8.5).addScaledVector(GARX.hd,Math.sin(b0)*8.5); E.y=c.y+4.8;   // déjà garée : on arrive pile sur le tour
+    flyTo(E,c,58); return; }
   TOUR=null; flyTo(v[0],v[1],v[2]); }
 function fermer(){ SEL=null; FOCUS=null; hideFor(null); }
 let showLbl=true;
@@ -1375,12 +1376,57 @@ function buildGarage(gm,cx){ const P=PLACES.find(q=>q.id==='garage'); GAR.gm=gm;
   // l'info en particules au-dessus de la voiture (toujours tournée vers toi)
   const slot=new THREE.Group(); scene.add(slot); GAR.slot=slot;
   const lab=labelPlane([{t:'CONTRÔLE TECHNIQUE',s:44,y:62,ls:6},{t:'',s:36,y:116}],4.4,.62); lab.position.set(0,-.62,0); slot.add(lab); GAR.lab=lab; slot.visible=false;
-  // le reste des infos : peint au sol sur la route devant la voiture, comme un marquage (pas de cadre, pas de panneau)
-  const deco=canvasPlane(4.4,2.6,230); deco.rotation.order='YXZ'; deco.rotation.x=-Math.PI/2;
-  Object.assign(deco.material,{transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-6,polygonOffsetUnits:-6}); deco.renderOrder=6;
-  deco.visible=false; scene.add(deco); GAR.sol=deco; GAR.board=deco; deco.userData.place=P; deco.userData.act='details'; pickables.push(deco);
+  // le reste des infos : une dalle du trottoir qui sort doucement du sol, même matière que les pavés, lettres en relief (néomorphisme)
   GARX.bk=0;
 }
+function construireDalle(){ if(GAR.dalle) return GAR.dalle; const P=PLACES.find(q=>q.id==='garage'), Wd=3.4, Dd=1.9;
+  const sh=new THREE.Shape(), r=.42, x0=-Wd/2, y0=-Dd/2; sh.moveTo(x0+r,y0); sh.lineTo(x0+Wd-r,y0); sh.quadraticCurveTo(x0+Wd,y0,x0+Wd,y0+r); sh.lineTo(x0+Wd,y0+Dd-r); sh.quadraticCurveTo(x0+Wd,y0+Dd,x0+Wd-r,y0+Dd);
+  sh.lineTo(x0+r,y0+Dd); sh.quadraticCurveTo(x0,y0+Dd,x0,y0+Dd-r); sh.lineTo(x0,y0+r); sh.quadraticCurveTo(x0,y0,x0+r,y0);
+  const g=new THREE.ExtrudeGeometry(sh,{depth:.04,bevelEnabled:true,bevelThickness:.045,bevelSize:.09,bevelSegments:6,curveSegments:10}); g.rotateX(-Math.PI/2); g.translate(0,.045,0);
+  const cv=document.createElement('canvas'); cv.width=1024; cv.height=Math.round(1024*Dd/Wd); const nv=document.createElement('canvas'); nv.width=cv.width; nv.height=cv.height; const ev=document.createElement('canvas'); ev.width=cv.width; ev.height=cv.height;
+  const tx=c=>{ const t=new THREE.CanvasTexture(c); t.repeat.set(1/Wd,1/Dd); t.offset.set(.5,.5); t.anisotropy=8; return t; };
+  const map=tx(cv), nmap=tx(nv), emap=tx(ev); map.colorSpace=THREE.SRGBColorSpace; emap.colorSpace=THREE.SRGBColorSpace;
+  const mat=new THREE.MeshStandardMaterial({color:GAR.solCol||0xe6e3dc,map,normalMap:nmap,normalScale:new THREE.Vector2(2.2,2.2),emissive:0x8fdcff,emissiveMap:emap,emissiveIntensity:0,roughness:.86,metalness:0});
+  const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; m.userData.place=P; m.userData.act='details'; pickables.push(m);
+  const G=new THREE.Group(); G.add(m); G.visible=false; scene.add(G); GAR.dalle=G; G.userData={cv,nv,ev,map,nmap,emap,mat,Wd,Dd}; return G; }
+// le dessin de la dalle : la couleur (presque blanche, la teinte vient du pavé), le relief (carte de normales) et la lueur de nuit
+function dessinDalle(G,D,ct){ const {cv,nv,ev,Wd,Dd}=G.userData, W=cv.width, H=cv.height, x=cv.getContext('2d'), h=nv.getContext('2d'), e=ev.getContext('2d');
+  x.fillStyle='#ffffff'; x.fillRect(0,0,W,H); h.fillStyle='#808080'; h.fillRect(0,0,W,H); e.fillStyle='#000'; e.fillRect(0,0,W,H);
+  const rr=(c,X,Y,w,hh,r)=>{ c.beginPath(); c.moveTo(X+r,Y); c.arcTo(X+w,Y,X+w,Y+hh,r); c.arcTo(X+w,Y+hh,X,Y+hh,r); c.arcTo(X,Y+hh,X,Y,r); c.arcTo(X,Y,X+w,Y,r); c.closePath(); };
+  const F=(D.facts||[]).filter(f=>f!==ct).slice(0,ct?3:4); if(ct){ const j=joursAvant(ct[1]); F.unshift([ct[0],(j!=null?(j>0?'J−'+j+' · ':'À faire · '):'')+String(ct[1]).replace(/^Avant le /i,'')]); } const al=(D.alerts||[])[0];
+  let top=46; if(al){ const t='⚠ '+al.t; let f=fitTxt(x,t,W-140,46,800); x.textAlign='center'; x.fillStyle='#b8432f'; x.fillText(t,W/2,top+f*.8); h.font=x.font; h.textAlign='center'; h.fillStyle='#c4c4c4'; h.fillText(t,W/2,top+f*.8); e.font=x.font; e.textAlign='center'; e.fillStyle='#ff9a8a'; e.fillText(t,W/2,top+f*.8); top+=f+30; }
+  const n=Math.max(1,F.length), cols=n>1?2:1, rows=Math.ceil(n/cols), gap=34, cw=(W-80-gap*(cols-1))/cols, ch=(H-top-46-gap*(rows-1))/rows;
+  if(!F.length){ x.textAlign='center'; const t='Assurance, entretien : bientôt ici'; fitTxt(x,t,W-160,52,700); x.fillStyle='#4a5560'; x.fillText(t,W/2,H/2+18); h.font=x.font; h.textAlign='center'; h.fillStyle='#bdbdbd'; h.fillText(t,W/2,H/2+18); }
+  F.forEach(([a,b],i)=>{ const X=40+(i%cols)*(cw+gap), Y=top+Math.floor(i/cols)*(ch+gap);
+    rr(h,X,Y,cw,ch,46); h.fillStyle='#383838'; h.fill();                        // une alvéole creusée dans la dalle
+    x.save(); rr(x,X,Y,cw,ch,46); x.clip(); x.fillStyle='#eceae5'; x.fillRect(X,Y,cw,ch);
+    x.lineWidth=26; x.shadowColor='rgba(70,64,56,.42)'; x.shadowBlur=26; x.shadowOffsetX=9; x.shadowOffsetY=9; rr(x,X-13,Y-13,cw+26,ch+26,56); x.strokeStyle='#eceae5'; x.stroke();   // ombre intérieure en haut à gauche
+    x.shadowColor='rgba(255,255,255,.95)'; x.shadowOffsetX=-8; x.shadowOffsetY=-8; x.stroke(); x.restore();                                                                  // lumière en bas à droite
+    const lab=String(a).toUpperCase(), val=String(b); x.textAlign='center'; h.textAlign='center'; e.textAlign='center';
+    try{ x.letterSpacing='5px'; h.letterSpacing='5px'; }catch(_){} let f=fitTxt(x,lab,cw-70,34,700); h.font=x.font;
+    x.fillStyle='#7a8088'; x.fillText(lab,X+cw/2,Y+ch*.36); h.fillStyle='#6a6a6a'; h.fillText(lab,X+cw/2,Y+ch*.36);
+    try{ x.letterSpacing='0px'; h.letterSpacing='0px'; }catch(_){}
+    f=fitTxt(x,val,cw-60,rows>1?74:96,800); h.font=x.font; e.font=x.font;
+    x.save(); x.shadowColor='rgba(60,55,48,.45)'; x.shadowBlur=10; x.shadowOffsetX=5; x.shadowOffsetY=6; x.fillStyle='#2f5f86'; x.fillText(val,X+cw/2,Y+ch*.36+f+14); x.restore(); h.fillStyle='#f0f0f0'; h.fillText(val,X+cw/2,Y+ch*.36+f+14); e.fillStyle='#9be8ff'; e.fillText(val,X+cw/2,Y+ch*.36+f+14); });
+  // relief : on adoucit la hauteur (néomorphisme = formes douces), puis on en tire les normales
+  const img=h.getImageData(0,0,W,H).data, N=W*H; let a1=new Float32Array(N), a2=new Float32Array(N); for(let k=0;k<N;k++) a1[k]=img[k*4]/255;
+  const flou=(src,dst,R2,horiz)=>{ for(let yy=0;yy<H;yy++) for(let xx=0;xx<W;xx++){ let s2=0,c2=0; for(let d=-R2;d<=R2;d++){ const X2=horiz?xx+d:xx, Y2=horiz?yy:yy+d; if(X2<0||Y2<0||X2>=W||Y2>=H) continue; s2+=src[Y2*W+X2]; c2++; } dst[yy*W+xx]=s2/c2; } };
+  for(let pass=0;pass<2;pass++){ flou(a1,a2,4,true); flou(a2,a1,4,false); }
+  const out=h.createImageData(W,H), o=out.data, k2=9;
+  for(let yy=0;yy<H;yy++) for(let xx=0;xx<W;xx++){ const i=yy*W+xx, l=a1[yy*W+Math.max(0,xx-1)], r2=a1[yy*W+Math.min(W-1,xx+1)], u=a1[Math.max(0,yy-1)*W+xx], d=a1[Math.min(H-1,yy+1)*W+xx];
+    let nx=(l-r2)*k2, ny=(d-u)*k2, nz=1; const L2=Math.hypot(nx,ny,nz); nx/=L2; ny/=L2; nz/=L2; o[i*4]=(nx*.5+.5)*255; o[i*4+1]=(ny*.5+.5)*255; o[i*4+2]=(nz*.5+.5)*255; o[i*4+3]=255; }
+  h.putImageData(out,0,0); G.userData.map.needsUpdate=true; G.userData.nmap.needsUpdate=true; G.userData.emap.needsUpdate=true; }
+// où poser la dalle : sur le trottoir, devant la voiture garée, là où rien ne dépasse du sol (jardinière, arbre, banc…)
+function placerDalle(){ if(GARX.dalleP) return GARX.dalleP; const {zc,ys}=GARX.mesure, L=GARX.L, xl=GARX.fin.clone().applyMatrix4(GARX.inv).x, G=construireDalle(), {Wd,Dd}=G.userData;
+  const sols=[]; scene.traverse(o=>{ if(o.isMesh&&o.visible&&!/^Voiture|DS5/.test(o.name)&&!(o.parent&&/^Voiture/.test(o.parent.name))&&!(o.material&&o.material.transparent)&&o!==G.children[0]) sols.push(o); });
+  const rc=new THREE.Raycaster(), dn=new THREE.Vector3(0,-1,0); let zcen=zc-.25-Dd/2-.1;
+  const libre=x0=>{ for(let dx=-Wd/2-.2;dx<=Wd/2+.2;dx+=.3) for(let dz=-Dd/2-.15;dz<=Dd/2+.15;dz+=.3){ rc.set(L(x0+dx,ys+4,zcen+dz),dn); rc.far=6; const hh=rc.intersectObjects(sols,false)[0]; if(!hh||Math.abs(hh.point.y-ys)>.05) return false; } return true; };
+  let x0=xl-4.4; trouve: for(let d=4.4;d<=9;d+=.35) for(const sg of [-1,1]) for(const zz of [zc-.25-Dd/2-.1, zc-1.05-Dd/2]){ zcen=zz; if(libre(xl+sg*d)){ x0=xl+sg*d; break trouve; } }   // juste devant ou juste derrière la voiture, là où le trottoir est libre
+  if(!libre(x0)) zcen=zc-.25-Dd/2-.1;
+  const pos=L(x0,0,zcen); pos.y=ys; const q=new THREE.Quaternion(); new THREE.Matrix4().extractRotation(GAR.gm).decompose(new THREE.Vector3(),q,new THREE.Vector3());
+  G.position.copy(pos); G.quaternion.copy(q);
+  rc.set(L(x0,ys+1,zcen),dn); rc.far=3; const hs=rc.intersectObjects(sols,false)[0]; if(hs&&hs.object.material&&hs.object.material.color){ G.userData.mat.color.copy(hs.object.material.color); const hsl={}; G.userData.mat.color.getHSL(hsl); if(hsl.l>.86) G.userData.mat.color.setHSL(hsl.h,hsl.s,.86); }   // même teinte que le pavé
+  GARX.dalleP=pos; return pos; }
 // le trajet de sortie, calculé une fois la ville finie : on cherche la bordure du trottoir devant le porche (le sol descend)
 function trajetGarage(){ if(GARX.path) return true; if(!GAR.gm||!DS5_SPOT) return false; const gm=GAR.gm, cx=GAR.cx, L=(x,y,z)=>V(x,y,z).applyMatrix4(gm);
   const sols=[]; scene.traverse(o=>{ if(o.isMesh&&o.visible&&!/^Voiture/.test(o.name)&&!(o.parent&&/^Voiture/.test(o.parent.name))&&!(o.material&&o.material.transparent)) sols.push(o); });
@@ -1399,7 +1445,8 @@ function trajetGarage(){ if(GARX.path) return true; if(!GAR.gm||!DS5_SPOT) retur
     for(let xx=1.2;xx<o2&&libre;xx+=.6) for(const dz of [-.9,0,.9]) if(occupe(L(cx-xx,1,zl+.6+dz))) libre=false;   // le chemin pour y arriver aussi
     if(libre){ off=o2; break; } }
   // dernière partie bien droite et parallèle au trottoir : la voiture finit alignée, roues à 10 cm de la bordure
-  const pts=[DS5_SPOT.p.clone(), L(cx,-2.6,-7.4), L(cx,-1.3,-3.65), L(cx,.02,-.25), L(cx,ys,zc-.9), L(cx-1.6,yr,zc+1.75), L(cx-off+3.6,yr,zl+.12), L(cx-off+1.4,yr,zl), L(cx-off,yr,zl)];
+  const oy=L(0,0,0).y, Ys=ys-oy, Yr=yr-oy;   // ys et yr sont déjà des hauteurs « monde » : on enlève la hauteur du bâtiment (avant, la voiture flottait 15 cm au-dessus de la rue)
+  const pts=[DS5_SPOT.p.clone(), L(cx,-2.6,-7.4), L(cx,-1.3,-3.65), L(cx,.02,-.25), L(cx,Ys,zc-.9), L(cx-1.6,Yr,zc+1.75), L(cx-off+3.6,Yr,zl+.12), L(cx-off+1.4,Yr,zl), L(cx-off,Yr,zl)];
   GARX.path=new THREE.CatmullRomCurve3(pts,false,'catmullrom',.3); GARX.fin=pts[pts.length-1].clone();
   GARX.zc=zc; GARX.L=L; GARX.inv=new THREE.Matrix4().copy(gm).invert();
   GARX.W=L(cx+2.7,2.9,zc+4.3); GARX.Wt=L(cx,-1.3,-4);   // d'où on la regarde monter la rampe
@@ -1459,7 +1506,11 @@ function updateGarage(dt){ const veut=(SEL&&SEL.id==='garage')||(CINE.on&&GARX.c
   const e=GARX.k*GARX.k*(3-2*GARX.k), u=Math.min(.999,e), p=GARX.path.getPointAt(u); GARX.path.getTangentAt(u,_gt);
   if(u>.9){ const w=Math.min(1,(u-.9)/.09); _gt.setY(_gt.y*(1-w)).lerp(GARX.hd,w*w).normalize(); }   // garée droite, parallèle au trottoir
   car.position.copy(p); car.lookAt(p.clone().add(_gt)); car.visible=GARX.k>0||!!ds5||car!==GAR.remplace;
-  if(!car.userData.rouesOk){ car.userData.rouesOk=true; const W=equiperRoues(car,'z'); window.__roues=W?W.R.length+' roues':'roues introuvables'; }
+  if(!car.userData.rouesOk){ car.userData.rouesOk=true; const W=equiperRoues(car,'z'); window.__roues=W?W.R.length+' roues':'roues introuvables';
+    // le bas des pneus dans le repère de la voiture : c'est lui qui doit toucher le sol (le modèle n'a pas forcément son origine au sol)
+    let bas; if(W&&W.R.length) bas=Math.min(...W.R.map(w=>w.c.y-w.r)); else { car.updateMatrixWorld(true); const iv=new THREE.Matrix4().copy(car.matrixWorld).invert(), b=new THREE.Box3(); car.traverse(o=>{ if(o.isMesh) b.union(new THREE.Box3().setFromObject(o).applyMatrix4(iv)); }); bas=b.min.y; }
+    car.userData.sol=bas+.012; window.__sol=bas.toFixed(3); }   // 1 cm d'écrasement du pneu
+  if(car.userData.sol) car.translateY(-car.userData.sol);
   roulerRoues(car,dt);
   if(car===GAR.remplace&&GARX.k<=0) car.visible=false;
   GARX.lz=p.clone().applyMatrix4(GARX.inv).z;
@@ -1468,35 +1519,36 @@ function updateGarage(dt){ const veut=(SEL&&SEL.id==='garage')||(CINE.on&&GARX.c
   const F=D.facts||[], ct=F.find(f=>/contr[oô]le/i.test(f[0])), j=ct?joursAvant(ct[1]):null;
   const gros=ct?(j!=null?(j>0?'J−'+j:'À faire'):String(ct[1]).replace(/^Avant le /i,'')):(F[0]?String(F[0][1]):'DS5');
   const titre=ct?'CONTRÔLE TECHNIQUE':(F[0]?String(F[0][0]).toUpperCase():'TA VOITURE'), sous=ct?String(ct[1]):(D.place||'');
-  GAR.slot.visible=GARX.want&&GARX.k>.97; if(GAR.slot.visible){ if(NRG.slots) NRG.slots.ds5=GAR.slot; numCloud('ds5',gros,NIGHT?'#9be8ff':(j!=null&&j<30?'#d64541':'#1f9ad6'),2.6);
+  GAR.slot.visible=GARX.want&&GARX.k>.97&&(GARX.bk||0)<.15; if(GAR.slot.visible){ if(NRG.slots) NRG.slots.ds5=GAR.slot; numCloud('ds5',gros,NIGHT?'#9be8ff':(j!=null&&j<30?'#d64541':'#1f9ad6'),2.6);
     GAR.slot.position.copy(car.position).add(new THREE.Vector3(0,2.9,0)); GAR.slot.quaternion.copy(camera.quaternion);
     const lk=titre+'|'+sous+'|'+NIGHT; if(GAR.lab.userData.k!==lk){ GAR.lab.userData.k=lk; GAR.lab.userData.draw([{t:titre,s:44,y:62,ls:6,c:NIGHT?'#fff':'#2B3138'},{t:sous,s:36,y:114,c:NIGHT?'rgba(255,255,255,.8)':'#5d636c'}]); } }
-  // le marquage au sol : il se « peint » une fois la voiture garée, et pivote doucement pour rester lisible de là où tu regardes
-  const B=GAR.board; GARX.bk=Math.max(0,Math.min(1,GARX.bk+((garee&&GARX.want)?1.2:-3)*dt)); B.visible=GARX.bk>0;
-  if(B.visible){ const f=GARX.fin; B.position.copy(f).addScaledVector(GARX.hd,.1).addScaledVector(GARX.out,3.25);   // dans la voie, à côté de la voiture : on le voit de partout B.position.y=f.y+.02;
-    camera.getWorldDirection(_gc); const ya=Math.atan2(-_gc.x,-_gc.z); if(GARX.dy==null) GARX.dy=ya;   // le texte reste droit à l'écran
-    let dy=ya-GARX.dy; dy=Math.atan2(Math.sin(dy),Math.cos(dy)); GARX.dy+=dy*Math.min(1,dt*1.6); B.rotation.set(-Math.PI/2,GARX.dy,0);
-    B.material.opacity=GARX.bk; const sc=.85+.15*(1-Math.pow(1-GARX.bk,3)); B.scale.set(sc,sc,1);
-    const key=JSON.stringify([F,D.alerts,D.place,NIGHT]); if(B.userData.k!==key){ B.userData.k=key; dessinSol(B,D,ct); } } else GARX.dy=null;
-  if(GARX.want&&!GARX.orbit&&!GARX.touche&&!anim&&GARX.lache&&performance.now()-GARX.lache>2500){ GARX.orbit=true; GARX.oa=null; }   // tu as lâché : elle reprend la caméra en douceur
-  if(!GARX.want||!GARX.orbit||anim) return;
-  // la caméra suit la voiture : d'abord depuis la rue, face au porche (on la voit monter la rampe), puis derrière elle côté chaussée
-  if(!garee){ GARX.oa=null; const f=_gt.clone().setY(0).normalize(), gauche=_gr.crossVectors(_up,f).normalize();
-    if(GARX.lz<GARX.zc-.7){ _gp.copy(GARX.W); _gc.copy(p).add(new THREE.Vector3(0,.75,0)); }
-    else { _gp.copy(p).addScaledVector(f,-7).addScaledVector(gauche,3.1); _gp.applyMatrix4(GARX.inv); _gp.z=Math.max(_gp.z,GARX.zc+2.2); _gp.applyMatrix4(GAR.gm); _gp.y=p.y+2.35;   // jamais dans le bâtiment : la caméra reste sur la chaussée
-      _gc.copy(p).addScaledVector(f,1.4); _gc.y=p.y+.9; }
-    camera.position.lerp(_gp,1-Math.exp(-dt*2.2)); controls.target.lerp(_gc,1-Math.exp(-dt*3.2));
-    GARX.ht=(GARX.ht||0)-dt; if(GARX.ht<=0){ GARX.ht=.4; hideFor(camera.position,controls.target); } return; }
-  // une fois garée : la caméra tourne lentement autour de la voiture et de son marquage, côté rue (va-et-vient de 140°),
-  // en repartant d'où elle est (pas de saut) ; le marquage reste entre toi et la voiture, donc toujours lisible
-  const c=GARX.fin.clone().addScaledVector(GARX.out,1.9); c.y+=.5; const R=5.6, A=.95;
-  if(GARX.oa==null){ GARX.a=0; GARX.oa=0; }   // on commence face à la rue : le marquage devant, la voiture derrière (la caméra y glisse en douceur)
-  GARX.oa=Math.min(1,GARX.oa+dt*.5); GARX.a+=dt*.16*GARX.oa; const th=A*Math.sin(GARX.a);
-  const pos=c.clone().addScaledVector(GARX.out,Math.cos(th)*R).addScaledVector(GARX.hd,Math.sin(th)*R); pos.y=c.y+7.2;
-  if(Math.abs(camera.fov-58)>.05){ camera.fov+=(58-camera.fov)*Math.min(1,dt*2); camera.updateProjectionMatrix(); }   // un peu plus large, pour voir la voiture et son marquage ensemble
-  camera.position.lerp(pos,1-Math.exp(-dt*(GARX.oa<1?2.2:6))); controls.target.lerp(c,1-Math.exp(-dt*3)); GARX.ht=(GARX.ht||0)-dt; if(GARX.ht<=0){ GARX.ht=.5; hideFor(pos,c); }
+  // la dalle : elle sort doucement du trottoir une fois la voiture garée, et y redescend quand tu pars
+  const dp=placerDalle(), G=GAR.dalle; GARX.bk=Math.max(0,Math.min(1,GARX.bk+((garee&&GARX.want)?.7:-1.4)*dt)); G.visible=GARX.bk>0;
+  if(G.visible){ const eb=GARX.bk*GARX.bk*(3-2*GARX.bk); G.position.y=dp.y-.16*(1-eb); G.userData.mat.emissiveIntensity=NIGHT?.9*eb:0;
+    const key=JSON.stringify([F,D.alerts,NIGHT]); if(G.userData.k!==key){ G.userData.k=key; dessinDalle(G,D,ct); } }
+  if(GARX.want&&!GARX.orbit&&!GARX.touche&&!anim&&GARX.lache&&performance.now()-GARX.lache>2500){ GARX.orbit=true; GARX.rk=0; }   // tu as lâché : elle reprend la caméra en douceur
+  if(!GARX.want){ GARX.w=0; return; } if(!GARX.orbit||anim){ GARX.rk=0; return; }
+  const sm=t=>t*t*(3-2*t);
+  // 1) la pose « suivi » : face au porche quand elle monte la rampe, puis derrière elle côté chaussée (les deux se fondent l'une dans l'autre)
+  const f=_gt.clone().setY(0).normalize(), gauche=_gr.crossVectors(_up,f).normalize();
+  const P1=GARX.W, T1=p.clone().add(new THREE.Vector3(0,.75,0));
+  const P2=p.clone().addScaledVector(f,-7).addScaledVector(gauche,3.1); P2.applyMatrix4(GARX.inv); P2.z=Math.max(P2.z,GARX.zc+2.2); P2.applyMatrix4(GAR.gm); P2.y=p.y+2.35;
+  const T2=p.clone().addScaledVector(f,1.4); T2.y=p.y+.9; const wp=sm(Math.max(0,Math.min(1,(GARX.lz-(GARX.zc-1.9))/2.2)));
+  const Pf=P1.clone().lerp(P2,wp), Tf=T1.clone().lerp(T2,wp);
+  // 2) la pose « tour » : va-et-vient lent côté rue autour de la voiture et de sa dalle ; elle part de l'angle où était le suivi
+  const c=GARX.fin.clone().lerp(dp,.5); c.y=GARX.fin.y+.3; const R=8.5, A=.38, B0=.4*Math.sign(dp.clone().sub(GARX.fin).dot(GARX.hd)||1);   // la caméra se met du côté de la dalle   // vue de trois-quarts avant : la dalle devant, la voiture derrière, tout tient dans l'écran du téléphone
+  if(garee){ if(!GARX.w){ const r=Pf.clone().sub(c), t0=Math.atan2(r.dot(GARX.hd),Math.max(.2,r.dot(GARX.out))); GARX.a=Math.asin(Math.max(-.97,Math.min(.97,(t0-B0)/A))); }
+    GARX.w=Math.min(1,(GARX.w||0)+dt/3.2); } else GARX.w=0;
+  const sw=sm(GARX.w||0); GARX.a+=dt*.15*sw; const th=B0+A*Math.sin(GARX.a);
+  const Po=c.clone().addScaledVector(GARX.out,Math.cos(th)*R).addScaledVector(GARX.hd,Math.sin(th)*R); Po.y=c.y+4.8;
+  _gp.copy(Pf).lerp(Po,sw); _gc.copy(Tf).lerp(c,sw);
+  const fv=52+6*sw; if(Math.abs(camera.fov-fv)>.02){ camera.fov+=(fv-camera.fov)*Math.min(1,dt*2); camera.updateProjectionMatrix(); }
+  // 3) la caméra rejoint cette pose avec un ressort doux ; à la reprise (après un vol ou un toucher) le ressort se tend progressivement
+  GARX.rk=Math.min(1,(GARX.rk==null?1:GARX.rk)+dt/1.4); const k=2.2*sm(GARX.rk);
+  camera.position.lerp(_gp,1-Math.exp(-dt*k)); controls.target.lerp(_gc,1-Math.exp(-dt*(k*1.3)));
+  GARX.ht=(GARX.ht||0)-dt; if(GARX.ht<=0){ GARX.ht=.4; hideFor(camera.position,controls.target); }
 }
-function dessinSol(pl,D,ct){ const c=pl.userData.c, x=c.getContext('2d'), S=c.width/1000, H=pl.userData.H; x.setTransform(S,0,0,S,0,0); x.clearRect(0,0,1000,H);
+function _ancienDessinSol(pl,D,ct){ const c=pl.userData.c, x=c.getContext('2d'), S=c.width/1000, H=pl.userData.H; x.setTransform(S,0,0,S,0,0); x.clearRect(0,0,1000,H);
   const peint=NIGHT?'#a9ecff':'#1d5f99', doux=NIGHT?'rgba(210,245,255,.85)':'#2f3a46', rouge=NIGHT?'#ff8a7a':'#c0392b';
   const ecrire=(t,X,Y,size,w,col,font)=>{ x.font=`${w} ${size}px ${font||FNT}`; x.lineJoin='round';
     x.lineWidth=size*.16; x.strokeStyle=NIGHT?'rgba(10,25,40,.55)':'rgba(255,255,255,.75)'; x.strokeText(t,X,Y);   // un liseré pour se détacher des pavés
@@ -1873,7 +1925,8 @@ function frame(){
     else camera.position.lerpVectors(anim.p0,anim.p,e); controls.target.lerpVectors(anim.t0,anim.t,e); camera.fov=anim.f0+(anim.f-anim.f0)*e; camera.updateProjectionMatrix(); if(anim.k>=1){ const cb=anim.then; anim=null; cb&&cb(); } }
   sky.position.copy(camera.position);
   shift+=(shiftGoal-shift)*.08; if(shift>.001) camera.setViewOffset(innerWidth,innerHeight,0,innerHeight*.2*shift,innerWidth,innerHeight); else camera.clearViewOffset();
-  if(!CINE.on) controls.update(); updateCine(); update3D(); composer.render(); if(HK.frame) HK.frame();
+  try{ if(!CINE.on) controls.update(); updateCine(); update3D(); }catch(err){ if(!frame.err){ frame.err=1; console.warn('ville',err); } }
+  composer.render(); if(HK.frame) try{ HK.frame(); }catch(_){}
   // économie d'énergie : pleine vitesse quand ça bouge ou que tu touches, ralenti au repos, pause quand la fenêtre est cachée
   const me=camera.matrixWorld.elements, cm=frame.cm||(frame.cm=new Float32Array(16)); let bouge=false;
   for(let k=0;k<16;k++){ if(Math.abs(me[k]-cm[k])>1e-5){ bouge=true; } cm[k]=me[k]; } if(bouge) REVEIL.t=_now;
