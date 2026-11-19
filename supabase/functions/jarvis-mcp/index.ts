@@ -134,7 +134,7 @@ function energie(rows: Row[], detail: boolean) {
 function sante(rows: Row[], detail: boolean) {
   const m = rows.filter((r) => r.source === "medinlyon");
   const rdv = m.filter((r) => r.kind === "rdv").map((r) => r.data).filter((r) => r && r.statut !== "annule")
-    .map((r) => ({ ...r, statut: r.date >= today() ? "a_venir" : "passe" })).sort((a, b) => (a.date + a.heure).localeCompare(b.date + b.heure));
+    .map((r) => ({ ...r, statut: `${r.date} ${String(r.heure ?? "00:00").padStart(5, "0")}` > new Date().toLocaleString("sv-SE", { timeZone: "Europe/Paris" }).slice(0, 16) ? "a_venir" : "passe" })).sort((a, b) => (a.date + a.heure).localeCompare(b.date + b.heure));
   const fut = rdv.filter((r) => r.statut === "a_venir"), passes = rdv.filter((r) => r.statut === "passe").reverse();
   const fam = (m.find((r) => r.kind === "patients")?.data?.liste ?? []).map((p: any) => p.nom);
   let t = fut.length ? "Rendez-vous à venir :\n" + fut.map((r) => `- ${r.patient}, ${jour(r.date)} à ${r.heure.replace(":", "h")}, centre ${r.centre} (n° ${r.id})`).join("\n") : "Aucun rendez-vous médical à venir.";

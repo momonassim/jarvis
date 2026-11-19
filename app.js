@@ -16,6 +16,9 @@ const nb = t => typeof t === "string" ? t.replace(/ (€|%|h\b|kWh)/g, " $1").r
 const eur = n => nb(Number(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
 const frd = d => d ? d.slice(0, 10).split("-").reverse().join("/") : "";
 const parisDay = (plus = 0) => new Date(Date.now() + plus * 864e5).toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+// date + heure à Paris, ex. « 2026-11-19 22:29 » : un rendez-vous est passé dès que son heure est passée
+const parisNow = () => new Date().toLocaleString("sv-SE", { timeZone: "Europe/Paris" }).slice(0, 16);
+const rdvPasse = r => `${r.date} ${(r.heure || "00:00").padStart(5, "0")}` <= parisNow();
 const jour = d => new Date(d + "T12:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 const hh = h => (h || "").replace(":", "h");
 const quand = up => { const t = new Date(up); return t.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) + " à " + t.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
@@ -385,7 +388,7 @@ const MEDIN_TEL = "04 28 29 76 60";
 function applySante(rows) {
   const p = byId.clinique;
   const rdv = rows.filter(r => r.kind === "rdv").map(r => r.data).filter(r => r && r.statut !== "annule")
-    .map(r => ({ ...r, statut: r.date >= parisDay() ? "a_venir" : "passe" }))
+    .map(r => ({ ...r, statut: rdvPasse(r) ? "passe" : "a_venir" }))
     .sort((a, b) => (b.date + b.heure).localeCompare(a.date + a.heure));
   S.rdv = rdv;
   S.creneaux = rows.filter(r => r.kind === "creneaux");
@@ -1191,6 +1194,8 @@ async function verifierMaj() {
   } catch (e) { /* pas de réseau : on réessaiera */ }
 }
 setInterval(verifierMaj, 60000);
+// app restée ouverte : dès qu'un rendez-vous atteint son heure, il quitte la ville et les notifications
+setInterval(() => { if (!document.hidden && (S.rdv || []).some(r => r.statut === "a_venir" && rdvPasse(r))) loadAll(); }, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) verifierMaj(); });
 addEventListener("focus", verifierMaj);
 setTimeout(verifierMaj, 5000);
