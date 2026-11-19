@@ -106,12 +106,13 @@ const propreNom = (s: string) => (s || "document").normalize("NFD").replace(/[̀
 const typeDoc = (nom: string, cat: string) => /quittance/i.test(nom) ? "Quittance de loyer" : /avis.?d.?[ée]ch[ée]ance/i.test(nom) ? "Avis d'échéance loyer" : /r[ée]gularisation/i.test(nom) ? "Régularisation des charges locatives" : /r[ée]vision/i.test(nom) ? "Révision de loyer" : /diagnostic/i.test(nom) ? "Diagnostics gl" : /assur/i.test(nom) ? "Assurance locataires" : (CATEGORIES[cat] ?? cat);
 const STATUTS: Record<string, string> = { OPEN: "Ouverte", WORK_IN_PROGRESS: "En cours", WAITING_FOR_FIRST_CLIENT_RESPONSE: "En attente de ta réponse", PROCESSED: "Traitée", FINISHED: "Terminée", CLOSED: "Terminée" };
 
-type Ligne = { source: string; kind: string; label: string; date: string | null; date_key: string; amount: number | null; data: Record<string, unknown>; updated_at: string };
+// date_key est calculé automatiquement par la base (COALESCE(date,'1970-01-01')) : on ne l'envoie jamais.
+type Ligne = { source: string; kind: string; label: string; date: string | null; amount: number | null; data: Record<string, unknown>; updated_at: string };
 function sansDoublon(lignes: Ligne[]) {
   const vu = new Map<string, number>(), out: Ligne[] = [];
   for (const l of lignes) {
-    const k = l.kind + "|" + l.label + "|" + l.date_key, n = (vu.get(k) ?? 0) + 1; vu.set(k, n);
-    out.push(n === 1 ? l : { ...l, label: l.label + " (" + n + ")", date_key: l.date_key });
+    const k = l.kind + "|" + l.label + "|" + (l.date ?? "1970-01-01"), n = (vu.get(k) ?? 0) + 1; vu.set(k, n);
+    out.push(n === 1 ? l : { ...l, label: l.label + " (" + n + ")" });
   }
   return out;
 }
@@ -160,7 +161,7 @@ async function rangerPapier(at: string, cat: string, n: any, deja: Set<string>) 
 async function synchroniser(at: string) {
   const maintenant = new Date().toISOString();
   const L = (kind: string, label: string, date: string | null, amount: number | null, data: Record<string, unknown>): Ligne =>
-    ({ source: "foncia", kind, label: String(label).slice(0, 300), date, date_key: date ?? "1970-01-01", amount, data, updated_at: maintenant });
+    ({ source: "foncia", kind, label: String(label).slice(0, 300), date, amount, data, updated_at: maintenant });
 
   const comptes = (await gql(at, Q_COMPTES, { itemsPerPage: 20, pageNumber: 1 })).accounts ?? [];
   const compte = comptes.find((c: any) => c.quality === "TENANT") ?? comptes[0];
@@ -210,7 +211,7 @@ async function synchroniser(at: string) {
       let after: string | null = null;
       for (let p = 0; p < 40; p++) {
         const d: any = (await gql(at, Q_DOCS, { accountUuid: uuid, first: 50, after, customerPortalCategory: c.key }))?.account?.documents;
-        for (const e of (d?.edges ?? [])) { lignes.push({ ...L("document", "", null, null, {}), ...(await rangerPapier(at, c.key, e.node, deja)), source: "foncia", updated_at: maintenant, date_key: (jour(e.node.createdAt) ?? "1970-01-01"), amount: null }); n++; }
+        for (const e of (d?.edges ?? [])) { const p = await rangerPapier(at, c.key, e.node, deja); lignes.push(L("document", p.label, p.date, null, p.data)); n++; }
         if (!d?.pageInfo?.hasNextPage) break; after = d?.pageInfo?.endCursor ?? null; if (!after) break;
       }
     }
