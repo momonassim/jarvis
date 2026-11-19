@@ -824,7 +824,8 @@ setTime(0);
 
 const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,.2,1500);
 const controls=new OrbitControls(camera,renderer.domElement);
-controls.addEventListener('start',()=>{ TOUR=null; GARX.orbit=false; GARX.suivi=false; });   // tu reprends la main : la visite guidée s'arrête
+controls.addEventListener('start',()=>{ TOUR=null; GARX.orbit=false; GARX.suivi=false; GARX.touche=true; });
+controls.addEventListener('end',()=>{ GARX.touche=false; GARX.lache=performance.now(); });   // tu reprends la main : la visite guidée s'arrête
 controls.enableDamping=true; controls.dampingFactor=.08; controls.maxPolarAngle=Math.PI*.495; controls.minDistance=1.5; controls.maxDistance=220;
 controls.touches={ONE:THREE.TOUCH.ROTATE,TWO:THREE.TOUCH.DOLLY_PAN};
 const VIEWS={rue:[V(-32,2.6,2.6),V(0,7.5,-3.5),48],facades:[V(-4,5.2,5.6),V(-4,8.2,-7),58],place:[V(2,2.4,4.0),V(2,7,22),52],ciel:[V(-45,118,92),V(18,0,-4),45]};
@@ -1374,16 +1375,10 @@ function buildGarage(gm,cx){ const P=PLACES.find(q=>q.id==='garage'); GAR.gm=gm;
   // l'info en particules au-dessus de la voiture (toujours tournée vers toi)
   const slot=new THREE.Group(); scene.add(slot); GAR.slot=slot;
   const lab=labelPlane([{t:'CONTRÔLE TECHNIQUE',s:44,y:62,ls:6},{t:'',s:36,y:116}],4.4,.62); lab.position.set(0,-.62,0); slot.add(lab); GAR.lab=lab; slot.visible=false;
-  // le reste des infos : un chevalet debout sur la route, devant le capot, toujours tourné vers toi
-  const B=new THREE.Group(); B.visible=false; scene.add(B); GAR.board=B;
-  const tilt=new THREE.Group(); tilt.rotation.x=-.13; B.add(tilt);
-  const fer=new THREE.MeshStandardMaterial({color:0x2b3138,roughness:.55,metalness:.4});
-  const dos=new THREE.Mesh(new THREE.BoxGeometry(2.72,1.65,.05),fer); dos.position.set(0,1.2,-.03); dos.castShadow=true; tilt.add(dos);
-  for(const sx of [-1.22,1.22]){ const pied=new THREE.Mesh(new THREE.BoxGeometry(.07,.42,.07),fer); pied.position.set(sx,.2,-.03); pied.castShadow=true; tilt.add(pied);
-    const patin=new THREE.Mesh(new THREE.BoxGeometry(.12,.04,.5),fer); patin.position.set(sx,.02,0); B.add(patin); }
-  const face=canvasPlane(2.6,1.55,360); face.position.set(0,1.2,.002); tilt.add(face); GAR.sol=face;
-  face.userData.place=P; face.userData.act='details'; pickables.push(face);
-  dos.userData.place=P; dos.userData.act='details'; pickables.push(dos);
+  // le reste des infos : peint au sol sur la route devant la voiture, comme un marquage (pas de cadre, pas de panneau)
+  const deco=canvasPlane(4.4,2.6,230); deco.rotation.order='YXZ'; deco.rotation.x=-Math.PI/2;
+  Object.assign(deco.material,{transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-6,polygonOffsetUnits:-6}); deco.renderOrder=6;
+  deco.visible=false; scene.add(deco); GAR.sol=deco; GAR.board=deco; deco.userData.place=P; deco.userData.act='details'; pickables.push(deco);
   GARX.bk=0;
 }
 // le trajet de sortie, calculé une fois la ville finie : on cherche la bordure du trottoir devant le porche (le sol descend)
@@ -1415,6 +1410,45 @@ function trajetGarage(){ if(GARX.path) return true; if(!GAR.gm||!DS5_SPOT) retur
 function voitureGarage(){ if(ds5) return ds5; if(GAR.remplace) return GAR.remplace; const v=scene.getObjectByName('Voiture_4'); if(!v||!DS5_SPOT) return null;
   const c=v.clone(true); c.position.set(0,0,0); c.rotation.set(0,0,0); c.scale.set(1,1,1); const g=new THREE.Group(); c.rotation.y=-Math.PI/2; g.add(c); g.name='Voiture_garage'; scene.add(g); GAR.remplace=g; return g; }
 const _gt=new THREE.Vector3();
+/* Les roues : on les retrouve dans le modèle (par leur nom, sinon par leur place aux 4 coins du bas de la voiture),
+   on coupe les maillages qui regroupent les 4 roues, et chaque roue reçoit un pivot qui braque puis un pivot qui tourne. */
+const RX=/pneu|jante|roue|wheel|tire|tyre|rim\b|rims|rueda|felge|reifen/i;
+function equiperRoues(car,avant){ car.updateMatrixWorld(true); const inv=new THREE.Matrix4().copy(car.matrixWorld).invert(), up=new THREE.Vector3(0,1,0);
+  const meshes=[]; car.traverse(o=>{ if(o.isMesh&&!o.isSkinnedMesh) meshes.push(o); });
+  const boxL=o=>new THREE.Box3().setFromBufferAttribute(o.geometry.attributes.position).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv,o.matrixWorld));
+  const tout=new THREE.Box3(); meshes.forEach(o=>tout.union(boxL(o))); if(tout.isEmpty()) return null;
+  const sz=tout.getSize(new THREE.Vector3()), ctr=tout.getCenter(new THREE.Vector3());
+  const ax=avant==='x'?'x':'z', lat=avant==='x'?'z':'x';
+  let roues=meshes.filter(o=>RX.test(o.name)||RX.test(o.parent&&o.parent.name||'')||(o.material&&RX.test(o.material.name||'')));
+  if(!roues.length) roues=meshes.filter(o=>{ const b=boxL(o), s2=b.getSize(new THREE.Vector3());   // pas de nom : ce qui tient dans un coin bas de la voiture
+    return b.max.y<tout.min.y+sz.y*.48&&Math.max(s2.x,s2.y,s2.z)<sz.y*.75&&Math.abs(b.getCenter(new THREE.Vector3())[ax]-ctr[ax])>sz[ax]*.22&&Math.abs(b.getCenter(new THREE.Vector3())[lat]-ctr[lat])>sz[lat]*.2; });
+  if(!roues.length) return null;
+  const q=[[],[],[],[]], _v=new THREE.Vector3();
+  for(const o of roues){ const M4=new THREE.Matrix4().multiplyMatrices(inv,o.matrixWorld), g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone(); g.applyMatrix4(M4);
+    const pos=g.attributes.position, n=pos.count/3, mats=Array.isArray(o.material)?o.material:[o.material], groups=g.groups.length?g.groups:[{start:0,count:pos.count,materialIndex:0}];
+    for(const gr of groups){ const seaux=[[],[],[],[]];
+      for(let t=gr.start/3;t<(gr.start+gr.count)/3&&t<n;t++){ _v.set(0,0,0); for(let k=0;k<3;k++) _v.add(new THREE.Vector3().fromBufferAttribute(pos,t*3+k)); _v.multiplyScalar(1/3);
+        seaux[(_v[ax]>ctr[ax]?0:2)+(_v[lat]>ctr[lat]?0:1)].push(t); }
+      seaux.forEach((tris,i)=>{ if(!tris.length) return; const ng=new THREE.BufferGeometry();
+        for(const nm in g.attributes){ const A=g.attributes[nm], it=A.itemSize, arr=new A.array.constructor(tris.length*3*it);
+          tris.forEach((t,j)=>{ for(let k=0;k<3*it;k++) arr[j*3*it+k]=A.array[t*3*it+k]; }); ng.setAttribute(nm,new THREE.BufferAttribute(arr,it,A.normalized)); }
+        q[i].push({g:ng,m:mats[gr.materialIndex||0]||mats[0],ombre:o.castShadow}); }); }
+    o.parent&&o.parent.remove(o); }
+  const fwd=new THREE.Vector3(); fwd[ax]=1; const axe=new THREE.Vector3().crossVectors(up,fwd).normalize(), R=[];
+  q.forEach((parts,i)=>{ if(!parts.length) return; const b=new THREE.Box3(); parts.forEach(p=>{ p.g.computeBoundingBox(); b.union(p.g.boundingBox); });
+    const c=b.getCenter(new THREE.Vector3()), r=Math.max(.05,(b.max.y-b.min.y)/2), steer=new THREE.Object3D(), spin=new THREE.Object3D(); steer.position.copy(c); steer.add(spin); car.add(steer);
+    parts.forEach(p=>{ p.g.translate(-c.x,-c.y,-c.z); const m=new THREE.Mesh(p.g,p.m); m.castShadow=p.ombre; m.receiveShadow=true; spin.add(m); });
+    R.push({steer,spin,r,avant:i<2,c}); });
+  const fr=R.filter(w=>w.avant), ar=R.filter(w=>!w.avant); const L=fr.length&&ar.length?Math.abs(fr[0].c[ax]-ar[0].c[ax]):2.6;
+  car.userData.roues={R,axe,L,a:0,d:0,fwd:fwd.clone()}; return car.userData.roues; }
+// fait rouler les roues selon le chemin parcouru (en avant ou en marche arrière) et braque celles de devant selon le virage
+const _rq=new THREE.Quaternion(), _rf=new THREE.Vector3(), _rp=new THREE.Vector3();
+function roulerRoues(car,dt,ds){ const W=car.userData.roues; if(!W) return; car.updateMatrixWorld();
+  _rf.copy(W.fwd).transformDirection(car.matrixWorld); const yaw=Math.atan2(_rf.x,_rf.z);
+  if(ds==null){ _rp.setFromMatrixPosition(car.matrixWorld); ds=W.p?_rp.clone().sub(W.p).dot(_rf):0; W.p=(W.p||new THREE.Vector3()).copy(_rp); if(Math.abs(ds)>3) ds=0; }
+  let cible=0; if(W.yaw!=null&&Math.abs(ds)>1e-4){ let dyaw=yaw-W.yaw; dyaw=Math.atan2(Math.sin(dyaw),Math.cos(dyaw)); cible=Math.max(-.6,Math.min(.6,Math.atan(W.L*dyaw/ds))); } else cible=W.d*.9;
+  W.yaw=yaw; W.d+=(cible-W.d)*Math.min(1,dt*6); W.a+=ds;
+  for(const w of W.R){ w.spin.quaternion.setFromAxisAngle(W.axe,W.a/w.r); if(w.avant) w.steer.rotation.y=W.d; } }
 function joursAvant(t){ const d=dateFr(t)||(()=>{ const m=String(t).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m?new Date(+m[3],+m[2]-1,+m[1]):null; })(); if(!d) return null; return Math.ceil((d-new Date())/864e5); }
 const _up=new THREE.Vector3(0,1,0), _gr=new THREE.Vector3(), _gc=new THREE.Vector3(), _gp=new THREE.Vector3();
 function updateGarage(dt){ const veut=(SEL&&SEL.id==='garage')||(CINE.on&&GARX.cine)||GARX.k>0; if(!veut||!trajetGarage()) return; const car=voitureGarage(); if(!car) return; if(ds5&&GAR.remplace){ scene.remove(GAR.remplace); GAR.remplace=null; }
@@ -1425,6 +1459,8 @@ function updateGarage(dt){ const veut=(SEL&&SEL.id==='garage')||(CINE.on&&GARX.c
   const e=GARX.k*GARX.k*(3-2*GARX.k), u=Math.min(.999,e), p=GARX.path.getPointAt(u); GARX.path.getTangentAt(u,_gt);
   if(u>.9){ const w=Math.min(1,(u-.9)/.09); _gt.setY(_gt.y*(1-w)).lerp(GARX.hd,w*w).normalize(); }   // garée droite, parallèle au trottoir
   car.position.copy(p); car.lookAt(p.clone().add(_gt)); car.visible=GARX.k>0||!!ds5||car!==GAR.remplace;
+  if(!car.userData.rouesOk){ car.userData.rouesOk=true; const W=equiperRoues(car,'z'); window.__roues=W?W.R.length+' roues':'roues introuvables'; }
+  roulerRoues(car,dt);
   if(car===GAR.remplace&&GARX.k<=0) car.visible=false;
   GARX.lz=p.clone().applyMatrix4(GARX.inv).z;
   const garee=GARX.k>=1, D=DATA.garage||{};
@@ -1435,13 +1471,14 @@ function updateGarage(dt){ const veut=(SEL&&SEL.id==='garage')||(CINE.on&&GARX.c
   GAR.slot.visible=GARX.want&&GARX.k>.97; if(GAR.slot.visible){ if(NRG.slots) NRG.slots.ds5=GAR.slot; numCloud('ds5',gros,NIGHT?'#9be8ff':(j!=null&&j<30?'#d64541':'#1f9ad6'),2.6);
     GAR.slot.position.copy(car.position).add(new THREE.Vector3(0,2.9,0)); GAR.slot.quaternion.copy(camera.quaternion);
     const lk=titre+'|'+sous+'|'+NIGHT; if(GAR.lab.userData.k!==lk){ GAR.lab.userData.k=lk; GAR.lab.userData.draw([{t:titre,s:44,y:62,ls:6,c:NIGHT?'#fff':'#2B3138'},{t:sous,s:36,y:114,c:NIGHT?'rgba(255,255,255,.8)':'#5d636c'}]); } }
-  // le chevalet : il sort de la route devant le capot une fois la voiture garée, et se tourne toujours vers toi
-  const B=GAR.board; GARX.bk=Math.max(0,Math.min(1,GARX.bk+((garee&&GARX.want)?1.6:-3)*dt)); B.visible=GARX.bk>0;
-  if(B.visible){ const f=GARX.fin; B.position.copy(f).addScaledVector(GARX.hd,3.3).addScaledVector(GARX.out,1.75); B.position.y=f.y+.005;
-    const ya=Math.atan2(camera.position.x-B.position.x,camera.position.z-B.position.z); let dy=ya-B.rotation.y; dy=Math.atan2(Math.sin(dy),Math.cos(dy)); B.rotation.y+=dy*Math.min(1,dt*5);
-    const kb=GARX.bk, eb=1-Math.pow(1-kb,3)+Math.sin(kb*Math.PI)*.08; B.scale.set(.9+.1*kb,Math.max(.001,eb),1);
-    B.visible=camera.position.distanceTo(B.position)>2.2||CINE.on;
-    const key=JSON.stringify([F,D.alerts,D.place]); if(GAR.sol.userData.k!==key){ GAR.sol.userData.k=key; dessinSol(GAR.sol,D,ct); } }
+  // le marquage au sol : il se « peint » une fois la voiture garée, et pivote doucement pour rester lisible de là où tu regardes
+  const B=GAR.board; GARX.bk=Math.max(0,Math.min(1,GARX.bk+((garee&&GARX.want)?1.2:-3)*dt)); B.visible=GARX.bk>0;
+  if(B.visible){ const f=GARX.fin; B.position.copy(f).addScaledVector(GARX.hd,.1).addScaledVector(GARX.out,3.25);   // dans la voie, à côté de la voiture : on le voit de partout B.position.y=f.y+.02;
+    camera.getWorldDirection(_gc); const ya=Math.atan2(-_gc.x,-_gc.z); if(GARX.dy==null) GARX.dy=ya;   // le texte reste droit à l'écran
+    let dy=ya-GARX.dy; dy=Math.atan2(Math.sin(dy),Math.cos(dy)); GARX.dy+=dy*Math.min(1,dt*1.6); B.rotation.set(-Math.PI/2,GARX.dy,0);
+    B.material.opacity=GARX.bk; const sc=.85+.15*(1-Math.pow(1-GARX.bk,3)); B.scale.set(sc,sc,1);
+    const key=JSON.stringify([F,D.alerts,D.place,NIGHT]); if(B.userData.k!==key){ B.userData.k=key; dessinSol(B,D,ct); } } else GARX.dy=null;
+  if(GARX.want&&!GARX.orbit&&!GARX.touche&&!anim&&GARX.lache&&performance.now()-GARX.lache>2500){ GARX.orbit=true; GARX.oa=null; }   // tu as lâché : elle reprend la caméra en douceur
   if(!GARX.want||!GARX.orbit||anim) return;
   // la caméra suit la voiture : d'abord depuis la rue, face au porche (on la voit monter la rampe), puis derrière elle côté chaussée
   if(!garee){ GARX.oa=null; const f=_gt.clone().setY(0).normalize(), gauche=_gr.crossVectors(_up,f).normalize();
@@ -1450,23 +1487,32 @@ function updateGarage(dt){ const veut=(SEL&&SEL.id==='garage')||(CINE.on&&GARX.c
       _gc.copy(p).addScaledVector(f,1.4); _gc.y=p.y+.9; }
     camera.position.lerp(_gp,1-Math.exp(-dt*2.2)); controls.target.lerp(_gc,1-Math.exp(-dt*3.2));
     GARX.ht=(GARX.ht||0)-dt; if(GARX.ht<=0){ GARX.ht=.4; hideFor(camera.position,controls.target); } return; }
-  // une fois garée : la caméra tourne lentement autour, en repartant d'où elle est (pas de saut)
-  const c=GARX.fin.clone().add(new THREE.Vector3(0,1.5,0));
-  if(GARX.oa==null){ const r=camera.position.clone().sub(c), y=r.dot(GARX.out); GARX.a=Math.atan2(y/(y>0?4.6:GARX.rIn),r.dot(GARX.hd)/8.6); GARX.oa=0; }
-  GARX.oa=Math.min(1,GARX.oa+dt*.6); GARX.a+=dt*.2*GARX.oa; const ca=Math.cos(GARX.a), sa=Math.sin(GARX.a);
-  const pos=c.clone().addScaledVector(GARX.hd,ca*8.6).addScaledVector(GARX.out,sa*(sa>0?4.6:GARX.rIn)); pos.y=c.y+1.4;
-  camera.position.lerp(pos,GARX.oa<1?1-Math.exp(-dt*2.5):1); controls.target.lerp(c,1-Math.exp(-dt*3)); GARX.ht=(GARX.ht||0)-dt; if(GARX.ht<=0){ GARX.ht=.5; hideFor(pos,c); }
+  // une fois garée : la caméra tourne lentement autour de la voiture et de son marquage, côté rue (va-et-vient de 140°),
+  // en repartant d'où elle est (pas de saut) ; le marquage reste entre toi et la voiture, donc toujours lisible
+  const c=GARX.fin.clone().addScaledVector(GARX.out,1.9); c.y+=.5; const R=5.6, A=.95;
+  if(GARX.oa==null){ GARX.a=0; GARX.oa=0; }   // on commence face à la rue : le marquage devant, la voiture derrière (la caméra y glisse en douceur)
+  GARX.oa=Math.min(1,GARX.oa+dt*.5); GARX.a+=dt*.16*GARX.oa; const th=A*Math.sin(GARX.a);
+  const pos=c.clone().addScaledVector(GARX.out,Math.cos(th)*R).addScaledVector(GARX.hd,Math.sin(th)*R); pos.y=c.y+7.2;
+  if(Math.abs(camera.fov-58)>.05){ camera.fov+=(58-camera.fov)*Math.min(1,dt*2); camera.updateProjectionMatrix(); }   // un peu plus large, pour voir la voiture et son marquage ensemble
+  camera.position.lerp(pos,1-Math.exp(-dt*(GARX.oa<1?2.2:6))); controls.target.lerp(c,1-Math.exp(-dt*3)); GARX.ht=(GARX.ht||0)-dt; if(GARX.ht<=0){ GARX.ht=.5; hideFor(pos,c); }
 }
 function dessinSol(pl,D,ct){ const c=pl.userData.c, x=c.getContext('2d'), S=c.width/1000, H=pl.userData.H; x.setTransform(S,0,0,S,0,0); x.clearRect(0,0,1000,H);
-  x.fillStyle='rgba(246,242,234,.94)'; x.fillRect(0,0,1000,H); x.fillStyle='#5AA5C6'; x.fillRect(20,20,960,92);
-  x.textAlign='left'; x.font=`700 56px ${SERIF}`; x.fillStyle='#fff'; try{x.letterSpacing='9px';}catch(e){} x.fillText('TA VOITURE',48,86); try{x.letterSpacing='0px';}catch(e){}
-  if(D.place){ x.textAlign='right'; fitTxt(x,D.place,430,30,700); x.fillStyle='rgba(255,255,255,.92)'; x.fillText(D.place,952,80); x.textAlign='left'; }
-  let y=140; (D.alerts||[]).slice(0,1).forEach(a=>{ x.fillStyle='rgba(201,72,58,.12)'; x.fillRect(40,y,920,70); x.fillStyle='#C9483A'; x.fillRect(40,y,8,70); fitTxt(x,a.t,880,32,700); x.fillText(a.t,66,y+46); y+=84; });
-  const F=(D.facts||[]).filter(f=>f!==ct).slice(0,4);
-  if(!F.length){ x.font=`600 34px ${FNT}`; x.fillStyle='#3d434c'; x.fillText('Assurance, entretien : je les range ici dès que je les trouve.',50,y+50); }
-  const cw=450; F.forEach(([a,b],i)=>{ const X=40+(i%2)*(cw+20), Y=y+Math.floor(i/2)*128; x.fillStyle='#fbf8f2'; x.fillRect(X,Y,cw,112); x.strokeStyle='rgba(43,49,56,.2)'; x.lineWidth=2; x.strokeRect(X,Y,cw,112);
-    x.fillStyle='#5AA5C6'; x.fillRect(X,Y+20,6,72); fitTxt(x,String(a),cw-50,27,600); x.fillStyle='#6b7079'; x.fillText(String(a),X+26,Y+42); fitTxt(x,String(b),cw-50,40,800); x.fillStyle='#2B3138'; x.fillText(String(b),X+26,Y+90); });
-  cadreFer(x,H); pl.userData.t.needsUpdate=true; }
+  const peint=NIGHT?'#a9ecff':'#1d5f99', doux=NIGHT?'rgba(210,245,255,.85)':'#2f3a46', rouge=NIGHT?'#ff8a7a':'#c0392b';
+  const ecrire=(t,X,Y,size,w,col,font)=>{ x.font=`${w} ${size}px ${font||FNT}`; x.lineJoin='round';
+    x.lineWidth=size*.16; x.strokeStyle=NIGHT?'rgba(10,25,40,.55)':'rgba(255,255,255,.75)'; x.strokeText(t,X,Y);   // un liseré pour se détacher des pavés
+    x.fillStyle=col; x.fillText(t,X,Y); };
+  x.textAlign='center'; x.textBaseline='alphabetic';
+  let y=24; const al=(D.alerts||[])[0]; if(al){ const f=fitTxt(x,'⚠ '+al.t,940,60,800); ecrire('⚠ '+al.t,500,y+f,f,800,rouge); y+=f+26; }
+  const F=(D.facts||[]).filter(f=>f!==ct).slice(0,4); if(!F.length&&ct) F.push(ct);
+  if(!F.length){ const f=fitTxt(x,'Assurance, entretien : bientôt ici',940,64,700); ecrire('Assurance, entretien : bientôt ici',500,H/2+f/3,f,700,doux); }
+  const deux=F.length>1, rows=Math.ceil(F.length/(deux?2:1)), hL=(H-y-10)/Math.max(1,rows), colW=deux?480:960;
+  F.forEach(([a,b],i)=>{ const col=deux?i%2:0, row=deux?Math.floor(i/2):i, X=deux?(col?755:245):500, Y=y+row*hL;
+    if(deux&&col===1){ x.fillStyle=peint; x.globalAlpha=.55; x.fillRect(498,Y+18,5,hL-36); x.globalAlpha=1; }   // trait de séparation peint
+    let f1=fitTxt(x,String(a).toUpperCase(),colW-40,44,700); try{x.letterSpacing='4px';}catch(e){} ecrire(String(a).toUpperCase(),X,Y+hL*.36,f1,700,doux); try{x.letterSpacing='0px';}catch(e){}
+    const f2=fitTxt(x,String(b),colW-40,rows>1?92:120,800); ecrire(String(b),X,Y+hL*.36+f2+8,f2,800,peint); });
+  // usure légère de la peinture
+  x.globalCompositeOperation='destination-out'; for(let i=0;i<900;i++){ x.globalAlpha=Math.random()*.25; const r=Math.random()*3.2; x.beginPath(); x.arc(Math.random()*1000,Math.random()*H,r,0,7); x.fill(); }
+  x.globalAlpha=1; x.globalCompositeOperation='source-over'; pl.userData.t.needsUpdate=true; }
 
 /* ---------- TON TRAVAIL : la pointeuse, le panneau sécurité et la cheminée du four ---------- */
 const USN={};
@@ -1871,7 +1917,7 @@ function updateTrafic(dt){ const D5=ds5||GAR.remplace, bouge=!!(D5&&GARX.fin&&GA
   for(const c of TRAFIC){ if(c.z0===undefined) c.z0=c.o.position.z; if(c.cur===undefined) c.cur=c.v; let vt=c.v;
     // la DS5 sort ou rentre : la voiture de sa file freine et s'arrête avant elle ; si elle est déjà à sa hauteur, c'est la DS5 qui attend
     if(bouge&&Math.sign(c.z0)===Math.sign(GARX.fin.z)){ const ahead=(D5.position.x-c.x)*c.dir; if(ahead>4.6&&ahead<18) vt=ahead<7.5?0:c.v*Math.min(1,(ahead-7.5)/9); else if(Math.abs(ahead)<=4.6) GARX.bloque=true; }
-    c.cur+=(vt-c.cur)*Math.min(1,dt*2.4); c.x+=c.dir*c.cur*dt; if(c.x>50) c.x=-58; if(c.x<-58) c.x=50; c.o.position.x=c.x;
+    c.cur+=(vt-c.cur)*Math.min(1,dt*2.4); c.x+=c.dir*c.cur*dt; if(!c.o.userData.rouesOk){ c.o.userData.rouesOk=true; equiperRoues(c.o,'x'); } roulerRoues(c.o,dt,c.cur*dt); if(c.x>50) c.x=-58; if(c.x<-58) c.x=50; c.o.position.x=c.x;
     // la DS5 garée le long du trottoir : la voiture qui arrive se décale un peu pour la contourner
     let veut=0; if(GARX.fin&&GARX.surRue&&GARX.k>.97&&Math.abs(c.z0-GARX.zp)<2.2){ const devant=(GARX.fin.x-c.x)*c.dir; if(devant>-8&&devant<18) veut=1; }
     c.dz=(c.dz||0)+(veut-(c.dz||0))*Math.min(1,dt*1.4); c.o.position.z=c.z0-Math.sign(c.z0)*1.45*c.dz;
