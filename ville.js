@@ -767,6 +767,10 @@ paveM.map.repeat.set(1,1);
 function slab(x0,x1,z0,z1,y){const g=new THREE.BoxGeometry(x1-x0,y,z1-z0); const uv=g.attributes.uv; const p=g.attributes.position;
   for(let i=0;i<uv.count;i++){uv.setXY(i,(p.getX(i)+(x0+x1)/2)/2.4,(p.getZ(i)+(z0+z1)/2)/2.4);} const m=new THREE.Mesh(g,paveM); m.position.set((x0+x1)/2,y/2,(z0+z1)/2); m.receiveShadow=true; scene.add(m);}
 slab(-62,54,-7.0,-3.84,.15); slab(-62,54,3.84,7.0,.15); slab(-6,10,7.0,25.3,.15); slab(61.6,66,-17,17,.15);
+// parvis de la boutique Plenitude : la cour de l'énergie est posée sur un vrai sol pavé, relié à la rue de l'usine (avant : terrain vague)
+{ const x0=62,x1=95,z0=-39,z1=-17, g=new THREE.PlaneGeometry(x1-x0,z1-z0); g.rotateX(-Math.PI/2); const uv=g.attributes.uv,p=g.attributes.position;
+  for(let i=0;i<uv.count;i++) uv.setXY(i,(p.getX(i)+(x0+x1)/2)/2.4,(p.getZ(i)+(z0+z1)/2)/2.4);
+  const m=new THREE.Mesh(g,paveM); m.position.set((x0+x1)/2,.004,(z0+z1)/2); m.receiveShadow=true; m.name='Parvis_energie'; scene.add(m); }
 { const r2=new THREE.Mesh(new THREE.PlaneGeometry(8,80),road.material.clone()); r2.material.map=cobble.c.clone(); r2.material.normalMap=cobble.n.clone(); r2.material.map.repeat.set(2.7,26.7); r2.material.normalMap.repeat.set(2.7,26.7);
   r2.material.map.needsUpdate=r2.material.normalMap.needsUpdate=true; r2.rotation.x=-Math.PI/2; r2.position.set(58,.002,0); r2.receiveShadow=true; scene.add(r2); }
 const gshape=new THREE.Shape(); gshape.absarc(0,0,400,0,Math.PI*2,false);
@@ -1932,7 +1936,7 @@ function frame(){
   for(let k=0;k<16;k++){ if(Math.abs(me[k]-cm[k])>1e-5){ bouge=true; } cm[k]=me[k]; } if(bouge) REVEIL.t=_now;
   const actif=anim||CINE.on||TOUR||GARX.orbit||Math.abs(GARX.k-GARX.want)>.001||(_now-REVEIL.t)<3000;
   if(document.hidden){ REVEIL.dort=true; return; }
-  if(actif) requestAnimationFrame(frame); else REVEIL.id=setTimeout(()=>requestAnimationFrame(frame), document.hasFocus()?100:250);
+  if(actif) requestAnimationFrame(frame); else REVEIL.id=setTimeout(()=>requestAnimationFrame(frame), document.hasFocus()?33:250);
 }
 var REVEIL={t:performance.now(),id:0,dort:false};
 function reveiller(){ if(!REVEIL) return; REVEIL.t=performance.now(); if(REVEIL.dort){ REVEIL.dort=false; frame.t=performance.now(); requestAnimationFrame(frame); }
@@ -1975,7 +1979,13 @@ function updateTrafic(dt){ const D5=ds5||GAR.remplace, bouge=!!(D5&&GARX.fin&&GA
     let veut=0; if(GARX.fin&&GARX.surRue&&GARX.k>.97&&Math.abs(c.z0-GARX.zp)<2.2){ const devant=(GARX.fin.x-c.x)*c.dir; if(devant>-8&&devant<18) veut=1; }
     c.dz=(c.dz||0)+(veut-(c.dz||0))*Math.min(1,dt*1.4); c.o.position.z=c.z0-Math.sign(c.z0)*1.45*c.dz;
     // une voiture qui passerait collée à la caméra disparaît (elle ne bouche jamais la vue)
-    c.o.visible=camera.position.distanceTo(c.o.position)>5 || CINE.on; } }
+    // aux deux bouts de la rue, la voiture apparaît et s'efface en douceur (plus de voiture qui surgit ou disparaît d'un coup)
+    const a=Math.min(1,(50-c.x)/5,(c.x+58)/5); fondu(c.o,Math.max(0,a));
+    c.o.visible=a>.01 && (camera.position.distanceTo(c.o.position)>5 || CINE.on); } }
+function fondu(o,a){ if(!o.userData.fondu){ o.userData.fondu=[]; o.traverse(m=>{ if(!m.isMesh) return; m.material=Array.isArray(m.material)?m.material.map(x=>x.clone()):m.material.clone(); (Array.isArray(m.material)?m.material:[m.material]).forEach(x=>{ x.userData.op0=x.opacity; x.userData.tr0=x.transparent; o.userData.fondu.push(x); }); }); }
+  if(o.userData.a===a) return; o.userData.a=a;
+  for(const x of o.userData.fondu){ const t=a<.999||x.userData.tr0; if(x.transparent!==t){ x.transparent=t; x.needsUpdate=true; } x.opacity=x.userData.op0*a; x.depthWrite=a>.999||!x.userData.tr0; }
+  o.traverse(m=>{ if(m.isMesh) m.castShadow=a>.5; }); }
 const AJOUTS=/^(Voiture_\d+|M_ob\d+_feuilles|Marquage_sol|Jardinieres_|Colonne_Morris|Parasol_cafe)/;
 async function chargerVilleBlender(url){
   const draco=new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/');
