@@ -100,6 +100,20 @@ async function lireCompte(nav: Nav) {
   }
   for (const u of urls) { try { html += (await nav.go(u, { hx: true })).text; } catch { /* rien */ } }
   const seen = new Map<string, Rdv>();
+  // depuis novembre 2026, la page charge la liste à part, en JSON (à venir, puis archivés)
+  for (const [q, archive] of [["", false], ["?archives=1", true]] as const) {
+    try {
+      const r = await nav.go("/mon-compte/get-rendez-vous" + q, { headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" } });
+      for (const x of JSON.parse(r.text) as Record<string, any>[]) {
+        const dm = String(x.date_rdv ?? "").match(/(\d{2})\/(\d{2})\/(\d{4})/), hm = String(x.heure_rdv ?? "").match(/(\d{1,2}):(\d{2})/);
+        if (!dm || !hm || x.id == null) continue;
+        const pour = `${x.patient?.prenom ?? ""} ${x.patient?.nom ?? ""}`.replace(/\s+/g, " ").trim();
+        seen.set(String(x.id), { id: String(x.id), date: `${dm[3]}-${dm[2]}-${dm[1]}`, heure: `${hm[1].padStart(2, "0")}:${hm[2]}`,
+          patient: pour.replace(/^\(Dr[^)]*\)\s*/i, ""), pour, centre: /brotteaux/i.test(String(x.nom_centre ?? "")) ? "Lyon 6ème - Brotteaux" : "Villeurbanne",
+          statut: archive ? (/annul/i.test(String(x.statut ?? "")) ? "annule" : "passe") : "", annulable: !archive, justificatif: true });
+      }
+    } catch { /* ancienne page : les cartes HTML ci-dessous prennent le relais */ }
+  }
   for (const r of parseCartes(html)) if (!seen.has(r.id)) seen.set(r.id, r);
   return { rdv: [...seen.values()], html };
 }
@@ -164,7 +178,7 @@ async function sync(nav: Nav) {
   const stock = new Set((deja ?? []).map((f) => f.name));
   const auj = today();
   for (const r of rdv) {
-    r.statut = r.date >= auj ? "a_venir" : "passe";
+    if (!r.statut) r.statut = r.date >= auj ? "a_venir" : "passe";
     const nom = `${r.id}.pdf`;
     if (stock.has(nom)) { r.chemin = "medinlyon/" + nom; continue; }
     if (!r.justificatif) continue;
@@ -211,9 +225,20 @@ async function reserver(nav: Nav, b: Record<string, string>) {
   const fd = new URLSearchParams();
   for (const [k, v] of f.champs) fd.set(k, v);
   for (const [k, v] of Object.entries(p.data)) if (f.champs.has(k) && v) fd.set(k, v);
+  // depuis novembre 2026, le site ne met plus la fiche dans la liste : il la charge à part (/mon-compte/patients/<id>), comme sa propre page
+  try {
+    const r = await nav.go(`/mon-compte/patients/${patient}`, { headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" } });
+    const fiche = JSON.parse(r.text) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(fiche)) {
+      if (!f.champs.has(k) || v == null || v === "" || typeof v === "object") continue;
+      fd.set(k, k === "date_naissance" ? String(v).split("-").reverse().join("/") : String(v));
+    }
+  } catch { /* fiche illisible : on garde ce qu'on a, le contrôle ci-dessous s'en chargera */ }
   fd.set(f.selName, patient); fd.set("centre", centre); fd.set("date", date); fd.set("creneau", creneau);
   if (!fd.get("preference_medecin")) fd.set("preference_medecin", "Le premier médecin disponible");
   const manque = ["prenom", "nom", "date_naissance", "mobile", "email", "adresse", "code_postal", "ville"].filter((k) => !fd.get(k));
+  // mode essai : remplit le formulaire sans jamais l'envoyer (vérifie que le robot a tout ce qu'il faut)
+  if (b.essai === "1") return { ok: manque.length === 0, essai: true, manque, rempli: [...fd.keys()].filter((k) => fd.get(k)) };
   if (manque.length) {
     await trace("reserver", { manque, cabinet: structure(cab.text) });
     return { ok: false, message: "Il me manque des infos de la fiche patient (" + manque.join(", ") + "). Rien n'a été réservé." };
@@ -229,27 +254,12 @@ async function reserver(nav: Nav, b: Record<string, string>) {
 
 async function annuler(nav: Nav, id?: string) {
   if (!/^\d+$/.test(id ?? "")) return { ok: false, message: "Rendez-vous inconnu." };
-  const { rdv, html } = await lireCompte(nav);
-  if (!rdv.find((r) => r.id === id)) return { ok: false, message: "Je ne trouve plus ce rendez-vous : il est peut-être déjà annulé." };
-  const form = html.match(/<form[^>]*id="annuler_form"[\s\S]*?<\/form>/i)?.[0];
-  const carte = html.split(/(?=<div[^>]*id="rdv_n_\d+")/i).find((p) => p.includes(`rdv_n_${id}"`)) ?? "";
-  const bouton = (carte.match(/<(?:a|button)[^>]*>[^<]*annul[^<]*</i) ?? [""])[0];
-  let action = form ? attr(form.match(/<form[^>]*>/i)![0], "action") : null;
-  const fd = new URLSearchParams();
-  if (form) for (const tag of form.match(/<(input|textarea|select)[^>]*>/gi) ?? []) {
-    const n = attr(tag, "name"); if (!n) continue;
-    fd.set(n, /reason|raison|motif/i.test(n + (attr(tag, "id") ?? "")) ? "Empêchement" : (attr(tag, "value") ?? ""));
-  }
-  for (const [k, v] of [...fd]) if (/id|rdv|rendez/i.test(k) && !v) fd.set(k, id!);
-  const viaBouton = attr(bouton, "hx-post") ?? attr(bouton, "data-action") ?? attr(bouton, "data-url");
-  if ((!action || action === "#") && viaBouton?.startsWith("/")) action = viaBouton;
-  if (!action || action === "#") {
-    await trace("annuler", { bouton: bouton.replace(/\d{5,}/g, "ID"), compte: structure(html) });
-    return { ok: false, message: "Je n'ai pas encore trouvé comment annuler sur le site. Rien n'a changé." };
-  }
-  action = action.replace(/\{id\}|__id__|:id/gi, id!);
-  if (![...fd.values()].includes(id!) && !action.includes(id!)) fd.set("id", id!);
-  const r = await nav.go(action, { method: "POST", body: fd, headers: { "Content-Type": "application/x-www-form-urlencoded" }, hx: true });
+  const { rdv } = await lireCompte(nav);
+  const ce = rdv.find((r) => r.id === id);
+  if (!ce || ce.statut === "annule") return { ok: false, message: "Je ne trouve plus ce rendez-vous : il est peut-être déjà annulé." };
+  // le site annule par /mon-compte/rendezvous/<id>/annuler avec une raison (comme son bouton « Annuler »)
+  const fd = new FormData(); fd.append("raison", "Empêchement");
+  const r = await nav.go(`/mon-compte/rendezvous/${id}/annuler`, { method: "POST", body: fd });
   await sync(nav);
   const { data } = await admin().from("jarvis_items").select("data").eq("source", "medinlyon").eq("kind", "rdv").eq("label", "rdv " + id).maybeSingle();
   if ((data?.data as Rdv | undefined)?.statut !== "a_venir") return { ok: true, message: "Rendez-vous annulé." };
@@ -262,7 +272,11 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "methode" }, 405);
   // seul le propriétaire (la base le vérifie) ou le connecteur Jarvis (appel interne du serveur) peut lancer le robot
   const auth = req.headers.get("Authorization") ?? "";
-  const interne = auth === "Bearer " + Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  let interne = auth === "Bearer " + Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!interne && auth.startsWith("Bearer ")) {
+    const { data: c } = await admin().rpc("jarvis_get_secret", { p_name: "CRON_TOKEN" });
+    interne = typeof c === "string" && c.length > 20 && auth === "Bearer " + c;
+  }
   if (!interne) {
     const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
     const { data: owner } = await sb.rpc("jarvis_is_owner");
