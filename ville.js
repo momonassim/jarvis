@@ -950,7 +950,7 @@ const ORB=new THREE.Group(); ORB.position.set(2,11,16); scene.add(ORB);
   const rm=new THREE.MeshBasicMaterial({color:0xffe1b0,transparent:true,opacity:.8}); const r1=new THREE.Mesh(new THREE.TorusGeometry(1.35,.035,8,90),rm); r1.rotation.x=Math.PI/2.3; ORB.add(r1);
   const r2=new THREE.Mesh(new THREE.TorusGeometry(1.7,.025,8,90),rm); r2.rotation.x=Math.PI/1.8; r2.rotation.y=.6; ORB.add(r2); }
 let FOCUS=null;
-function flyTo(pos,tgt,fov){ const p0=camera.position.clone(), t0=controls.target.clone(); const dist=Math.hypot(pos.x-p0.x,pos.z-p0.z);
+function flyTo(pos,tgt,fov){ reveiller(); const p0=camera.position.clone(), t0=controls.target.clone(); const dist=Math.hypot(pos.x-p0.x,pos.z-p0.z);
   let ctrl=null; if(dist>16){ ctrl=p0.clone().lerp(pos,.5); ctrl.y=Math.max(p0.y,pos.y,24)+Math.min(14,dist*.12); }
   anim={p0,t0,f0:camera.fov,p:pos.clone(),t:tgt.clone(),f:fov,k:0,ctrl,spd:ctrl?.016:.026}; hideFor(pos,tgt); }
 let TOUR=null;   // petite visite guidée en cours (annulée dès que tu touches la ville)
@@ -1766,7 +1766,7 @@ function planCine(i){ const pl=CINE.plans[i]; CINE.i=i; CINE.t0=performance.now(
   const p0=poseCine(pl,0); hideFor(p0.E,p0.T); if(pl.S.arbre) pl.S.arbre.want=0;   // l'arbre filmé reste debout
   OBST.forEach(o=>{ o.k=o.want; o.done=false; });   // les arbres devant la caméra s'effacent dès le cut
   if(HK.cine) HK.cine({i,n:CINE.plans.length,sous_titre:pl.sous_titre||''}); }
-function lancerCine(plans,mode){ const P=(plans||[]).filter(Boolean).map(p=>({...p,duree:Math.max(1.5,Math.min(20,+p.duree||5))})); if(!P.length) return;
+function lancerCine(plans,mode){ reveiller(); const P=(plans||[]).filter(Boolean).map(p=>({...p,duree:Math.max(1.5,Math.min(20,+p.duree||5))})); if(!P.length) return;
   if(CINE.on&&mode==='enchainer'){ CINE.plans.push(...P); return; }
   CINE.plans=P; CINE.on=true; anim=null; FOCUS=null; TOUR=null; controls.enabled=false; filmPass.enabled=true; CINE.base=camera.fov; planCine(0); }
 function arreterCine(){ if(!CINE.on) return; CINE.on=false; controls.enabled=true; bokeh.enabled=false; CINE.fin=performance.now(); camera.fov=CINE.base||50; camera.updateProjectionMatrix();
@@ -1794,13 +1794,26 @@ function frame(){
     else camera.position.lerpVectors(anim.p0,anim.p,e); controls.target.lerpVectors(anim.t0,anim.t,e); camera.fov=anim.f0+(anim.f-anim.f0)*e; camera.updateProjectionMatrix(); if(anim.k>=1){ const cb=anim.then; anim=null; cb&&cb(); } }
   sky.position.copy(camera.position);
   shift+=(shiftGoal-shift)*.08; if(shift>.001) camera.setViewOffset(innerWidth,innerHeight,0,innerHeight*.2*shift,innerWidth,innerHeight); else camera.clearViewOffset();
-  if(!CINE.on) controls.update(); updateCine(); update3D(); composer.render(); if(HK.frame) HK.frame(); requestAnimationFrame(frame);
+  if(!CINE.on) controls.update(); updateCine(); update3D(); composer.render(); if(HK.frame) HK.frame();
+  // économie d'énergie : pleine vitesse quand ça bouge ou que tu touches, ralenti au repos, pause quand la fenêtre est cachée
+  const me=camera.matrixWorld.elements, cm=frame.cm||(frame.cm=new Float32Array(16)); let bouge=false;
+  for(let k=0;k<16;k++){ if(Math.abs(me[k]-cm[k])>1e-5){ bouge=true; } cm[k]=me[k]; } if(bouge) REVEIL.t=_now;
+  const actif=anim||CINE.on||TOUR||GARX.orbit||Math.abs(GARX.k-GARX.want)>.001||(_now-REVEIL.t)<3000;
+  if(document.hidden){ REVEIL.dort=true; return; }
+  if(actif) requestAnimationFrame(frame); else REVEIL.id=setTimeout(()=>requestAnimationFrame(frame), document.hasFocus()?100:250);
 }
+var REVEIL={t:performance.now(),id:0,dort:false};
+function reveiller(){ if(!REVEIL) return; REVEIL.t=performance.now(); if(REVEIL.dort){ REVEIL.dort=false; frame.t=performance.now(); requestAnimationFrame(frame); }
+  else if(REVEIL.id){ clearTimeout(REVEIL.id); REVEIL.id=0; requestAnimationFrame(frame); } }
+['pointerdown','pointermove','wheel','keydown','touchstart','focus'].forEach(ev=>addEventListener(ev,reveiller,{passive:true}));
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) reveiller(); });
+controls.addEventListener('change',reveiller);
 let shift=0, shiftGoal=0;
 frame();
+for(const k in window.VILLE){ const f=window.VILLE[k]; if(typeof f==='function') window.VILLE[k]=(...a)=>{ reveiller(); return f(...a); }; }
 window.VILLE.ready=true;
 
-function setDonnees(list){ for(const d of list){ const old=DATA[d.id]; DATA[d.id]=d; (PANELS[d.id]||[]).forEach(P=>P.last=-1);
+function setDonnees(list){ reveiller(); for(const d of list){ const old=DATA[d.id]; DATA[d.id]=d; (PANELS[d.id]||[]).forEach(P=>P.last=-1);
     const p=PLACES.find(q=>q.id===d.id); if(p&&p.mast&&(!old||old.status!==d.status||old.urgent!==d.urgent)){ const {t,ar}=plateTex(p,d); const ph=p.mast.R*.52*(d.status?178/112:1);
       p.mast.plate.children.forEach(pl=>{ pl.material.map&&pl.material.map.dispose(); pl.material.map=t; pl.material.needsUpdate=true; pl.geometry.dispose(); pl.geometry=new THREE.PlaneGeometry(ph*ar,ph); }); } } if(bankWall) bankWall.userData.last=-1; }
 function orbit(a){ const s=new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)); let th=s.theta,r=s.radius,ph=s.phi;
@@ -1877,10 +1890,12 @@ async function chargerVoiture(url){
   car.position.copy(DS5_SPOT.p); car.rotation.y=DS5_SPOT.rot+Math.PI/2; car.name='DS5';
   scene.add(car); ds5=car; return true;
 }
-return { camera, controls, renderer, scene, ouvrir, fermer, setDonnees, orbit, chargerVoiture, cinema:lancerCine, cinemaStop:arreterCine, cinemaEnCours:()=>CINE.on,
+const API={ camera, controls, renderer, scene, ouvrir, fermer, setDonnees, orbit, chargerVoiture, cinema:lancerCine, cinemaStop:arreterCine, cinemaEnCours:()=>CINE.on,
   ensemble(){ fermer(); const [p,t,f]=VIEWS.ciel; flyTo(p,t,f); },
   setNuit(n){ setTime(n?2:0); }, decalage(k){ shiftGoal=k; },
   arreteVol(){ anim=null; },
   instantane(){ if(anim) anim.k=.999; OBST.forEach(o=>{o.k=o.want;o.done=false;}); if(SEL&&SEL.halos) SEL.halos.forEach(m=>{ m.userData.U.uK.value=1; m.visible=true; }); if(SEL){ openK[SEL.id]=.999; if(SEL.id==='banque') bankK=1; } }, icone:id=>svg(id), couleur:id=>(PLACES.find(q=>q.id===id)||{}).c, ids:PLACES.map(p=>p.id) };
+for(const k in API){ const f=API[k]; if(typeof f==='function') API[k]=(...a)=>{ reveiller(); return f(...a); }; }
+return API;
 
 }
