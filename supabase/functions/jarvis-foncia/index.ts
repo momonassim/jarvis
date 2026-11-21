@@ -101,6 +101,8 @@ const Q_DEMANDES = `query getDashboardTickets($accountUuid: EncodedID!) { ticket
 const CATEGORIES: Record<string, string> = { dueNotice: "Avis d’échéance et quittances", insurance: "Assurance", diagnosesGl: "Diagnostics", regularization_Rental_Management: "Régularisation des charges", rentReview: "Révision de loyer" };
 const jour = (s?: string | null) => (s ? String(s).slice(0, 10) : null);
 const frDate = (s?: string | null) => { const d = jour(s); return d ? d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4) : ""; };
+// Foncia envoie tous les montants en centimes : on les remet en euros.
+const cts = (v: unknown) => Math.round(Number(v ?? 0)) / 100;
 const euros = (n: number) => (n < 0 ? "-" : "+") + Math.abs(n).toFixed(2).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " €";
 const propreNom = (s: string) => (s || "document").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/_+/g, "_").slice(0, 120);
 const typeDoc = (nom: string, cat: string) => /quittance/i.test(nom) ? "Quittance de loyer" : /avis.?d.?[ée]ch[ée]ance/i.test(nom) ? "Avis d'échéance loyer" : /r[ée]gularisation/i.test(nom) ? "Régularisation des charges locatives" : /r[ée]vision/i.test(nom) ? "Révision de loyer" : /diagnostic/i.test(nom) ? "Diagnostics gl" : /assur/i.test(nom) ? "Assurance locataires" : (CATEGORIES[cat] ?? cat);
@@ -177,7 +179,7 @@ async function synchroniser(at: string) {
   await essayer("solde", async () => {
     const s = (await gql(at, Q_SOLDE, { accountUuid: uuid }))?.account?.accounting;
     const v = s?.currentBalance?.value; if (v == null) return 0;
-    const n = Number(v);
+    const n = cts(v);
     lignes.push(L("compte", "Solde", null, n, { solde: Math.abs(n).toFixed(2).replace(".", ",") }));
     return 1;
   });
@@ -185,7 +187,7 @@ async function synchroniser(at: string) {
   await essayer("operation", async () => {
     const ns = await toutesPages(at, Q_LIGNES, uuid, (d) => d?.account?.accounting?.lines);
     for (const n of ns) {
-      const v = Number(n.amount?.value ?? 0), signe = n.amount?.__typename === "Credit" ? 1 : -1, m = signe * Math.abs(v);
+      const v = cts(n.amount?.value), signe = n.amount?.__typename === "Credit" ? 1 : -1, m = signe * Math.abs(v);
       lignes.push(L("operation", n.label, jour(n.valueDate ?? n.dueDate), m, { date: frDate(n.valueDate ?? n.dueDate), libelle: n.label, montant: euros(m) }));
     }
     return ns.length;
@@ -194,7 +196,7 @@ async function synchroniser(at: string) {
   await essayer("paiement", async () => {
     const ns = await toutesPages(at, Q_PAIEMENTS, uuid, (d) => d?.account?.accounting?.payments);
     for (const n of ns) {
-      const m = Math.abs(Number(n.amount?.value ?? 0));
+      const m = Math.abs(cts(n.amount?.value));
       lignes.push(L("paiement", n.motive || "Paiement", jour(n.instructionDate ?? n.createdAt), m, { date: frDate(n.instructionDate ?? n.createdAt), moyen: n.motive || "Paiement", montant: euros(m), statut: n.status, auto: !!n.isAuto }));
     }
     return ns.length;

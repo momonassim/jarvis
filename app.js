@@ -145,6 +145,10 @@ $("lbPrev").addEventListener("click", () => pas(-1));
 $("lbNext").addEventListener("click", () => pas(1));
 $("lbMore").addEventListener("click", openDetails);
 $("lbClose").addEventListener("click", () => { deselect(); });
+// la « sorte » d'un papier : ce qui précède « · » dans son titre, sans l'année (« Quittance · octobre 2026 » → « Quittance »)
+function sorteDe(d) { if (d.alerteId || d.future || d.lines && !d.path && !/ · /.test(d.t)) return "#" + d.t;
+  return (d.g || d.t.split(" · ")[0]).replace(/\s*\d{4}(\s*[-–]\s*\d{4})?$/, "").trim(); }
+const pluriel = s => s.replace(/^(\S+?)(?<![sxz])(?=\s|$)/, "$1s");
 function renderSheet(p) {
   const box = $("pDocs"); box.innerHTML = ""; const docs = p.docs || [];
   if (p.id === "usine" && (p.semaine || []).length) {   // la semaine et les compteurs (en jours, jamais d’argent)
@@ -162,14 +166,33 @@ function renderSheet(p) {
     box.append(w);
   }
   if (docs.length > 6) { const q = document.createElement("input"); q.className = "dsearch"; q.type = "search"; q.placeholder = "Chercher un papier (ex. octobre, quittance)";
-    q.addEventListener("input", () => { const v = q.value.trim().toLowerCase(); box.querySelectorAll(".doc").forEach(b => b.hidden = v && !b.textContent.toLowerCase().includes(v)); }); box.append(q); }
+    q.addEventListener("input", () => { const v = q.value.trim().toLowerCase();
+      // en recherche, on ouvre les dossiers qui contiennent un papier trouvé ; sinon on les referme
+      box.querySelectorAll(".dgrp").forEach(g => { const hit = v && [...g.querySelectorAll(".sub")].some(b => b.textContent.toLowerCase().includes(v));
+        g.classList.toggle("open", !!hit); g.querySelector(".fold").hidden = v && !hit && !g.querySelector(".fold").textContent.toLowerCase().includes(v); });
+      box.querySelectorAll(".doc.sub").forEach(b => b.hidden = v && !b.textContent.toLowerCase().includes(v));
+      box.querySelectorAll(".doc:not(.sub):not(.fold)").forEach(b => b.hidden = v && !b.textContent.toLowerCase().includes(v)); }); box.append(q); }
   const dh = document.createElement("div"); dh.className = "dh"; dh.innerHTML = "<b>Papiers rangés</b><span></span>";
   dh.querySelector("span").textContent = docs.length ? docs.length + (docs.length > 1 ? " papiers" : " papier") : ""; box.append(dh);
   if (!docs.length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Rien pour l’instant"; box.append(e); }
-  docs.forEach(d => { const b = document.createElement("button"); b.className = "doc" + (d.future ? " soon" : "");
+  // Les papiers de la même sorte (quittances, avis d'échéance, factures…) sont rangés sous une seule ligne qu'on déroule d'un appui.
+  const ligne = (d, sub) => { const b = document.createElement("button"); b.className = "doc" + (d.future ? " soon" : "") + (sub ? " sub" : "");
     b.innerHTML = '<span class="pg"></span><span class="dt"><b></b><span></span></span><span class="dv"></span><span class="chev">›</span>';
     b.querySelector(".dt b").textContent = d.t; b.querySelector(".dt span").textContent = d.d; b.querySelector(".dv").textContent = d.v || "";
-    b.addEventListener("click", () => openDoc(p, d)); box.append(b); });
+    b.addEventListener("click", () => openDoc(p, d)); return b; };
+  const grp = new Map(); docs.forEach(d => { const k = sorteDe(d); if (!grp.has(k)) grp.set(k, []); grp.get(k).push(d); });
+  const faits = new Set();
+  docs.forEach(d => { const k = sorteDe(d), l = grp.get(k);
+    if (!k.startsWith("#") && l.length > 1) { if (faits.has(k)) return; faits.add(k);
+      const tri = [...l].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      const g = document.createElement("div"); g.className = "dgrp";
+      const f = document.createElement("button"); f.className = "doc fold";
+      f.innerHTML = '<span class="pg stack"></span><span class="dt"><b></b><span></span></span><span class="dv"></span><span class="chev">›</span>';
+      f.querySelector(".dt b").textContent = pluriel(k); f.querySelector(".dt span").textContent = "Le plus récent · " + (tri[0].t.split(" · ")[1] || tri[0].d || "");
+      f.querySelector(".dv").textContent = l.length;
+      const in_ = document.createElement("div"); in_.className = "dgin"; tri.forEach(x => in_.append(ligne(x, true)));
+      f.addEventListener("click", () => g.classList.toggle("open")); g.append(f, in_); box.append(g); return; }
+    box.append(ligne(d)); });
   $("pNote").textContent = p.live || "";
   $("card").scrollTop = 0;
   $("card").style.setProperty("--c", p.color);
@@ -588,7 +611,16 @@ function applyOutlook(rows) {
 function applyNotes(rows) {
   rows.filter(r => r.kind === "note" && r.data && byId[r.data.lieu])
     .sort((a, b) => (a.data.titre || "").localeCompare(b.data.titre || ""))
-    .forEach(r => { const p = byId[r.data.lieu]; p.facts = [[r.data.titre, r.data.texte], ...(p.facts || [])];
+    .forEach(r => { const p = byId[r.data.lieu];
+      // un achat régulier (ex. boîte Green Vape) : une ligne courte « à racheter vers le … », le détail dans les papiers
+      const rach = (r.data.texte || "").match(/prochain achat vers le (\d{2}\/\d{2})/i);
+      if (rach || /^achats? r[ée]guliers?/i.test(r.data.titre || "")) { const t = (r.data.titre || "Achat régulier").replace(/^achats? r[ée]guliers?\s*[—–-]\s*/i, "");
+        const nom = t.charAt(0).toUpperCase() + t.slice(1);
+        p.facts = [[nom, rach ? "À racheter vers le " + rach[1] : "Suivi"], ...(p.facts || [])];
+        p.docs = [{ t: "Achat régulier · " + nom, d: rach ? "À racheter vers le " + rach[1] : "Suivi", v: "", where: "Noté par Jarvis",
+          lines: (r.data.texte || "").split(/(?<=\.)\s+/).filter(Boolean).map((x, i) => [i ? "" : "Où on en est", x]) }, ...(p.docs || [])];
+        return; }
+      p.facts = [[r.data.titre, r.data.texte], ...(p.facts || [])];
       // une note qui parle de salaire ou de solde reste cachée, comme le reste
       if (ARGENT.test(r.data.titre) && /€/.test(r.data.texte || "")) cacheArgent(p); });
 }
