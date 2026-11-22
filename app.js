@@ -188,7 +188,7 @@ function renderSheet(p) {
       const g = document.createElement("div"); g.className = "dgrp";
       const f = document.createElement("button"); f.className = "doc fold";
       f.innerHTML = '<span class="pg stack"></span><span class="dt"><b></b><span></span></span><span class="dv"></span><span class="chev">›</span>';
-      f.querySelector(".dt b").textContent = pluriel(k); f.querySelector(".dt span").textContent = "Le plus récent · " + (tri[0].t.split(" · ")[1] || tri[0].d || "");
+      f.querySelector(".dt b").textContent = pluriel(k); f.querySelector(".dt span").textContent = (/^Chantier/.test(k) ? "Le plus proche · " : "Le plus récent · ") + (tri[0].t.split(" · ")[1] || tri[0].d || "");
       f.querySelector(".dv").textContent = l.length;
       const in_ = document.createElement("div"); in_.className = "dgin"; tri.forEach(x => in_.append(ligne(x, true)));
       f.addEventListener("click", () => g.classList.toggle("open")); g.append(f, in_); box.append(g); return; }
@@ -225,7 +225,7 @@ async function openDoc(p, d) {
   const pdf = $("dPdf"), x = $("dX");
   pdf.hidden = true; x.hidden = true; x.textContent = "Annuler ce rendez-vous"; x.dataset.step = "";
   if (d.tel) { pdf.hidden = false; pdf.href = "tel:" + d.tel.replace(/\s/g, ""); pdf.textContent = "Appeler " + d.tel; pdf.removeAttribute("target"); }
-  if (d.url) { pdf.hidden = false; pdf.href = d.url; pdf.textContent = "Ouvrir le mail dans Outlook"; pdf.target = "_blank"; pdf.rel = "noopener"; }
+  if (d.url) { pdf.hidden = false; pdf.href = d.url; pdf.textContent = d.urlTxt || "Ouvrir le mail dans Outlook"; pdf.target = "_blank"; pdf.rel = "noopener"; }
   if (d.path) {
     pdf.hidden = false; pdf.textContent = "Je prépare le PDF…"; pdf.removeAttribute("href"); pdf.classList.add("wait"); pdf.target = "_blank";
     const { data, error } = await sb.storage.from("papiers").createSignedUrl(d.path, 600);
@@ -628,6 +628,29 @@ function applyNotes(rows) {
       // une note qui parle de salaire ou de solde reste cachée, comme le reste
       if (ARGENT.test(r.data.titre) && /€/.test(r.data.texte || "")) cacheArgent(p); });
 }
+/* ---------- Dehors : carburant, chantiers (sources publiques, relues chaque heure par Supabase) ----------
+   Rappels de produits : ils arrivent comme des alertes (lieu en rouge), rien à faire ici. */
+const virg = (n, k = 3) => Number(n).toFixed(k).replace(".", ",");
+const jm = d => d ? d.slice(8, 10) + "/" + d.slice(5, 7) : "";
+function applyDehors(rows) {
+  const c = rows.find(r => r.kind === "carburant"), st = (c && c.data && c.data.stations) || [];
+  if (st.length) { const g = byId.garage, b = st[0];
+    g.facts = [["Gazole le moins cher", `${virg(b.prix)} € · ${b.ville} · ${virg(b.d, 1)} km`], ...(g.facts || [])];
+    g.docs = [{ t: "Gazole le moins cher près de chez toi", d: "Prix officiels · lus le " + quand(c.data.lu_le), v: virg(b.prix) + " €", where: "Prix des carburants (État)",
+      lines: [...st.map((s, i) => [i ? `${i + 1}ᵉ` : "Le moins cher", `${virg(s.prix)} € · ${s.adresse}, ${s.ville} · ${virg(s.d, 1)} km${s.auto ? " · 24h/24" : ""}`]),
+        ["Prix moyen du coin", virg(c.data.moyenne) + " € (" + c.data.nb + " stations)"]],
+      url: `https://waze.com/ul?ll=${b.lat},${b.lon}&navigate=yes`, urlTxt: "Y aller avec Waze" }, ...(g.docs || [])]; }
+  const ch = rows.find(r => r.kind === "chantiers"), L = (ch && ch.data && ch.data.liste) || [];
+  [["home", "maison", "chez toi"], ["usine", "usine", "de l’usine"]].forEach(([id, lieu, ou]) => {
+    const l = L.filter(x => x.lieu === lieu); if (!l.length) return; const p = byId[id], x = l[0];
+    const quandTxt = x.en_cours ? "jusqu’au " + jm(x.fin) : "à partir du " + jm(x.debut);
+    p.facts = [[l.length > 1 ? `Travaux près ${id === "home" ? "de " : ""}${ou} (${l.length})` : `Travaux près ${id === "home" ? "de " : ""}${ou}`, `${x.rue} · ${(x.gene || "gêne").toLowerCase()} ${quandTxt}`], ...(p.facts || [])];
+    p.docs = [...l.map(y => ({ t: "Chantier · " + y.rue, d: y.en_cours ? "En cours, jusqu’au " + jm(y.fin) : "Du " + jm(y.debut) + " au " + jm(y.fin), v: y.fort ? "Bloquant" : "",
+      g: "Chantier près " + (id === "home" ? "de chez toi" : "de l’usine"), ts: -y.m,
+      where: "Grand Lyon (données officielles)", lines: [["Où", [y.ou, y.commune].filter(Boolean).join(", ") || y.rue], ["Gêne", y.gene || "—"], ["Distance", y.m + " m " + ou],
+        ["Dates", "du " + frd(y.debut) + " au " + frd(y.fin)]] })), ...(p.docs || [])];
+  });
+}
 let loading = null;
 async function loadAll() {
   if (loading) return loading;
@@ -648,6 +671,7 @@ async function loadAll() {
     applyMails(rows.filter(r => r.source === "mails"));
     applyOutlook(rows.filter(r => r.source === "outlook"));
     applyNotes(rows.filter(r => r.source === "jarvis"));
+    applyDehors(rows.filter(r => r.source === "dehors"));
     PLACES.forEach(p => {
       if (p.status === "…") { p.status = "À brancher"; p.say = "Je n’ai encore rien pour ce lieu. Dès qu’une source est branchée, je le remplis."; p.live = "Pas encore branché"; }
       p.say = nb(p.say); p.status = nb(p.status); });
