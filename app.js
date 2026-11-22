@@ -401,7 +401,11 @@ function applyFoncia(rows) {
   if (lots.length) d.push({ t: "Ton logement", d: `${lots.length} lots`, v: "", where: "MyFoncia", lines: lots.map(l => [l.label, l.data?.tantiemes || ""]) });
   if (ops.length) d.push({ t: "Comptabilité", d: `${ops.length} opérations`, v: loyer ? eur(loyer) : "", where: "MyFoncia", lines: ops.slice(0, 10).map(r => [frd(r.date) + " · " + r.label.toLowerCase().replace(/^./, c => c.toUpperCase()).slice(0, 34), (Number(r.amount) > 0 ? "+" : "") + eur(r.amount)]) });
   by("intervention").forEach(r => d.push({ t: "Intervention", d: frd(r.date), v: r.data?.statut || "", where: "MyFoncia", lines: [["Objet", r.label.toLowerCase().replace(/^./, c => c.toUpperCase())], ["Statut", r.data?.statut || "—"]] }));
-  docs.forEach(r => d.push({ ts: (() => { const m = (r.data?.ajoute_le || "").match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0; })(), t: nice(r.label, r.data?.categorie).slice(0, 60), d: "Ajouté le " + (r.data?.ajoute_le || "—"), v: "PDF", where: "Jarvis › papiers › Foncia",
+  // date du papier : le mois qu'il couvre (« du 01 10 2026… », « AS_20231001… »), sinon le jour où Foncia l'a ajouté
+  const tsDoc = r => { const l = r.label || "", p = l.match(/(\d{2})[ _-](\d{2})[ _-](\d{4})/) || l.match(/^A[SP]_(\d{4})(\d{2})(\d{2})/);
+    if (p) return /^A[SP]_/.test(l) ? new Date(+p[1], +p[2] - 1, +p[3]).getTime() : new Date(+p[3], +p[2] - 1, +p[1]).getTime();
+    const m = (r.data?.ajoute_le || "").match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : 0; };
+  docs.forEach(r => d.push({ ts: tsDoc(r), t: nice(r.label, r.data?.categorie).slice(0, 60), d: "Ajouté le " + (r.data?.ajoute_le || "—"), v: "PDF", where: "Jarvis › papiers › Foncia",
     lines: [["Catégorie", r.data?.categorie || "—"], ["Ajouté le", r.data?.ajoute_le || "—"]], path: r.data?.path ? "foncia/" + r.data.path : null }));
   h.docs = [...d, ...(h.macDocs || [])]; h.live = stamp(rows, "relu par ton iPhone");
   cacheArgent(h);

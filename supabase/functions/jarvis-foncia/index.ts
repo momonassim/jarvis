@@ -222,7 +222,11 @@ async function synchroniser(at: string) {
 
   await essayer("contact", async () => {
     const m = (await gql(at, Q_GESTIONNAIRE, { uuid }))?.account?.manager; if (!m) return 0;
-    lignes.push(L("contact", "Gestionnaire", null, null, { nom: [m.firstName, m.lastName].filter(Boolean).join(" "), agence: m.branch?.commercialName ?? "", email: m.email ?? "" }));
+    // Foncia ne renvoie ici ni l'adresse ni le téléphone de l'agence : on garde ceux déjà rangés au lieu de les effacer.
+    const { data: avant } = await admin.from("jarvis_items").select("data").eq("source", "foncia").eq("kind", "contact").eq("label", "Gestionnaire").maybeSingle();
+    const neuf: Record<string, unknown> = { nom: [m.firstName, m.lastName].filter(Boolean).join(" "), agence: m.branch?.commercialName ?? "", email: m.email ?? "" };
+    for (const k of Object.keys(neuf)) if (!neuf[k]) delete neuf[k];
+    lignes.push(L("contact", "Gestionnaire", null, null, { ...((avant?.data as Record<string, unknown>) ?? {}), ...neuf }));
     return 1;
   });
 
