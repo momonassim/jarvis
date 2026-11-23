@@ -3,7 +3,6 @@
    Aucune donnée personnelle ici : tout arrive de Supabase
    après connexion, et seul le propriétaire peut les lire.
    ========================================================= */
-import { creerVille } from "./ville.js?v=ville14";
 import { createClient } from "@supabase/supabase-js";
 
 const SB_URL = "https://uaprtibscyepsabyqcyl.supabase.co";
@@ -53,7 +52,10 @@ const canvas = $("c");
 let viewShiftGoal = 0, userMoved = false, V = null;
 // les polices des plaques et des panneaux 3D doivent être prêtes avant de dessiner la ville (2 s au plus)
 await Promise.race([Promise.all(["700 64px 'Cormorant Garamond'", "700 40px 'Plus Jakarta Sans'", "600 40px 'Plus Jakarta Sans'", "800 40px 'Plus Jakarta Sans'"].map(f => document.fonts.load(f))).catch(() => {}), new Promise(r => setTimeout(r, 2000))]);
-V = await creerVille(canvas, {
+// La vue : la vraie carte de ton quartier (par défaut) ou l'ancienne ville, remise d'un appui dans Réglages
+const VUE = (() => { try { return localStorage.getItem("jarvis_vue") === "ville" ? "ville" : "carte"; } catch (_) { return "carte"; } })();
+const appeler = async (nom, body) => { const { data, error } = await sb.functions.invoke(nom, { body }); if (error) throw error; return data; };
+const HOOKS = {
   pick: id => { userMoved = true; if (id === "jarvis") openTalk(null); else if (byId[id]) select(byId[id]); },
   action: (id, a) => { userMoved = true; if (a === "rdv") { openBook(); return; }
     const p = byId[id]; if (!p) return; if (S.sel !== p) select(p);
@@ -68,7 +70,16 @@ V = await creerVille(canvas, {
   cine: e => { document.body.classList.toggle("cine", !!e); const st = $("cineSub");
     if (e) { st.textContent = e.sous_titre || ""; st.classList.toggle("on", !!e.sous_titre); } else { st.classList.remove("on"); overview(); } },
   frame: () => V && V.decalage(viewShiftGoal),
-});
+};
+V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
+  : await (await import("./carte.js?v=carte1")).creerCarte(canvas, HOOKS, { fn: appeler });
+document.body.classList.toggle("vuecarte", VUE === "carte");
+if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
+// sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)
+if (V.quartier && $("quart")) { const q = $("quart"), travail = V.lieu !== "usine";
+  q.hidden = false; q.setAttribute("aria-label", travail ? "Voir le quartier de ton travail" : "Revenir chez toi");
+  q.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (travail ? '<path d="M3 20V11l5 3v-3l5 3v-3l5 3V4h3v16z"/><path d="M3 20h18"/>' : '<path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/>') + "</svg>";
+  q.addEventListener("click", () => V.quartier()); }
 V.controls.addEventListener("start", () => { userMoved = true; });
 PLACES.forEach(p => { p.color = V.couleur(p.id) || p.color; });
 const icone = (el, p) => { el.innerHTML = V.icone(p.id); el.classList.add("svgic"); };
@@ -1068,6 +1079,15 @@ const REGLAGES = [
   { name: "GRANDLYON_PASSWORD", label: "TCL (Data Grand Lyon) · mot de passe", help: "", type: "password", ph: "ton mot de passe Data Grand Lyon" },
   { name: "MS_CLIENT_SECRET", label: "Outlook · secret de l’application", help: "La « valeur » du secret client créé dans Microsoft Entra (application Jarvis › Certificats et secrets). Elle sert seulement à lire tes mails.", type: "password", ph: "valeur du secret Microsoft" },
 ];
+/* ---------- La vue de la ville : la vraie carte, ou l'ancienne ville (gardée, remise d'un appui) ---------- */
+function blocVue() {
+  const c = document.createElement("div"); c.className = "set";
+  c.innerHTML = '<div class="stop"><b>Vue de la ville</b><span class="ok"></span></div><div class="row2"><button class="btn" type="button" data-v="carte">Vraie carte</button><button class="btn" type="button" data-v="ville">Ancienne ville</button></div><small>La vraie carte montre ton quartier en vrai (bus en direct, chantiers, tes lieux aux vraies adresses). L’ancienne ville reste disponible ici.</small>';
+  c.querySelector(".stop span").textContent = VUE === "carte" ? "Vraie carte" : "Ancienne ville";
+  c.querySelectorAll("[data-v]").forEach(b => { b.classList.add(b.dataset.v === VUE ? "main" : "soft");
+    b.addEventListener("click", () => { if (b.dataset.v === VUE) return; try { localStorage.setItem("jarvis_vue", b.dataset.v); } catch (_) {} location.reload(); }); });
+  return c;
+}
 let setOpen = false;
 async function openSettings() {
   deselect(); closeTalk(true); closeBook(true);
@@ -1096,6 +1116,7 @@ async function openSettings() {
     inp.addEventListener("keydown", e => { if (e.key === "Enter") b.click(); });
     o.append(c);
   });
+  o.append(blocVue());
   o.append(blocOutlook());
   o.append(blocPapiers());
   o.append(blocVoix());
@@ -1292,6 +1313,7 @@ async function enter(session) {
   const { data: ok } = await sb.rpc("jarvis_is_owner");
   if (ok !== true) { showGate(session.user && !session.user.email_confirmed_at ? "Confirme d’abord ton e-mail (lien reçu), puis reviens ici." : "Cette ville est privée."); return; }
   gate.hidden = true;
+  if (V.demarrer) V.demarrer().then(() => { if (!userMoved && !S.sel) overview(); }).catch(e => toast("Ta carte ne se charge pas : " + (e && e.message || e)));
   chargerDS5(); // la voiture se charge tout de suite, sans attendre le reste
   await loadAll(); goLive(); goTelecommande();
   // Le bandeau du haut a pris sa vraie taille : on recadre si tu n’as encore rien touché

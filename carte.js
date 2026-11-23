@@ -7,13 +7,32 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
-const $ = id => document.getElementById(id);
-const TEST = window.__JARVIS_TEST || null;
+
+const ICON={
+ home:'<path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/>',
+ garage:'<path d="M3.5 15.5v-3l2.2-4.2h12.6l2.2 4.2v3z"/><path d="M3.5 12.5h17"/><circle cx="7.5" cy="16.5" r="1.6"/><circle cx="16.5" cy="16.5" r="1.6"/>',
+ usine:'<path d="M3 20V11l5 3v-3l5 3v-3l5 3V4h3v16z"/><path d="M3 20h18"/>',
+ impots:'<path d="M3.5 9L12 4.5 20.5 9z"/><path d="M6 9.5v7M10 9.5v7M14 9.5v7M18 9.5v7"/><path d="M4.5 17h15M3.5 20h17"/>',
+ clinique:'<path d="M9.5 4h5v5.5H20v5h-5.5V20h-5v-5.5H4v-5h5.5z"/>',
+ mairie:'<rect x="3" y="6" width="18" height="12" rx="1.5"/><circle cx="8.5" cy="11" r="1.8"/><path d="M5.8 15.3c.8-1.4 4.6-1.4 5.4 0"/><path d="M14 10h4.5M14 13h3"/>',
+ banque:'<circle cx="12" cy="12" r="8"/><path d="M15 9.4a3.6 3.6 0 1 0 0 5.2"/><path d="M8 11h5M8 13h5"/>',
+ medecin:'<path d="M4 11h10.5a5.5 5.5 0 0 1-5.5 5.5H8.5A4.5 4.5 0 0 1 4 12z"/><path d="M14.5 11V5.5A5.5 5.5 0 0 1 20 11z"/><circle cx="7.5" cy="19.5" r="1.3"/><circle cx="14" cy="19.5" r="1.3"/>',
+ orange:'<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
+ energie:'<path d="M13 3L5.5 13.5h5.5L10 21l8-11h-5.5z"/>',
+};
+const svg=id=>`<svg viewBox="0 0 24 24">${ICON[id]}</svg>`;
+
+export async function creerCarte(canvas, HK = null, OPT = {}) {
+// un élément de la page d'essai absent dans l'app : on renvoie une boîte vide (cachée), jamais d'erreur
+const $ = id => document.getElementById(id) || Object.assign(document.createElement("div"), { hidden: true });
+const APP = !!HK;   // dans l'app Jarvis : ses fiches et ses boutons ; sur la page d'essai : les siens
+const TEST = OPT.test || window.__JARVIS_TEST || null;
 const LIEU = /[?&]lieu=usine/.test(location.search) ? "usine" : "maison";   // chez toi, ou ton travail (même carte, autre quartier)          // seulement pour les essais hors ligne
 
 /* ---------- accès aux données (même connexion que l'app Jarvis) ---------- */
-let fn;
-if (TEST) fn = async (nom, body) => TEST[nom](body);
+let fn = OPT.fn || null;
+if (fn) { /* fourni par l'app (déjà connectée) */ }
+else if (TEST) fn = async (nom, body) => TEST[nom](body);
 else {
   const { createClient } = await import("@supabase/supabase-js");
   const sb = createClient("https://uaprtibscyepsabyqcyl.supabase.co", "sb_publishable_qjJRK71zrG1ETae5SBY4Dg_ofD8oeYl", { auth: { persistSession: true, autoRefreshToken: true } });
@@ -24,7 +43,6 @@ else {
 
 /* ---------- la scène : même ambiance que la ville (crème, blanc, ombres douces) ---------- */
 const FOND = 0xebe6dc;
-const canvas = $("c");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: !!TEST });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1199,7 +1217,7 @@ function poserLieux() {
   canvas.addEventListener("pointerdown", e => { d0 = [e.clientX, e.clientY]; });
   canvas.addEventListener("pointerup", e => { if (!d0 || Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 8) return;
     v.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(v, camera); ray.camera = camera;
-    const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) { choisirLieu(hit.object.userData.pin); dernier = 0; return; }
+    const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) { const P = hit.object.userData.pin; if (APP) HK.pick(P.L.id); else choisirLieu(P); dernier = 0; return; }
     const bus = [...BUS.values()].find(o => ray.intersectObject(o.m, true).length); if (bus) { suivreBus(bus); dernier = 0; return; }
     const now = performance.now();
     if (now - dernier < 320) { const p = new THREE.Vector3(); if (ray.ray.intersectPlane(plan, p)) approcher(p); dernier = 0; return; }   // double toucher
@@ -1209,8 +1227,8 @@ function approcher(p) {   // on se rapproche du point touché, en gardant l'angl
   const dir = camera.position.clone().sub(controls.target), d = Math.max(controls.minDistance + 4, dir.length() * 0.45);
   voler(p.clone().add(dir.normalize().multiplyScalar(d)), p);
 }
-function choisirLieu(P) {
-  const L = P.L; if (L.bord && L.aller) { allerA(L.aller); return; }
+function choisirLieu(P, naviguer = true) {
+  const L = P.L; if (L.bord && L.aller && naviguer) { allerA(L.aller); return; }
   SUIVI = null;
   // comme dans ta ville : on lève d'abord les yeux vers le lieu (vue haute), puis on descend de trois quarts, et la caméra tourne doucement autour
   const R = Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5, cible = new THREE.Vector3(P.x, P.h * 0.5, -P.y);
@@ -1272,8 +1290,10 @@ ANIMS.push(t => {
     controls.target.lerp(_t, 1 - Math.exp(-dt * 4)); }
   // 4) au repos (rien touché depuis 25 s, rien de choisi) : la caméra tourne très lentement autour du quartier
   // 5) fiche ouverte en haut : on décale la vue vers le bas pour que le lieu ne soit pas caché
-  const ouvert = $("fiche") && !$("fiche").hidden, but = ouvert ? 1 : 0; DECALE += (but - DECALE) * Math.min(1, dt * 4);
-  if (DECALE > 0.002) camera.setViewOffset(innerWidth, innerHeight, 0, -innerHeight * 0.12 * DECALE, innerWidth, innerHeight); else camera.clearViewOffset();
+  if (APP) { if (HK.frame) HK.frame(); DECALE += (SHIFT - DECALE) * Math.min(1, dt * 4);   // dans l'app, la fiche monte du bas : le lieu remonte au-dessus
+    if (DECALE > 0.002) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight * 0.2 * DECALE, innerWidth, innerHeight); else camera.clearViewOffset(); }
+  else { const ouvert = $("fiche") && !$("fiche").hidden, but = ouvert ? 1 : 0; DECALE += (but - DECALE) * Math.min(1, dt * 4);
+  if (DECALE > 0.002) camera.setViewOffset(innerWidth, innerHeight, 0, -innerHeight * 0.12 * DECALE, innerWidth, innerHeight); else camera.clearViewOffset(); }
 });
 // les vues toutes prêtes, comme les boutons de ta ville : rue, quartier, ciel
 function vue(k) {
@@ -1323,26 +1343,124 @@ function panneau(p) {
   }
 }
 
-$("tete").addEventListener("click", () => { const o = $("panel").classList.toggle("ouvert"); $("plus").textContent = o ? "▾ réduire" : "▴ tout voir"; });
+if (!APP) $("tete").addEventListener("click", () => { const o = $("panel").classList.toggle("ouvert"); $("plus").textContent = o ? "▾ réduire" : "▴ tout voir"; });
 /* ---------- boucle ---------- */
 function taille() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener("resize", taille); taille();
 // « Chez moi » et « Travail » : on recentre si on y est déjà, sinon on change de quartier
 const allerA = (lieu) => { if (lieu === LIEU) { const P = PINS.find(p => p.L.ici); if (P) choisirLieu(P); else voler(new THREE.Vector3(-150, 190, 220), new THREE.Vector3(maisonCentre ? maisonCentre[0] : 0, 0, maisonCentre ? -maisonCentre[1] : 0)); return; }
   const u = new URL(location.href); if (lieu === "usine") u.searchParams.set("lieu", "usine"); else u.searchParams.delete("lieu"); location.href = u.toString(); };
-$("moi").addEventListener("click", () => allerA("maison"));
-if ($("travail")) $("travail").addEventListener("click", () => allerA("usine"));
+if (!APP) $("moi").addEventListener("click", () => allerA("maison"));
+if (!APP) $("travail").addEventListener("click", () => allerA("usine"));
 function boucle(t) {
-  controls.update(); animerBus(t); for (const f of ANIMS) f(t);
+  if (CINE.on) majCine(); else controls.update(); animerBus(t); for (const f of ANIMS) f(t);
   for (const a of anneaux) { const s = 1 + 0.04 * Math.sin(t / 700); a.scale.set(s, s, 1); a.material.opacity = 0.55 + 0.25 * Math.sin(t / 700); }
   renderer.render(scene, camera); requestAnimationFrame(boucle);
 }
 
+
+/* =========================================================
+   Ce que l'app Jarvis peut demander à la carte (les mêmes ordres que l'ancienne ville) :
+   ouvrir un lieu, fermer, vue d'ensemble, nuit, décalage sous la fiche, pilotage par Claude,
+   mode documentaire, ta DS5 devant ton immeuble.
+   ========================================================= */
+let DEMARRE = null, ATTENTE = null, VOITURE_URL = null, NUIT = false, SHIFT = 0, DONNEES = [], DS5 = null;
+const LIEU_DE = { logement: "home", chez_toi: "home", maison: "home", energie: "energie", sante: "clinique", travail: "usine", usine: "usine", impots: "impots", voiture: "garage", garage: "garage", ds5: "garage", papiers: "mairie", mairie: "mairie", banque: "banque", bebe: "medecin", abonnements: "orange" };
+const couleurs = Object.fromEntries([...LIEUX_CARTE.usine, ...LIEUX_CARTE.maison].map(L => [L.id, L.c]));
+
+/* un lieu qui a quelque chose d'important (alerte, retard) : sa tête et son halo passent au rouge */
+const ROUGE = new THREE.Color(0xd8413a);
+function majAlertes() {
+  for (const P of PINS) { const d = DONNEES.find(x => x.id === P.L.id), urgent = !!(d && (d.urgent || (d.alerts || []).length));
+    const c = urgent ? ROUGE : new THREE.Color(P.L.c);
+    P.tete.material.color.copy(c); P.tete.material.emissive.copy(c); P.halo.material.color.copy(c); P.urgent = urgent; }
+}
+
+/* la nuit : ciel bleu nuit, lampadaires allumés, la lumière du soleil devient un clair de lune */
+const lum = { hemi: scene.children.find(o => o.isHemisphereLight), fond: new THREE.Color(FOND) };
+function nuit(n) {
+  if (n === NUIT && lum.fait) return; lum.fait = true; NUIT = n; const bg = n ? new THREE.Color(0x283044) : lum.fond;
+  scene.background = bg; scene.fog.color.copy(bg); if (n && !lum.sol) lum.sol = sol.material.color.clone(); if (n) sol.material.color.copy(lum.sol).multiplyScalar(0.6); else if (lum.sol) { sol.material.color.copy(lum.sol); lum.sol = null; }
+  if (lum.hemi) { lum.hemi.intensity = n ? 1.0 : 1.15; lum.hemi.color.set(n ? 0x9fb3d9 : 0xfffbf2); lum.hemi.groundColor.set(n ? 0x2a2f3a : 0xcfc6b6); }
+  soleil.intensity = n ? 0.7 : 2.1; soleil.color.set(n ? 0xaabbff : 0xfff1dc); renderer.toneMappingExposure = n ? 0.95 : 1.05;
+  scene.traverse(o => { const m = o.material; if (!m || !m.emissive) return;
+    if (m.userData.lampe === undefined) m.userData.lampe = m.emissive.getHex() === 0xffe2a0;
+    if (m.userData.lampe) m.emissiveIntensity = n ? 2.4 : 0.6; });
+}
+
+/* ta DS5 : garée sur la rampe, devant la porte du garage, le nez vers la rue */
+async function chargerVoiture(url) {
+  VOITURE_URL = url; if (DS5 || !url || LIEU !== "maison") return !!DS5;
+  const g = window.MAISON_GARAGE; if (!g) return false;   // le quartier n'est pas encore construit : on la posera après
+  const { GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js"), { DRACOLoader } = await import("three/addons/loaders/DRACOLoader.js");
+  const draco = new DRACOLoader(); draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/");
+  const gl = new GLTFLoader(); gl.setDRACOLoader(draco);
+  const car = (await gl.loadAsync(url)).scene; draco.dispose(); if (DS5) return true;
+  car.traverse(o => { if (!o.isMesh) return; o.castShadow = o.receiveShadow = true; const m = o.material;
+    if (m && m.transmission > 0) { const sombre = m.color.getHSL({}).l < 0.3; m.transmission = 0; m.transparent = true; m.opacity = sombre ? 0.72 : 0.28; m.depthWrite = false; } });
+  // à la bonne taille (une DS5 fait 4,53 m), posée au sol
+  const b = new THREE.Box3().setFromObject(car), sz = b.getSize(new THREE.Vector3()), k = 4.53 / Math.max(sz.x, sz.z);
+  const boite = new THREE.Group(); car.scale.setScalar(k); car.position.set(-(b.min.x + b.max.x) / 2 * k, -b.min.y * k, -(b.min.z + b.max.z) / 2 * k); boite.add(car);
+  boite.position.set(g.x + g.nx * 3.2, 0.12, -(g.y + g.ny * 3.2)); boite.rotation.y = Math.atan2(g.nx, -g.ny);   // le modèle regarde vers +Z
+  boite.name = "DS5"; scene.add(boite); DS5 = boite;
+  const P = PINS.find(p => p.L.garage); if (P) { P.g.position.set(boite.position.x, 1.6, boite.position.z); }   // le repère « Ta voiture » au-dessus d'elle
+  return true;
+}
+
+/* ---------- le mode documentaire : la caméra va de lieu en lieu pendant que le narrateur parle ---------- */
+const CINE = { on: false, plans: [], i: 0, t0: 0 };
+function sujet(nom) {
+  const n = String(nom || "").toLowerCase(), id = LIEU_DE[n] || n, P = PINS.find(p => p.L.id === id && !p.L.bord);
+  if (P) return { c: new THREE.Vector3(P.x, Math.max(2, P.h * 0.5), -P.y), r: Math.max(40, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.2 + P.h * 1.5 : 30) };
+  if (/voiture|rue|circul/.test(n) && VOITURES.length) { const v = VOITURES[Math.floor(Math.random() * VOITURES.length)]; if (v) return { suivre: { get position() { return new THREE.Vector3(v.x, 0.6, -v.y); } }, r: 14 }; }
+  if (/bus/.test(n) && BUS.size) { const o = [...BUS.values()][0]; return { suivre: o.m, r: 22 }; }
+  const P0 = PINS.find(p => p.L.ici); return { c: new THREE.Vector3(P0 ? P0.x : 0, 0, P0 ? -P0.y : 0), r: 260, large: true };
+}
+function planCine(i) { const pl = CINE.plans[i]; CINE.i = i; CINE.t0 = performance.now(); pl.S = sujet(pl.sujet); pl.a0 = Math.random() * Math.PI * 2;
+  camera.fov = { gros_plan: 30, insert: 30, etablissement: 42, survol: 48, plongee: 42, contre_plongee: 50, orbite: 38, panoramique: 40 }[pl.cadrage] || 38; camera.updateProjectionMatrix();
+  if (HK && HK.cine) HK.cine({ i, n: CINE.plans.length, sous_titre: pl.sous_titre || "" }); }
+function majCine() {
+  let pl = CINE.plans[CINE.i], u = (performance.now() - CINE.t0) / 1000 / pl.duree;
+  if (u >= 1) { if (CINE.i + 1 < CINE.plans.length) { planCine(CINE.i + 1); pl = CINE.plans[CINE.i]; u = 0; } else { cinemaStop(); return; } }
+  const S = pl.S, k = u * u * (3 - 2 * u) * 0.35 + u * 0.65, c = S.suivre ? S.suivre.position.clone().add(new THREE.Vector3(0, 1, 0)) : S.c;
+  const proche = { gros_plan: 0.45, insert: 0.4, plongee: 0.7, contre_plongee: 0.55, survol: 1.3, etablissement: 1.2 }[pl.cadrage] || 0.9, r = (pl.distance || S.r * proche);
+  const a = pl.a0 + (pl.cadrage === "orbite" ? (k - 0.5) * 1.2 : (k - 0.5) * 0.45), h = pl.hauteur ?? ({ plongee: r * 1.1, survol: r * 0.8, contre_plongee: 2, gros_plan: r * 0.35 }[pl.cadrage] ?? r * 0.5);
+  camera.position.set(c.x + Math.cos(a) * r, c.y + h, c.z + Math.sin(a) * r); controls.target.copy(c); camera.lookAt(c);
+}
+function cinema(plans, mode) {
+  const P = (plans || []).filter(Boolean).map(p => ({ ...p, duree: Math.max(1.5, Math.min(20, +p.duree || 5)) })); if (!P.length) return;
+  if (CINE.on && mode === "enchainer") { CINE.plans.push(...P); return; }
+  VOL = null; FOCUS = null; ORBITE = null; SUIVI = null; CINE.plans = P; CINE.on = true; CINE.fov = camera.fov; controls.enabled = false; planCine(0);
+}
+function cinemaStop() { if (!CINE.on) return; CINE.on = false; controls.enabled = true; camera.fov = CINE.fov || 38; camera.updateProjectionMatrix(); if (HK && HK.cine) HK.cine(null); }
+
+const API = {
+  camera, controls, renderer, scene, lieu: LIEU, demarrer,
+  ouvrir(id) { const P = PINS.find(p => p.L.id === id); if (!P) { ATTENTE = id; return; } if (CINE.on) cinemaStop(); choisirLieu(P, false); },
+  fermer() { FOCUS = null; ORBITE = null; SUIVI = null; },
+  ensemble() { API.fermer(); vue("quartier"); },
+  vue(k) { vue(k); },
+  quartier(l) { allerA(l || (LIEU === "maison" ? "usine" : "maison")); },
+  setDonnees(list) { DONNEES = list || []; majAlertes(); },
+  setNuit(n) { nuit(!!n); },
+  decalage(k) { SHIFT = k; },
+  // Claude (connecteur) : tourner de X degrés, zoomer, vue du dessus ou rasante — toujours en vol doux
+  orbit(a = {}) { const s = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)); let th = s.theta, r = s.radius, ph = s.phi;
+    if (a.tourner) th += (Number(a.tourner) || 0) * Math.PI / 180; if (a.zoom === "avant") r *= 0.6; else if (a.zoom === "arriere") r *= 1.6;
+    if (a.vue === "dessus") ph = 0.35; else if (a.vue === "rasante") ph = 1.25;
+    r = Math.max(controls.minDistance + 2, Math.min(controls.maxDistance, r)); s.set(r, ph, th); FOCUS = null; ORBITE = null; SUIVI = null;
+    voler(new THREE.Vector3().setFromSpherical(s).add(controls.target), controls.target.clone(), 1200); },
+  chargerVoiture, cinema, cinemaStop, cinemaEnCours: () => CINE.on,
+  arreteVol() { VOL = null; }, instantane() {},
+  icone: id => svg(id), couleur: id => couleurs[id], ids: Object.keys(couleurs),
+};
 /* ---------- démarrage ---------- */
 if (TEST || location.search.includes("regard")) Object.assign(window, { vue, suivreBus, ETAT: () => ({ s: !!SUIVI, f: !!FOCUS, v: !!VOL, t: TOUCHE, ar: controls.autoRotate }), PINS_: () => PINS.map(p => [p.L.id, Math.round(p.x), Math.round(p.y), Math.round(p.h), !!p.b]), choisirLieu, PINS, camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
-try {
+async function demarrer() {
+if (DEMARRE) return DEMARRE;
+DEMARRE = (async () => { try {
   const chezMoi = LIEU === "maison";   // les bus TCL suivis sont ceux du bas de chez toi
-  if (!chezMoi) { $("panel").hidden = true; const t = document.querySelector(".bar b"); if (t) t.lastChild.textContent = "Ton travail"; }
+  if (!chezMoi) { $("panel").hidden = true; const t = APP ? null : document.querySelector(".bar b"); if (t) t.lastChild.textContent = "Ton travail"; }
   const [q, carte] = await Promise.all([fn("jarvis-quartier", { lieu: LIEU }), chezMoi ? fn("jarvis-tcl", { quoi: "carte" }) : null]);
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;
@@ -1354,7 +1472,9 @@ try {
   poserLieux();   // tes lieux Jarvis, aux vrais endroits
   if (LIEU === "usine") { const P = PINS.find(p => p.L.ici); if (P) setTimeout(() => choisirLieu(P), 600); }   // au travail : on arrive directement sur l'usine   // les rues de la carte : ce qui roule les suit
   $("msg").hidden = true;
-  requestAnimationFrame(boucle);
+  if (ATTENTE) { const id = ATTENTE; ATTENTE = null; API.ouvrir(id); }
+  if (VOITURE_URL) chargerVoiture(VOITURE_URL).catch(e => console.warn("DS5", e));
+  majAlertes(); if (NUIT) { lum.sol = null; NUIT = false; nuit(true); }   // le quartier vient d'être construit : on rallume ses lampadaires
   // les chantiers en cours (Grand Lyon) et ton point GPS
   (async () => { try { const ch = await fn("jarvis-quartier", { quoi: "chantiers", lieu: LIEU }); if (ch && ch.ok) window.__chantiers = poserChantiers(ch.liste || []); } catch (_) { /* tant pis : la carte reste sans chantiers */ } })();
   suivreMoi();
@@ -1362,4 +1482,10 @@ try {
   const passages = async () => { try { const p = await fn("jarvis-tcl", { quoi: "passages" }); if (p && p.ok) panneau(p); } catch (_) { /* prochain tour */ } };
   if (chezMoi) { vivre(); passages(); setInterval(vivre, 15000); setInterval(passages, 30000); }
   window.__pret = true;
-} catch (e) { $("msg").hidden = false; $("msg").textContent = "Le quartier ne se charge pas : " + (e.message || e); window.__pret = "erreur"; }
+} catch (e) { $("msg").hidden = false; $("msg").textContent = "Le quartier ne se charge pas : " + (e.message || e); window.__pret = "erreur"; DEMARRE = null; throw e; } })();
+return DEMARRE; }
+
+if (!APP) demarrer().catch(() => {});
+requestAnimationFrame(boucle);
+return API;
+}

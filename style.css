@@ -503,3 +503,4 @@ body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!im
 .busou .btn{flex:0 0 auto;padding:0 14px;min-height:44px}
 .busvite{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .busvite .chip{padding:7px 11px;font-size:13px;font-weight:700}
+.round[hidden]{display:none}
