@@ -459,8 +459,9 @@ function detaillerMaison(pp, hAt, voisins) {
         entreeGarage = { x: gx0, y: gy0, nx, ny, ux, uy, ang };
         // entrée de l'immeuble à côté : porte vitrée sous un petit auvent, boîtes aux lettres et interphone devant
         const ex = x1 + ux * 6.2, ey = y1 + uy * 6.2;
-        boite(portes, 1.6, 2.3, 0.08, ex + nx * 0.04, ey + ny * 0.04, 1.15, ang);
-        boite(dalles, 2.4, 0.15, 1.2, ex + nx * 0.6, ey + ny * 0.6, 2.75, ang);
+        boite(cadres, 1.9, 2.5, 0.06, ex + nx * 0.03, ey + ny * 0.03, 1.25, ang);
+        boite(portes, 1.6, 2.3, 0.08, ex + nx * 0.05, ey + ny * 0.05, 1.15, ang);
+        entreeGarage.porte = [ex, ey];
         boite(beton, 2.2, 1.35, 0.5, ex + nx * 1.9 + ux * 1.6, ey + ny * 1.9 + uy * 1.6, 0.8, ang);
         boite(boites, 1.9, 1.0, 0.04, ex + nx * 2.16 + ux * 1.6, ey + ny * 2.16 + uy * 1.6, 0.85, ang);
         garagePose = true; boitesPosees = true;
@@ -523,7 +524,12 @@ function detaillerMaison(pp, hAt, voisins) {
         v.push(A1[0], ha, -A1[1], B1[0], hb, -B1[1], B2[0], hb, -B2[1], A1[0], ha, -A1[1], B2[0], hb, -B2[1], A2[0], ha, -A2[1]); }
       const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); g.computeVertexNormals();
       const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x8f8c87, roughness: 1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 })); m.receiveShadow = true; scene.add(m);
-      ZONES_LIBRES.push([x + nx * d / 2, y + ny * d / 2, d / 2 + 2]); } }
+      ZONES_LIBRES.push([x + nx * d / 2, y + ny * d / 2, d / 2 + 2]);
+      // le parvis de l'entrée : dalles claires de la porte jusqu'au trottoir (pas de pelouse devant)
+      if (entreeGarage.porte) { const [ex, ey] = entreeGarage.porte, L2 = Math.max(1, d - 0.8), cx = ex + nx * L2 / 2, cy = ey + ny * L2 / 2;
+        const pv = new THREE.BoxGeometry(3.4, 0.05, L2); pv.rotateY(Math.atan2(nx, ny)); pv.translate(cx, 0.16, -cy);
+        const mp = new THREE.Mesh(pv, new THREE.MeshStandardMaterial({ color: 0xdedad2, roughness: 0.9 })); mp.receiveShadow = true; scene.add(mp);
+        ZONES_LIBRES.push([cx, cy, L2 / 2 + 1.5]); } } }
   if (TEST || location.search.includes("regard")) window.MAISON = { poly, garage: entreeGarage };
   // le jardin : pelouse, haie et clôture (muret + grillage vert) autour de l'immeuble, sans jamais déborder sur la route ni chez les voisins
   const env = [...poly].sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
