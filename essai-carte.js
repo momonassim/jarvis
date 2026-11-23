@@ -50,8 +50,8 @@ Object.assign(soleil.shadow.camera, { left: -720, right: 720, top: 720, bottom: 
 soleil.shadow.bias = -0.0004; soleil.shadow.normalBias = 0.6;
 scene.add(soleil);
 
-const sol = new THREE.Mesh(new THREE.CircleGeometry(2400, 64), new THREE.MeshStandardMaterial({ color: 0xe9e3d7, roughness: 1 }));
-sol.rotation.x = -Math.PI / 2; sol.receiveShadow = true; scene.add(sol);
+const sol = new THREE.Mesh(new THREE.CircleGeometry(2400, 64), new THREE.MeshStandardMaterial({ color: 0xebe7e0, roughness: 1 }));
+sol.rotation.x = -Math.PI / 2; sol.receiveShadow = true; scene.add(sol);   // même teinte et même grain que le sol détaillé : pas de cercle visible
 
 // x = est, z = -nord (les données arrivent en mètres autour de la maison)
 const V = (x, y) => new THREE.Vector2(x, y);   // après la rotation du sol, (x, y) tombe en (x, 0, -y), comme les routes
@@ -682,7 +682,7 @@ function poserLignes(carte) {
       // tracé redécoupé tous les 3 m, puis chaque point posé sur la rue la plus proche
       const brut = t.map(([la, lo]) => local(la, lo, centre)), fin = [];
       for (let i = 0; i < brut.length; i++) { if (i) { const [x1, y1] = brut[i - 1], [x2, y2] = brut[i], n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 3); for (let k = 1; k < n; k++) fin.push([x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n]); } fin.push(brut[i]); }
-      for (let [x, y] of fin) { const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } const surRoute = !RDETAIL || Math.hypot(x, y) > RDETAIL + 5; /* autour de chez toi : pas de tracés de lignes, les bus en direct suffisent */ if (x * x + y * y < R * R && surRoute) seg.push([x, y]); else flush(); }
+      for (let [x, y] of fin) { const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } const surRoute = false; /* les tracés TCL ne servent que de guide : on ne les dessine plus, les bus roulent sur les rues */ if (x * x + y * y < R * R && surRoute) seg.push([x, y]); else flush(); }
       // chaque ligne décalée sur le côté (comme des rails parallèles), pour ne jamais se superposer à une autre
 
       flush();
@@ -834,6 +834,7 @@ function grainBitume(base, amp) {
 }
 function uvMonde(g, k) { const p = g.attributes.position, uv = new Float32Array(p.count * 2); for (let i = 0; i < p.count; i++) { uv[i * 2] = p.getX(i) / k; uv[i * 2 + 1] = p.getZ(i) / k; } g.setAttribute("uv", new THREE.BufferAttribute(uv, 2)); return g; }
 function dessinerRues(routes) {
+  { const g = sol.geometry.clone(); g.rotateX(-Math.PI / 2); uvMonde(g, 6); sol.geometry = g; sol.rotation.x = 0; sol.material.map = grainBitume(CSOL[0], 6); sol.material.color.set(0xffffff); sol.material.needsUpdate = true; }
   const chaussee = [], trottoir = [], bord = [];
   for (const r of routes) { const l = pts(r.p);
     let seg = [];
@@ -1119,7 +1120,7 @@ function poserChantiers(liste) {
     ANIMS.push(t => { o2.bras.rotation.z = 2.2 + 0.5 * Math.sin(t / 260 + dec); });
     const c = at.zone.c; if (!etiquetees.has(c)) { etiquetees.add(c);
       const fin = c.fin ? " · jusqu'au " + c.fin.slice(8, 10) + "/" + c.fin.slice(5, 7) : "";
-      scene.add(etiquette("⚠ Travaux", "#f2b215", "#2b3138", { x: at.x, y: 7, z: -at.y }, 0.032, (c.gene || "Circulation perturbée") + fin)); }
+      scene.add(etiquette("⚠ Travaux", "#f2b215", "#2b3138", { x: at.x, y: 6, z: -at.y }, 0.022, (c.gene || "Circulation perturbée") + fin)); }
   });
   return { troncons: runs.length, barrieres: barr.length, ateliers: ateliers.map(t => [Math.round(t.x), Math.round(t.y)]) };
 }
@@ -1161,25 +1162,28 @@ function poserLieux() {
   for (const L of LIEUX_CARTE[LIEU]) {
     let b = null, x = 0, y = 0, h = 0;
     if (L.ici) { b = BATS.find(q => q.estMaison) || batiPres(0, 0); }
-    else if (L.garage && window.MAISON_GARAGE) { const g = window.MAISON_GARAGE; x = g.x + g.nx * 1.5; y = g.y + g.ny * 1.5; h = 3; }
+    else if (L.garage && window.MAISON_GARAGE) { const g = window.MAISON_GARAGE; x = g.x + g.nx * 5; y = g.y + g.ny * 5; h = 0.2; }   // sur la rampe, devant la porte du garage
     else if (L.ll) { [x, y] = local(L.ll[0], L.ll[1], centre); b = batiPres(x, y); }
-    else if (L.imagine) { const c = candidats.find(({ b, c }) => !pris.has(b) && cible.every(([a, d]) => Math.hypot(a - c[0], d - c[1]) > 70)); if (c) b = c.b; }
-    else if (L.loin) { const [lx, ly] = local(L.loin[0], L.loin[1], centre), d = Math.hypot(lx, ly); x = lx / d * 600; y = ly / d * 600; h = 0; L.bord = true; }
+    else if (L.imagine) { const ok = ({ b, c }) => !pris.has(b) && cible.every(([a, d]) => Math.hypot(a - c[0], d - c[1]) > 70);
+      let c = candidats.find(ok);
+      if (!c) c = BATS.filter(q => !q.estMaison && aireDe(q.pp) > 120 && !/résid/i.test(q.u || "")).map(q => ({ b: q, c: centreDe(q) })).filter(({ c }) => { const d = Math.hypot(...c); return d > 80 && d < 420; }).sort((p, q) => Math.hypot(...p.c) - Math.hypot(...q.c)).find(ok);   // pas assez de commerces : un autre bâtiment non résidentiel
+      if (c) b = c.b; }
+    else if (L.loin) { const [lx, ly] = local(L.loin[0], L.loin[1], centre), d = Math.hypot(lx, ly); if (d < 50) continue; x = lx / d * 600; y = ly / d * 600; h = 0; L.bord = true; }
     if (b) { pris.add(b); [x, y] = centreDe(b); h = Math.max(b.h, b.t || b.h); }
     if (!b && !L.garage && !L.bord && !L.ll) continue;
     cible.push([x, y]);
     // le mât et sa tête aux couleurs du lieu, l'étiquette au-dessus ; le pied du bâtiment souligné de la même couleur
-    const g = new THREE.Group(), col = new THREE.Color(L.c), haut = L.bord ? 26 : L.garage ? 6 : 12;
+    const g = new THREE.Group(), col = new THREE.Color(L.c), haut = L.bord ? 26 : L.garage ? 4 : 10, rt = L.bord ? 3 : L.garage ? 0.8 : 1.3;
     const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, emissive: col, emissiveIntensity: 0.25 });
     const mt = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, haut, 8), new THREE.MeshStandardMaterial({ color: 0x3a3f45 })); mt.position.y = haut / 2;
-    const tete = new THREE.Mesh(new THREE.SphereGeometry(L.bord ? 3.2 : 1.6, 20, 14), mat); tete.position.y = haut + (L.bord ? 3.2 : 1.6);
-    const halo = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.8, 40), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.6, side: THREE.DoubleSide })); halo.position.y = tete.position.y; halo.rotation.x = -Math.PI / 2;
+    const tete = new THREE.Mesh(new THREE.SphereGeometry(rt, 20, 14), mat); tete.position.y = haut + rt;
+    const halo = new THREE.Mesh(new THREE.RingGeometry(rt * 1.4, rt * 1.75, 40), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.6, side: THREE.DoubleSide })); halo.position.y = tete.position.y; halo.rotation.x = -Math.PI / 2;
     g.add(mt, tete, halo); g.position.set(x, h, -y); scene.add(g);
-    const lab = etiquette(L.e + " " + L.n, L.c, "#ffffff", { x: 0, y: tete.position.y + 2.5, z: 0 }, 0.026); g.add(lab);
+    const lab = etiquette(L.e + " " + L.n, L.c, "#ffffff", { x: 0, y: tete.position.y + rt + 0.8, z: 0 }, L.garage ? 0.018 : 0.021); g.add(lab);
     if (b) { const ligne = new THREE.BufferGeometry().setFromPoints(b.pp.map(([px, py]) => new THREE.Vector3(px, 0.35, -py)));
       scene.add(new THREE.Line(ligne, new THREE.LineBasicMaterial({ color: col }))); }
     const P = { L, g, tete, lab, halo, x, y, h, b }; PINS.push(P); tete.userData.pin = P; lab.userData.pin = P;
-    const dec = PINS.length * 0.7; ANIMS.push(t => { const s = 1 + 0.5 * ((t / 1600 + dec) % 1); halo.scale.set(s, s, 1); halo.material.opacity = 0.6 * (1 - ((t / 1600 + dec) % 1)); tete.position.y = haut + (L.bord ? 3.2 : 1.6) + Math.sin(t / 700 + dec) * 0.25; });
+    const dec = PINS.length * 0.7; ANIMS.push(t => { const s = 1 + 0.5 * ((t / 1600 + dec) % 1); halo.scale.set(s, s, 1); halo.material.opacity = 0.6 * (1 - ((t / 1600 + dec) % 1)); tete.position.y = haut + rt + Math.sin(t / 700 + dec) * 0.2; });
   }
 }
 // toucher un lieu (ou son étiquette) : la caméra vole jusqu'à lui et sa fiche s'ouvre
@@ -1192,8 +1196,8 @@ function poserLieux() {
 function choisirLieu(P) {
   const L = P.L; if (L.bord && L.aller) { allerA(L.aller); return; }
   // vue de trois quarts, un peu en hauteur, le lieu au centre
-  const R = Math.max(55, P.b ? Math.sqrt(aireDe(P.b.pp)) * 1.8 + P.h * 1.5 : 0), a = Math.atan2(-P.y, -P.x) + 0.5;
-  voler(new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.7, -(P.y + Math.sin(a) * R)), new THREE.Vector3(P.x, P.h + 4, -P.y));
+  const R = Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5;
+  voler(new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.55, -(P.y + Math.sin(a) * R)), new THREE.Vector3(P.x, P.h * 0.5, -P.y));
   const f = $("fiche"); if (!f) return;
   const [la, lo] = L.ll || (P.b ? (() => { const k = Math.cos(centre.lat * Math.PI / 180) * 111320; return [centre.lat + P.y / 110574, centre.lon + P.x / k]; })() : [centre.lat, centre.lon]);
   f.style.setProperty("--c", L.c);
@@ -1268,7 +1272,7 @@ function boucle(t) {
 if (TEST || location.search.includes("regard")) Object.assign(window, { PINS_: () => PINS.map(p => [p.L.id, Math.round(p.x), Math.round(p.y), Math.round(p.h), !!p.b]), choisirLieu, PINS, camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
 try {
   const chezMoi = LIEU === "maison";   // les bus TCL suivis sont ceux du bas de chez toi
-  if (!chezMoi) { $("panel").hidden = true; const t = document.querySelector(".bar b"); if (t) t.lastChild.textContent = "Ton travail en vrai"; }
+  if (!chezMoi) { $("panel").hidden = true; const t = document.querySelector(".bar b"); if (t) t.lastChild.textContent = "Ton travail"; }
   const [q, carte] = await Promise.all([fn("jarvis-quartier", { lieu: LIEU }), chezMoi ? fn("jarvis-tcl", { quoi: "carte" }) : null]);
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;

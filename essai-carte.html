@@ -19,7 +19,7 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 .bar div{flex:1;min-width:0}
 .bar small{display:block;font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2)}
 .bar b{display:block;font-size:15px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bar a,.bar button{flex:none;height:38px;padding:0 12px;display:grid;place-items:center;border:1px solid var(--rim);background:#fff;color:var(--ink);font:700 13px var(--sans);text-decoration:none}
+.bar a,.bar button{flex:none;height:38px;padding:0 10px;display:grid;place-items:center;border:1px solid var(--rim);background:#fff;color:var(--ink);font:700 13px var(--sans);text-decoration:none}
 .live{display:inline-block;width:7px;height:7px;border-radius:50%;background:#1f9d63;margin-right:6px;vertical-align:1px;animation:r 1.6s ease-in-out infinite}
 @keyframes r{50%{opacity:.3}}
 .panel{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));max-width:520px;margin:0 auto;background:var(--enamel);border:1px solid var(--rim);box-shadow:0 14px 30px -16px rgba(30,40,55,.45);padding:10px 12px}
@@ -42,11 +42,12 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 .fiche a,.fiche button{height:36px;padding:0 12px;display:grid;place-items:center;border:1px solid var(--rim);background:#fff;color:var(--ink);font:700 13px var(--sans);text-decoration:none}
 .fiche a.ok{background:var(--c,#2b3138);color:#fff;border-color:transparent}
 .fiche button{margin-left:auto}
+@media (max-width:480px){.bar{gap:6px;padding:8px 8px 8px 12px}.bar small{display:none}.bar b{font-size:13px}.bar a,.bar button{padding:0 8px;font-size:12.5px}}
 </style>
 </head>
 <body>
 <canvas id="c" aria-label="Ton quartier en 3D, avec les bus en direct"></canvas>
-<div class="bar"><div><small>Essai · données réelles</small><b><i class="live"></i>Ton quartier en vrai</b></div><button id="moi" type="button">Chez moi</button><button id="travail" type="button">Travail</button><a href="./">Jarvis</a></div>
+<div class="bar"><div><small>Essai · données réelles</small><b><i class="live"></i>Ton quartier</b></div><button id="moi" type="button">Chez moi</button><button id="travail" type="button">Travail</button><a href="./">Jarvis</a></div>
 <div class="panel" id="panel"><h4 id="tete"><span>Brossolette Genas <em id="plus">▴ tout voir</em></span><span id="maj">…</span></h4><div id="pas"></div></div>
 <div class="fiche" id="fiche" hidden></div>
 <div class="msg" id="msg">Je construis ton quartier…</div>
@@ -57,6 +58,6 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
   "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.45.4"
 }}
 </script>
-<script type="module" src="essai-carte.js?v=24"></script>
+<script type="module" src="essai-carte.js?v=25"></script>
 </body>
 </html>
