@@ -338,6 +338,30 @@ async function chantiersAutour(lieu = "maison") {
   }
   return { ok: true, centre: { lat: la0, lon: lo0 }, liste, cles: fs[0] ? Object.keys(fs[0].properties ?? {}) : [] };
 }
+// « Vivant » : ce qui bouge autour du lieu, en direct et sans clé — stations-service et leurs prix (flux de l'État),
+// stations Vélo'v (vélos et places libres) et parkings (Grand Lyon). En mètres autour du lieu, comme le reste de la carte.
+async function vivantAutour(lieu = "maison") {
+  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g[lieu]; if (!m) throw new Error(lieu + " absent");
+  const la0 = m.lat, lo0 = m.lon, kx = Math.cos(la0 * Math.PI / 180) * 111320, ky = 110574;
+  const pt = (lo: number, la: number) => [Math.round((lo - lo0) * kx * 10) / 10, Math.round((la - la0) * ky * 10) / 10];
+  const ECO = "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/records";
+  const where = `within_distance(geom, geom'POINT(${lo0} ${la0})', 1.6km)`;
+  const [carbu, velo, parcs] = await Promise.all([
+    fetch(`${ECO}?limit=40&where=${encodeURIComponent(where)}`, { signal: AbortSignal.timeout(15000) }).then(r => r.ok ? r.json() : { results: [] }).catch(() => ({ results: [] })),
+    coucheGL("jcd_jcdecaux.jcdvelov", la0, lo0, R).catch(() => []),
+    coucheGL("pvo_patrimoine_voirie.pvoparking", la0, lo0, R).catch(() => []),
+  ]);
+  const frais = (d: any) => !d || Date.now() - new Date(d).getTime() < 7 * 864e5;
+  const prix = (s: any, c: string) => { const v = Number(s[c + "_prix"]); return Number.isFinite(v) && v > 0 && frais(s[c + "_maj"]) ? Math.round(v * 1000) / 1000 : null; };
+  const stations = (carbu.results ?? []).map((s: any) => { const geo = s.geom ?? { lat: Number(s.latitude) / 1e5, lon: Number(s.longitude) / 1e5 };
+    return { nom: String(s.adresse ?? "Station").slice(0, 60), ville: s.ville ?? "", xy: pt(geo.lon, geo.lat), gazole: prix(s, "gazole"), sp95: prix(s, "sp95"), e10: prix(s, "e10"), sp98: prix(s, "sp98"), auto: s.horaires_automate_24_24 === "Oui" }; })
+    .filter((s: any) => s.gazole || s.sp95 || s.e10 || s.sp98);
+  const velov = velo.map((f: any) => { const p = f.properties ?? {}, c = f.geometry?.coordinates; if (!c) return null;
+    return { nom: String(p.name ?? "").replace(/^\d+\s*-\s*/, "").slice(0, 50), xy: pt(c[0], c[1]), velos: Number(p.available_bikes) || 0, places: Number(p.available_bike_stands) || 0, ouvert: p.status === "OPEN" }; }).filter(Boolean);
+  const parkings = parcs.map((f: any) => { const p = f.properties ?? {}, c = f.geometry?.coordinates; if (!c || f.geometry?.type !== "Point") return null; if ((Number(p.capacite) || 0) < 15) return null;
+    return { nom: String(p.nom ?? "Parking").slice(0, 50), xy: pt(c[0], c[1]), places: Number(p.capacite) || 0, usage: p.usage ?? "", type: p.typeparking ?? "", sous_sol: /sous|souterrain|ouvrage/i.test(String(p.situation ?? "") + String(p.typeparking ?? "")) }; }).filter(Boolean);
+  return { ok: true, lu_le: new Date().toISOString(), stations, velov, parkings };
+}
 // TomTom : le trafic en direct autour du lieu (bouchons, accidents, routes fermées), avec la clé rangée dans les Réglages.
 // On ne garde que l'info utile, en mètres autour du lieu : la carte fait le reste (couleur sur la rue, voitures qui ralentissent).
 const CAT: Record<number, string> = { 1: "Accident", 2: "Brouillard", 3: "Conditions dangereuses", 4: "Pluie", 5: "Verglas", 6: "Bouchon", 7: "Voie fermée", 8: "Route fermée", 9: "Travaux", 10: "Vent", 11: "Inondation", 14: "Véhicule en panne" };
@@ -364,6 +388,7 @@ Deno.serve(async (req) => {
   if (!(await autorise(req))) return json({ erreur: "non autorisé" }, 401);
   const b = await req.json().catch(() => ({}));
   const lieu = b.lieu === "usine" ? "usine" : "maison";   // chez toi, ou ton travail
+  if (b.quoi === "vivant") { try { return json(await vivantAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   if (b.quoi === "trafic") { try { return json(await traficAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   if (b.quoi === "chantiers") { try { return json(await chantiersAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   const CHEMIN = `cache/quartier-${lieu}.json`;

@@ -1360,6 +1360,51 @@ function boucle(t) {
 }
 
 
+/* ---------- ce qui vit autour : stations-service (prix du jour), Vélo'v (vélos libres), parkings ----------
+   Petits objets posés au bon endroit, et leur étiquette n'apparaît que quand on s'approche (pour ne pas encombrer). */
+const VIVANT = { g: null, etiq: [], data: null };
+function poserVivant(d) {
+  if (VIVANT.g) { scene.remove(VIVANT.g); VIVANT.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); }
+  const g = new THREE.Group(); g.name = "vivant"; VIVANT.g = g; VIVANT.etiq = []; VIVANT.data = d;
+  const mat = c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 });
+  const pose = (lab, x, y, h) => { lab.position.set(x, h, -y); lab.userData.xy = [x, y]; g.add(lab); VIVANT.etiq.push(lab); };
+  const loin = (x, y) => x * x + y * y > 760 * 760;
+  // posé dans un bâtiment (la boutique de la station, un parking couvert) : pas d'objet en plus, l'étiquette se pose sur le toit
+  const dansBat = (x, y) => { for (const b of BATS || []) { if (!b.bx) { let a = 1e9, c = 1e9, e = -1e9, f = -1e9; for (const [u, v] of b.pp) { a = Math.min(a, u); c = Math.min(c, v); e = Math.max(e, u); f = Math.max(f, v); } b.bx = [a, c, e, f]; }
+    if (x < b.bx[0] || y < b.bx[1] || x > b.bx[2] || y > b.bx[3]) continue; if (dansPoly(x, y, b.pp)) return b; } return null; };
+  const toit = b => (b.t || b.h || 6) + 1.5;
+  // stations-service : un auvent sur quatre poteaux + une borne ; la moins chère du coin en vert
+  const gaz = (d.stations || []).filter(s => s.gazole), min = gaz.length ? Math.min(...gaz.map(s => s.gazole)) : 0;
+  for (const s of d.stations || []) { const [x, y] = s.xy; if (loin(x, y)) continue; const bat = dansBat(x, y);
+    if (!bat) { const top = new THREE.Mesh(new THREE.BoxGeometry(9, 0.5, 6), mat(0xf4f1ea)); top.position.set(x, 4.6, -y); top.castShadow = true; g.add(top);
+    const bande = new THREE.Mesh(new THREE.BoxGeometry(9.1, 0.22, 6.1), new THREE.MeshStandardMaterial({ color: 0x2f9e6b, emissive: 0x2f9e6b, emissiveIntensity: 0.25 })); bande.position.set(x, 4.3, -y); g.add(bande);
+    for (const [a, b] of [[-3.6, -2.2], [3.6, -2.2], [-3.6, 2.2], [3.6, 2.2]]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.3, 4.4, 0.3), mat(0xdedad2)); p.position.set(x + a, 2.2, -y + b); g.add(p); }
+    for (const a of [-1.6, 1.6]) { const pompe = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.5), mat(0x2b3340)); pompe.position.set(x + a, 0.8, -y); g.add(pompe); } }
+    const moinsCher = s.gazole && s.gazole === min, f = v => v ? v.toFixed(3).replace(".", ",") + " €" : null;
+    const lignes = [s.gazole && "Gazole " + f(s.gazole), s.e10 && "E10 " + f(s.e10), s.sp98 && "SP98 " + f(s.sp98)].filter(Boolean).join(" · ");
+    pose(etiquette((moinsCher ? "⛽ La moins chère · " : "⛽ ") + (f(s.gazole) || f(s.e10) || f(s.sp95)), moinsCher ? "#2f9e6b" : "#3a4350", "#ffffff", { x: 0, y: 0, z: 0 }, 0.024, lignes), x, y, bat ? toit(bat) : 6.2); }
+  // Vélo'v : une borne vert Vélo'v (rouge s'il n'y a plus de vélo)
+  for (const v of d.velov || []) { const [x, y] = v.xy; if (loin(x, y) || dansBat(x, y)) continue; const vide = !v.velos || !v.ouvert;
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 2.2, 10), new THREE.MeshStandardMaterial({ roughness: 0.4 }));
+    b.material.color.set(vide ? 0xd8413a : 0xc8d400); b.position.set(x, 1.1, -y); g.add(b);
+    for (let i = 0; i < Math.min(5, v.velos); i++) { const vel = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.9, 0.12), mat(0x9aa3ad)); vel.position.set(x + 1 + i * 0.5, 0.5, -y + 0.8); g.add(vel); }
+    pose(etiquette("🚲 " + v.velos + " vélo" + (v.velos > 1 ? "s" : ""), vide ? "#d8413a" : "#5b6b12", "#ffffff", { x: 0, y: 0, z: 0 }, 0.022, v.places + " places · " + v.nom), x, y, 3); }
+  // parkings : un panneau P bleu
+  for (const p of d.parkings || []) { const [x, y] = p.xy; if (loin(x, y)) continue; const bat = dansBat(x, y);
+    if (bat) { pose(etiquette("🅿️ " + p.places + " places", "#2563b8", "#ffffff", { x: 0, y: 0, z: 0 }, 0.022, [p.nom, p.usage].filter(Boolean).join(" · ")), x, y, toit(bat)); continue; }
+    const mat2 = new THREE.MeshStandardMaterial({ color: 0x2563b8, emissive: 0x2563b8, emissiveIntensity: 0.2 });
+    const panneau = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 0.15), mat2); panneau.position.set(x, 3.4, -y); g.add(panneau);
+    const mat3 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.6, 8), mat(0x9aa3ad)); mat3.position.set(x, 1.3, -y); g.add(mat3);
+    pose(etiquette("🅿️ " + p.places + " places", "#2563b8", "#ffffff", { x: 0, y: 0, z: 0 }, 0.022, [p.nom, p.usage].filter(Boolean).join(" · ")), x, y, 4.6); }
+  scene.add(g);
+}
+ANIMS.push(() => { if (!VIVANT.etiq.length) return; const c = controls.target, r = camera.position.distanceTo(c), lim = Math.max(120, r * 0.9);
+  for (const l of VIVANT.etiq) { const [x, y] = l.userData.xy; l.visible = r < 520 && Math.hypot(x - c.x, -y - c.z) < lim; } });
+async function lireVivant() {
+  if (typeof document !== "undefined" && document.hidden) return;
+  try { const r = await fn("jarvis-quartier", { quoi: "vivant", lieu: LIEU }); if (r && r.ok) poserVivant(r); } catch (_) { /* prochain tour */ }
+}
+
 /* ---------- le trafic en direct (TomTom) : bouchons, accidents, routes fermées ----------
    La rue touchée se colore (jaune : ça ralentit, orange : ça bouchonne, rouge : bloqué), des points lumineux y avancent
    au pas du trafic, et les voitures de la carte ralentissent vraiment à cet endroit. Une étiquette dit ce qui se passe. */
@@ -1496,6 +1541,7 @@ const API = {
     if (a.vue === "dessus") ph = 0.35; else if (a.vue === "rasante") ph = 1.25;
     r = Math.max(controls.minDistance + 2, Math.min(controls.maxDistance, r)); s.set(r, ph, th); FOCUS = null; ORBITE = null; SUIVI = null;
     voler(new THREE.Vector3().setFromSpherical(s).add(controls.target), controls.target.clone(), 1200); },
+  vivant: () => VIVANT.data,
   trafic: () => ({ cle: TRAFIC.cle, lu_le: TRAFIC.lu, liste: TRAFIC.liste.map(x => ({ type: x.type, retard: x.retard, de: x.de, vers: x.vers, routes: x.routes })) }),
   chargerVoiture, cinema, cinemaStop, cinemaEnCours: () => CINE.on,
   arreteVol() { VOL = null; }, instantane() {},
@@ -1525,7 +1571,8 @@ DEMARRE = (async () => { try {
   // les chantiers en cours (Grand Lyon) et ton point GPS
   (async () => { try { const ch = await fn("jarvis-quartier", { quoi: "chantiers", lieu: LIEU }); if (ch && ch.ok) window.__chantiers = poserChantiers(ch.liste || []); } catch (_) { /* tant pis : la carte reste sans chantiers */ } })();
   suivreMoi();
-  lireTrafic(); setInterval(lireTrafic, 120000);   // le trafic TomTom, toutes les 2 minutes (si la clé est rangée dans les Réglages)
+  lireTrafic(); setInterval(lireTrafic, 120000);
+  lireVivant(); setInterval(lireVivant, 300000);   // stations-service, Vélo'v, parkings : toutes les 5 minutes   // le trafic TomTom, toutes les 2 minutes (si la clé est rangée dans les Réglages)
   const vivre = async () => { try { const v = await fn("jarvis-tcl", { quoi: "vehicules" }); if (v && v.ok) majBus(v.bus || []); } catch (_) { /* prochain tour */ } };
   const passages = async () => { try { const p = await fn("jarvis-tcl", { quoi: "passages" }); if (p && p.ok) panneau(p); } catch (_) { /* prochain tour */ } };
   if (chezMoi) { vivre(); passages(); setInterval(vivre, 15000); setInterval(passages, 30000); }
