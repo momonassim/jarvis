@@ -472,3 +472,28 @@ body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!im
 .doc.sub{margin-bottom:5px}
 .doc.sub .pg{width:22px;height:28px}
 .doc.sub .dt b{font-size:14px}
+
+/* Bus en bas de chez toi (TCL en direct) */
+.busbox{margin-bottom:4px}
+.busl{display:flex;flex-direction:column;gap:6px}
+.busr{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--enamel2,var(--paper));border:1px solid var(--rim,var(--line));box-shadow:var(--plaque-plate,none);border-radius:14px}
+.busr .bd{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.busr strong{font-size:14px;font-weight:800;white-space:nowrap}
+.busr strong.live::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px;vertical-align:1px;animation:respire 1.6s ease-in-out infinite}
+.busr.alerte{border-color:color-mix(in srgb,var(--red) 45%,transparent)}
+.busr.alerte .bd{color:var(--red);white-space:normal}
+.bl{flex:none;min-width:38px;height:26px;padding:0 7px;border-radius:7px;display:grid;place-items:center;font-size:13px;font-weight:800;letter-spacing:.02em}
+.buscarte{margin-top:8px}
+@keyframes respire{0%,100%{opacity:1}50%{opacity:.35}}
+.busmap{position:fixed;inset:0;z-index:60;background:var(--enamel,#f3efe6);opacity:0;visibility:hidden;transition:opacity .3s,visibility 0s linear .3s}
+.busmap.open{opacity:1;visibility:visible;transition:opacity .3s}
+.bmcarte{position:absolute;inset:0}
+.bmtop{position:absolute;z-index:500;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));display:flex;align-items:center;gap:10px;padding:10px 12px 10px 16px;background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+.bmtop div{flex:1}
+.bmtop small{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+.bmtop b{font-size:15px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.bmleg{position:absolute;z-index:500;left:12px;bottom:calc(16px + env(safe-area-inset-bottom));display:flex;gap:6px;flex-wrap:wrap;padding:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.bmleg:empty{display:none}
+.bmbus span{display:grid;place-items:center;height:22px;min-width:34px;padding:0 5px;border-radius:6px;font:800 12px var(--sans);box-shadow:0 0 0 2px #fff,0 4px 10px -3px rgba(0,0,0,.45)}
+.bmhome{font-size:22px;line-height:30px;text-align:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+.busmap .leaflet-container{font-family:var(--sans);background:#f2efe9}

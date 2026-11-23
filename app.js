@@ -165,6 +165,7 @@ function renderSheet(p) {
     if (C.extrait) w.querySelectorAll(".dh span")[1].textContent = "relevé du " + new Date(C.extrait).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
     box.append(w);
   }
+  if (p.id === "home") box.append(blocBus());
   if (docs.length > 6) { const q = document.createElement("input"); q.className = "dsearch"; q.type = "search"; q.placeholder = "Chercher un papier (ex. octobre, quittance)";
     q.addEventListener("input", () => { const v = q.value.trim().toLowerCase();
       // en recherche, on ouvre les dossiers qui contiennent un papier trouvé ; sinon on les referme
@@ -650,6 +651,65 @@ function applyDehors(rows) {
       where: "Grand Lyon (données officielles)", lines: [["Où", [y.ou, y.commune].filter(Boolean).join(", ") || y.rue], ["Gêne", y.gene || "—"], ["Distance", y.m + " m " + ou],
         ["Dates", "du " + frd(y.debut) + " au " + frd(y.fin)]] })), ...(p.docs || [])];
   });
+}
+/* ---------- Bus en bas de chez toi (TCL en direct, Data Grand Lyon) ---------- */
+const COUL = { C15: "#D3D800", 52: "#00A3A6", 124: "#00A3A6", 125: "#E8308A", C17: "#3F4E55" };
+let busT = null, busCarte = null;
+const tcl = async quoi => { const { data, error } = await sb.functions.invoke("jarvis-tcl", { body: { quoi } }); if (error) throw error; return data; };
+const badge = (l, c) => { const b = document.createElement("b"); b.className = "bl"; b.textContent = l; b.style.background = c || COUL[l] || "#666";
+  b.style.color = /^#(D3D8|FFF|F[0-9A-F]E)/i.test(c || COUL[l] || "") ? "#2b3138" : "#fff"; return b; };
+const delai = p => !p ? "" : /proche|^0/i.test(p.delai || "") ? "à l’approche" : (p.delai || p.heure || "").replace(/\s*min/, " min");
+function blocBus() {
+  const w = document.createElement("div"); w.className = "busbox";
+  w.innerHTML = '<div class="dh"><b>Bus en bas de chez toi</b><span>Brossolette Genas</span></div><div class="busl"><div class="empty">Je regarde les prochains bus…</div></div><button class="btn soft wide buscarte" type="button">Voir les bus en direct sur la carte</button>';
+  w.querySelector(".buscarte").addEventListener("click", ouvrirCarteBus);
+  const liste = w.querySelector(".busl");
+  const maj = async () => {
+    if (!w.isConnected) { clearInterval(busT); busT = null; return; }
+    if (!sheet.classList.contains("open") || S.sel !== byId.home || document.hidden) return;   // fiche fermée : on ne relit rien
+    try { const d = await tcl("passages"); if (!d.ok) { liste.innerHTML = ""; const e = document.createElement("div"); e.className = "empty"; e.textContent = d.message; liste.append(e); return; }
+      liste.innerHTML = "";
+      (d.alertes || []).filter(a => a.grave).forEach(a => { const r = document.createElement("div"); r.className = "busr alerte"; r.append(badge(a.ligne));
+        const t = document.createElement("span"); t.className = "bd"; t.textContent = a.titre.replace(/\s*-\s*$/, ""); r.append(t); r.title = a.message; r.addEventListener("click", () => toast(a.message.slice(0, 300))); liste.append(r); });
+      if (!(d.liste || []).length) { const e = document.createElement("div"); e.className = "empty"; e.textContent = new Date().getHours() < 5 ? "Pas de bus la nuit : ils reprennent vers 5 h." : "Aucun passage annoncé pour l’instant."; liste.append(e); }
+      (d.liste || []).forEach(g => { const r = document.createElement("div"); r.className = "busr"; r.append(badge(g.ligne));
+        const t = document.createElement("span"); t.className = "bd"; t.textContent = "→ " + g.direction; r.append(t);
+        const h = document.createElement("strong"); const [a, b] = g.passages; h.textContent = delai(a) + (b ? " · " + delai(b) : ""); if (a && a.direct) h.className = "live"; r.append(h); liste.append(r); });
+      w.querySelector(".dh span").textContent = "Brossolette Genas · " + new Date(d.lu_le).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    } catch (_) { liste.innerHTML = '<div class="empty">Les TCL ne répondent pas pour l’instant.</div>'; }
+  };
+  setTimeout(maj, 80); clearInterval(busT); busT = setInterval(maj, 30000);
+  return w;
+}
+async function ouvrirCarteBus() {
+  let o = $("busmap");
+  if (!o) { o = document.createElement("div"); o.id = "busmap"; o.className = "busmap";
+    o.innerHTML = '<div class="bmcarte" id="bmCarte"></div><div class="bmtop"><div><small>TCL en direct</small><b>Bus autour de chez toi</b></div><button class="x" id="bmX" aria-label="Fermer">✕</button></div><div class="bmleg" id="bmLeg"></div>';
+    document.body.append(o); $("bmX").addEventListener("click", () => { o.classList.remove("open"); clearInterval(busCarte && busCarte.t); }); }
+  o.classList.add("open");
+  if (!window.L) { const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.append(css);
+    await new Promise((ok, ko) => { const sc = document.createElement("script"); sc.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; sc.onload = ok; sc.onerror = ko; document.head.append(sc); }).catch(() => toast("La carte ne se charge pas.")); }
+  const L = window.L; if (!L) return;
+  if (!busCarte) {
+    const m = L.map("bmCarte", { zoomControl: false, attributionControl: true }).setView([45.7487, 4.917], 15);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19, attribution: "© OpenStreetMap · © CARTO · TCL / Data Grand Lyon" }).addTo(m);
+    busCarte = { m, bus: L.layerGroup().addTo(m), t: null };
+    try { const c = await tcl("carte"); if (c.ok) {
+      const leg = $("bmLeg"); leg.innerHTML = ""; const faites = new Set();
+      c.lignes.forEach(l => { l.traits.forEach(t => L.polyline(t, { color: l.couleur, weight: 5, opacity: .75, lineCap: "round" }).addTo(m));
+        if (!faites.has(l.ligne)) { faites.add(l.ligne); COUL[l.ligne] = l.couleur; leg.append(badge(l.ligne, l.couleur)); } });
+      c.arrets.forEach(a => L.circleMarker([a.lat, a.lon], { radius: 6, color: "#2b3138", weight: 2, fillColor: "#fff", fillOpacity: 1 }).bindTooltip(a.nom + " · " + a.desserte.replace(/:[AR]/g, "")).addTo(m));
+      if (c.maison) L.marker([c.maison.lat, c.maison.lon], { icon: L.divIcon({ className: "bmhome", html: "🏠", iconSize: [30, 30] }) }).addTo(m);
+    } } catch (_) { toast("Je n’arrive pas à dessiner les lignes."); }
+  }
+  setTimeout(() => busCarte.m.invalidateSize(), 60);
+  const maj = async () => { if (!o.classList.contains("open")) return;
+    try { const v = await tcl("vehicules"); busCarte.bus.clearLayers();
+      (v.bus || []).forEach(b => L.marker([b.lat, b.lon], { icon: L.divIcon({ className: "bmbus", html: `<span style="background:${COUL[b.ligne] || "#2b3138"};color:${/^#D3D8/i.test(COUL[b.ligne] || "") ? "#2b3138" : "#fff"}">${b.ligne}</span>`, iconSize: [34, 22] }) })
+        .bindTooltip("→ " + (b.vers || "")).addTo(busCarte.bus));
+      if (!(v.bus || []).length) toast(new Date().getHours() < 5 ? "Pas de bus la nuit : la carte s’animera vers 5 h." : "Aucun bus de ces lignes en route pour l’instant.");
+    } catch (_) { /* on réessaie au prochain tour */ } };
+  maj(); clearInterval(busCarte.t); busCarte.t = setInterval(maj, 15000);
 }
 let loading = null;
 async function loadAll() {
