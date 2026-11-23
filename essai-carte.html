@@ -29,6 +29,9 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 .bl{flex:none;min-width:38px;height:24px;padding:0 6px;display:grid;place-items:center;font-size:12.5px;font-weight:800}
 .row span{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row strong{font-size:13.5px;font-weight:800;white-space:nowrap}
+.panel h4{cursor:pointer}
+.panel h4 em{font-style:normal;margin-left:8px;color:var(--ink);opacity:.6}
+.panel:not(.ouvert) .row:nth-of-type(n+3){display:none}
 .msg{position:fixed;inset:0;display:grid;place-items:center;padding:30px;text-align:center;font-weight:700;color:var(--ink2);pointer-events:none}
 .msg[hidden]{display:none}
 </style>
@@ -36,7 +39,7 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 <body>
 <canvas id="c" aria-label="Ton quartier en 3D, avec les bus en direct"></canvas>
 <div class="bar"><div><small>Essai · données réelles</small><b><i class="live"></i>Ton quartier en vrai</b></div><button id="moi" type="button">Chez moi</button><a href="./">Jarvis</a></div>
-<div class="panel" id="panel"><h4><span>Brossolette Genas</span><span id="maj">…</span></h4><div id="pas"></div></div>
+<div class="panel" id="panel"><h4 id="tete"><span>Brossolette Genas <em id="plus">▴ tout voir</em></span><span id="maj">…</span></h4><div id="pas"></div></div>
 <div class="msg" id="msg">Je construis ton quartier…</div>
 <script type="importmap">
 {"imports":{
@@ -45,6 +48,6 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
   "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.45.4"
 }}
 </script>
-<script type="module" src="essai-carte.js?v=1"></script>
+<script type="module" src="essai-carte.js?v=2"></script>
 </body>
 </html>

@@ -71,8 +71,10 @@ function ruban(ligne, largeur, hauteur) {
   return g;
 }
 
-let maisonPoly = null, maisonH = 15;
+let maisonPoly = null, maisonH = 15, maisonGeo = null, maisonCentre = null;
+const arbresReels = [];
 function construireQuartier(q) {
+  for (const a of q.arbres || []) arbresReels.push(a);
   // verdure : taches vert sauge + arbres simples
   const vg = [], arbres = [];
   for (const v of q.verdure || []) {
@@ -84,13 +86,17 @@ function construireQuartier(q) {
     for (let k = 0; k < n * 3 && arbres.length < 1400; k++) { const x = minx + Math.random() * (maxx - minx), y = miny + Math.random() * (maxy - miny); if (dansPoly(x, y, p)) arbres.push([x, y]); }
   }
   if (vg.length) { const m = new THREE.Mesh(mergeGeometries(vg), new THREE.MeshStandardMaterial({ color: 0xd3dcc6, roughness: 1 })); m.receiveShadow = true; scene.add(m); }
-  if (arbres.length) {
+  const vrais = arbresReels;
+  if (arbres.length || vrais.length) {
     const geo = new THREE.IcosahedronGeometry(3.2, 0); geo.translate(0, 5.2, 0);
     const tronc = new THREE.CylinderGeometry(0.35, 0.45, 2.6, 5); tronc.translate(0, 1.3, 0);
-    const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xa9bb98, roughness: 1, flatShading: true }), arbres.length);
-    const it = new THREE.InstancedMesh(tronc, new THREE.MeshStandardMaterial({ color: 0x9c8b78, roughness: 1 }), arbres.length);
+    const N = arbres.length + vrais.length;
+    const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xa9bb98, roughness: 1, flatShading: true }), N);
+    const it = new THREE.InstancedMesh(tronc, new THREE.MeshStandardMaterial({ color: 0x9c8b78, roughness: 1 }), N);
     const o = new THREE.Object3D();
     arbres.forEach(([x, y], i) => { const s = 0.75 + Math.random() * 0.6; o.position.set(x, 0, -y); o.scale.set(s, s * (0.9 + Math.random() * 0.4), s); o.rotation.y = Math.random() * 6; o.updateMatrix(); im.setMatrixAt(i, o.matrix); it.setMatrixAt(i, o.matrix); });
+    // les vrais arbres de la rue : leur hauteur et leur couronne mesurées par la Métropole
+    vrais.forEach(([x, y, h, r], j) => { const sx = Math.max(0.5, r / 3.2), sy = Math.max(0.6, h / 8.4); o.position.set(x, 0, -y); o.scale.set(sx, sy, sx); o.rotation.y = Math.random() * 6; o.updateMatrix(); im.setMatrixAt(arbres.length + j, o.matrix); it.setMatrixAt(arbres.length + j, o.matrix); });
     im.castShadow = true; it.castShadow = true; scene.add(im, it);
   }
   // routes : rubans clairs, les grands axes un peu plus marqués
@@ -112,20 +118,58 @@ function construireQuartier(q) {
     let best = null, bd = 1e9; (q.batiments || []).forEach(b => { const p = pts(b.p); const [cx, cy] = p.reduce((a, [x, y]) => [a[0] + x / p.length, a[1] + y / p.length], [0, 0]); const d = Math.hypot(cx, cy); if (d < bd) { bd = d; best = b; } });
     if (best) { maisonPoly = pts(best.p); maisonH = Math.max(2.5, best.h); }
   }
+  // toits du Grand Lyon : chaque morceau monte à sa hauteur de façade, les toits en pente finissent en pointe douce
+  const tg = [], maisonParts = [];
+  const toits = (q.toits || []).map(t => ({ ...t, pp: pts(t.p) })).filter(t => t.pp.length >= 3);
+  // l'immeuble de la maison : le morceau de toit qui contient la maison, puis tous ceux qui le touchent (même bâtiment)
+  const k = (x, y) => `${Math.round(x * 2)}|${Math.round(y * 2)}`;
+  const parSommet = new Map(); toits.forEach((t, i) => t.pp.forEach(([x, y]) => { const kk = k(x, y); (parSommet.get(kk) || parSommet.set(kk, []).get(kk)).push(i); }));
+  const depart = toits.findIndex(t => dansPoly(0, 0, t.pp)); const aMaison = new Set();
+  if (depart >= 0) { const pile = [depart]; while (pile.length && aMaison.size < 40) { const i = pile.pop(); if (aMaison.has(i)) continue; aMaison.add(i); toits[i].pp.forEach(([x, y]) => (parSommet.get(k(x, y)) || []).forEach(j => { if (!aMaison.has(j)) pile.push(j); })); } }
+  toits.forEach((t, i) => {
+    const sh = new THREE.Shape(t.pp.map(([x, y]) => V(x, y)));
+    const hf = Math.max(2.5, t.hf), ht = Math.max(hf, t.ht);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: hf, bevelEnabled: false }); g.rotateX(-Math.PI / 2);
+    const parts = [g.index ? g.toNonIndexed() : g];
+    if (t.t === 1 && ht > hf + 0.4 && t.pp.length <= 24) {   // toit en pente : une pointe vers le centre
+      const [cx, cy] = t.pp.reduce((a, [x, y]) => [a[0] + x / t.pp.length, a[1] + y / t.pp.length], [0, 0]);
+      const v = [];
+      for (let j = 0; j < t.pp.length - 1; j++) { const [x1, y1] = t.pp[j], [x2, y2] = t.pp[j + 1]; v.push(x1, hf, -y1, x2, hf, -y2, cx, ht, -cy); }
+      const r = new THREE.BufferGeometry(); r.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); r.computeVertexNormals();
+      r.setAttribute("uv", new THREE.Float32BufferAttribute(new Array(v.length / 3 * 2).fill(0), 2));
+      parts.push(r);
+    }
+    const one = parts.length > 1 ? mergeGeometries(parts.map(x => { const y = x.index ? x.toNonIndexed() : x; y.deleteAttribute("uv"); y.setAttribute("uv", new THREE.Float32BufferAttribute(new Array(y.attributes.position.count * 2).fill(0), 2)); return y; })) : parts[0];
+    if (aMaison.has(i)) { maisonParts.push(one); maisonH = Math.max(maisonH === 15 ? 0 : maisonH, ht); } else tg.push(one);
+  });
+  if (maisonParts.length) {
+    maison = null; maisonPoly = toits[depart].pp;
+    const g = mergeGeometries(maisonParts.map(x => { const y = x.index ? x.toNonIndexed() : x; if (!y.attributes.normal) y.computeVertexNormals(); return y; }));
+    maisonGeo = g;
+    // centre de l'immeuble entier (tous ses morceaux)
+    let sx = 0, sy = 0, n = 0; aMaison.forEach(i => toits[i].pp.forEach(([x, y]) => { sx += x; sy += y; n++; })); maisonCentre = [sx / n, sy / n];
+  }
+  bg.push(...tg);
+  if (q.bordures && q.bordures.length) {
+    const v = []; for (const l of q.bordures) { const p = pts(l); for (let j = 0; j < p.length - 1; j++) v.push(p[j][0], 0.16, -p[j][1], p[j + 1][0], 0.16, -p[j + 1][1]); }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+    scene.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xcfc7b9, transparent: true, opacity: 0.9 })));
+  }
   if (bg.length) {
-    const all = mergeGeometries(bg);
+    const norm = bg.map(x => { const y = x.index ? x.toNonIndexed() : x; if (!y.attributes.normal) y.computeVertexNormals(); if (!y.attributes.uv) y.setAttribute("uv", new THREE.Float32BufferAttribute(new Array(y.attributes.position.count * 2).fill(0), 2)); return y; });
+    const all = mergeGeometries(norm);
     const m = new THREE.Mesh(all, new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 0.92 })); m.castShadow = true; m.receiveShadow = true; scene.add(m);
     const e = new THREE.LineSegments(new THREE.EdgesGeometry(all, 25), new THREE.LineBasicMaterial({ color: 0xc8c0b3, transparent: true, opacity: 0.55 })); scene.add(e);
   }
   if (maisonPoly) {
     const h = maisonH;
-    const g = maison || new THREE.ExtrudeGeometry(new THREE.Shape(maisonPoly.map(([x, y]) => V(x, y))), { depth: h, bevelEnabled: false }).rotateX(-Math.PI / 2);
+    const g = maisonGeo || maison || new THREE.ExtrudeGeometry(new THREE.Shape(maisonPoly.map(([x, y]) => V(x, y))), { depth: h, bevelEnabled: false }).rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xf2c48a, roughness: 0.8 })); m.castShadow = true; m.receiveShadow = true; scene.add(m);
     scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), new THREE.LineBasicMaterial({ color: 0xb98a4f })));
     // un anneau doux au pied de l'immeuble
     const anneau = new THREE.Mesh(new THREE.RingGeometry(26, 27.2, 64), new THREE.MeshBasicMaterial({ color: 0xe9a23b, transparent: true, opacity: 0.8 }));
     anneau.rotation.x = -Math.PI / 2; anneau.position.y = 0.2;
-    const [cx, cy] = maisonPoly.reduce((a, [x, y]) => [a[0] + x / maisonPoly.length, a[1] + y / maisonPoly.length], [0, 0]);
+    const [cx, cy] = maisonCentre || maisonPoly.reduce((a, [x, y]) => [a[0] + x / maisonPoly.length, a[1] + y / maisonPoly.length], [0, 0]);
     anneau.position.x = cx; anneau.position.z = -cy; scene.add(anneau); anneaux.push(anneau);
     scene.add(etiquette("Chez toi", "#2b3138", "#f5f1e8", { x: cx, y: h + 8, z: -cy }, 0.028));
   }
@@ -224,7 +268,8 @@ function animerBus(t) {
 /* ---------- le panneau du bas : prochains passages ---------- */
 function panneau(p) {
   const box = $("pas"); box.innerHTML = "";
-  const lignes = (p.liste || []).filter(g => g.arret === "Brossolette Genas").slice(0, 6);
+  const min = g => { const d = (g.passages && g.passages[0] && g.passages[0].delai) || ""; return /proche/i.test(d) ? 0 : (parseInt(d) || 99); };
+  const lignes = (p.liste || []).filter(g => g.arret === "Brossolette Genas").sort((a, b) => min(a) - min(b)).slice(0, 8);
   if (!lignes.length) box.innerHTML = '<div class="row"><span>' + (new Date().getHours() < 5 ? "Pas de bus la nuit : ils reprennent vers 5 h." : "Aucun passage annoncé pour l'instant.") + "</span></div>";
   for (const g of lignes) {
     const r = document.createElement("div"); r.className = "row";
@@ -239,6 +284,7 @@ function panneau(p) {
   }
 }
 
+$("tete").addEventListener("click", () => { const o = $("panel").classList.toggle("ouvert"); $("plus").textContent = o ? "▾ réduire" : "▴ tout voir"; });
 /* ---------- boucle ---------- */
 function taille() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener("resize", taille); taille();
