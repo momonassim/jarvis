@@ -1028,7 +1028,8 @@ function lancerCirculation() {
     for (const c of VOITURES) {
       let a = aretes[c.e], q = surArete(a, c.s);
       const cote = c.dir > 0 ? -1 : 1, ferme = a.ferme[q.k];   // ma voie (côté droit) est-elle fermée par un chantier ?
-      const cible = ferme === cote ? 2.5 : ferme ? 4 : c.vmax;
+      const lent = a.lent ? a.lent[q.k] : 0;   // un bouchon signalé par TomTom à cet endroit
+      const cible = ferme === cote ? 2.5 : ferme ? 4 : lent ? Math.min(c.vmax, lent) : c.vmax;
       c.v += Math.max(-6 * dt, Math.min(2.5 * dt, cible - c.v));
       c.s += c.v * dt * c.dir;
       if (c.s < 0 || c.s > a.L) {   // bout de la rue : on continue sur une autre rue du carrefour (jamais demi-tour sauf impasse)
@@ -1359,6 +1360,51 @@ function boucle(t) {
 }
 
 
+/* ---------- le trafic en direct (TomTom) : bouchons, accidents, routes fermées ----------
+   La rue touchée se colore (jaune : ça ralentit, orange : ça bouchonne, rouge : bloqué), des points lumineux y avancent
+   au pas du trafic, et les voitures de la carte ralentissent vraiment à cet endroit. Une étiquette dit ce qui se passe. */
+const TRAFIC = { g: null, liste: [], lu: null, cle: null };
+const COUL_TRAFIC = g => g >= 4 ? 0x9e1f1f : g === 3 ? 0xd8413a : g === 2 ? 0xf08a24 : 0xf2c230;
+function poserTrafic(liste) {
+  if (TRAFIC.g) { scene.remove(TRAFIC.g); TRAFIC.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); }
+  if (RESEAU) for (const a of RESEAU.aretes) a.lent = null;
+  const g = new THREE.Group(); g.name = "trafic"; TRAFIC.g = g; TRAFIC.liste = liste;
+  const flux = [];
+  for (const inc of liste) {
+    const l = pts(inc.l); if (l.length < 2) continue;
+    const ferme = inc.cat === 8 || inc.cat === 7, grav = ferme ? 4 : inc.cat === 1 ? Math.max(3, inc.gravite) : Math.max(1, inc.gravite || (inc.cat === 6 ? 2 : 1));
+    const col = COUL_TRAFIC(grav);
+    // la rue colorée, juste au-dessus de la chaussée (qui respire doucement)
+    const geo = mergeGeometries(ruban(l, 4.6, 0.2).map(x => x.index ? x.toNonIndexed() : x));
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+    const m = new THREE.Mesh(geo, mat); m.renderOrder = 3; g.add(m);
+    // des points lumineux qui avancent au pas du trafic
+    const tr = trajet(l), n = Math.max(2, Math.min(10, Math.round(tr.L / 25))), v = ferme ? 0 : [0, 7, 4, 2, 1][Math.min(4, grav)];
+    const boules = []; for (let i = 0; i < n; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.85, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })); b.userData.d = i / n * tr.L; g.add(b); boules.push(b); }
+    flux.push({ tr, boules, v, mat, dec: Math.random() * 6 });
+    // l'étiquette, au milieu de la zone touchée
+    const mil = pointA(tr, tr.L / 2), min = Math.round((inc.retard || 0) / 60);
+    const titre = (ferme ? "⛔ " : inc.cat === 1 ? "💥 " : inc.cat === 9 ? "🚧 " : "🚗 ") + inc.type + (min >= 1 ? " · +" + min + " min" : "");
+    const sous = [inc.routes && inc.routes[0], inc.de && inc.vers ? inc.de + " → " + inc.vers : inc.de || inc.vers].filter(Boolean).join(" · ").slice(0, 60);
+    const lab = etiquette(titre, "#" + new THREE.Color(col).getHexString(), "#ffffff", { x: mil[0], y: 7, z: -mil[1] }, 0.026, sous); g.add(lab);
+    // les voitures de la carte ralentissent là où TomTom voit un ralentissement
+    if (RESEAU) { const vit = ferme ? 0.8 : [9, 6, 3.5, 1.8, 0.8][Math.min(4, grav)];
+      for (let d = 0; d <= tr.L; d += 4) { const [x, y] = pointA(tr, d);
+        for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [aid, k] of RESEAU.gS.get((Math.floor(x / 20) + i) + "|" + (Math.floor(y / 20) + j)) || []) {
+          const a = RESEAU.aretes[aid]; if (Math.hypot(a.p[k][0] - x, a.p[k][1] - y) > 9) continue;
+          if (!a.lent) a.lent = new Float32Array(a.p.length); a.lent[k] = a.lent[k] ? Math.min(a.lent[k], vit) : vit; } } }
+  }
+  scene.add(g);
+  TRAFIC.anim = t => { for (const f of flux) { f.mat.opacity = 0.62 + 0.15 * Math.sin(t / 650 + f.dec);
+    for (const b of f.boules) { b.userData.d = (b.userData.d + f.v * 0.016) % f.tr.L; const [x, y] = pointA(f.tr, b.userData.d); b.position.set(x, 0.75, -y); } } };
+}
+ANIMS.push(t => { if (TRAFIC.anim) TRAFIC.anim(t); });
+async function lireTrafic() {
+  if (typeof document !== "undefined" && document.hidden) return;
+  try { const r = await fn("jarvis-quartier", { quoi: "trafic", lieu: LIEU }); TRAFIC.cle = r ? r.cle : null;
+    if (r && r.ok) { TRAFIC.lu = r.lu_le; poserTrafic(r.liste || []); } } catch (_) { /* prochain tour */ }
+}
+
 /* =========================================================
    Ce que l'app Jarvis peut demander à la carte (les mêmes ordres que l'ancienne ville) :
    ouvrir un lieu, fermer, vue d'ensemble, nuit, décalage sous la fiche, pilotage par Claude,
@@ -1450,6 +1496,7 @@ const API = {
     if (a.vue === "dessus") ph = 0.35; else if (a.vue === "rasante") ph = 1.25;
     r = Math.max(controls.minDistance + 2, Math.min(controls.maxDistance, r)); s.set(r, ph, th); FOCUS = null; ORBITE = null; SUIVI = null;
     voler(new THREE.Vector3().setFromSpherical(s).add(controls.target), controls.target.clone(), 1200); },
+  trafic: () => ({ cle: TRAFIC.cle, lu_le: TRAFIC.lu, liste: TRAFIC.liste.map(x => ({ type: x.type, retard: x.retard, de: x.de, vers: x.vers, routes: x.routes })) }),
   chargerVoiture, cinema, cinemaStop, cinemaEnCours: () => CINE.on,
   arreteVol() { VOL = null; }, instantane() {},
   icone: id => svg(id), couleur: id => couleurs[id], ids: Object.keys(couleurs),
@@ -1478,6 +1525,7 @@ DEMARRE = (async () => { try {
   // les chantiers en cours (Grand Lyon) et ton point GPS
   (async () => { try { const ch = await fn("jarvis-quartier", { quoi: "chantiers", lieu: LIEU }); if (ch && ch.ok) window.__chantiers = poserChantiers(ch.liste || []); } catch (_) { /* tant pis : la carte reste sans chantiers */ } })();
   suivreMoi();
+  lireTrafic(); setInterval(lireTrafic, 120000);   // le trafic TomTom, toutes les 2 minutes (si la clé est rangée dans les Réglages)
   const vivre = async () => { try { const v = await fn("jarvis-tcl", { quoi: "vehicules" }); if (v && v.ok) majBus(v.bus || []); } catch (_) { /* prochain tour */ } };
   const passages = async () => { try { const p = await fn("jarvis-tcl", { quoi: "passages" }); if (p && p.ok) panneau(p); } catch (_) { /* prochain tour */ } };
   if (chezMoi) { vivre(); passages(); setInterval(vivre, 15000); setInterval(passages, 30000); }

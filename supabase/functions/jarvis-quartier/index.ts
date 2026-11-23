@@ -338,11 +338,33 @@ async function chantiersAutour(lieu = "maison") {
   }
   return { ok: true, centre: { lat: la0, lon: lo0 }, liste, cles: fs[0] ? Object.keys(fs[0].properties ?? {}) : [] };
 }
+// TomTom : le trafic en direct autour du lieu (bouchons, accidents, routes fermées), avec la clé rangée dans les Réglages.
+// On ne garde que l'info utile, en mètres autour du lieu : la carte fait le reste (couleur sur la rue, voitures qui ralentissent).
+const CAT: Record<number, string> = { 1: "Accident", 2: "Brouillard", 3: "Conditions dangereuses", 4: "Pluie", 5: "Verglas", 6: "Bouchon", 7: "Voie fermée", 8: "Route fermée", 9: "Travaux", 10: "Vent", 11: "Inondation", 14: "Véhicule en panne" };
+async function traficAutour(lieu = "maison") {
+  const cle = await secret("TOMTOM_KEY"); if (!cle) return { ok: false, cle: false };
+  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g[lieu]; if (!m) throw new Error(lieu + " absent");
+  const la0 = m.lat, lo0 = m.lon, kx = Math.cos(la0 * Math.PI / 180) * 111320, ky = 110574, r = 900;
+  const dla = r / ky, dlo = r / kx;
+  const champs = "{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description},startTime,endTime,from,to,length,delay,roadNumbers}}}";
+  const u = `https://api.tomtom.com/traffic/services/5/incidentDetails?key=${encodeURIComponent(cle)}&bbox=${lo0 - dlo},${la0 - dla},${lo0 + dlo},${la0 + dla}&fields=${encodeURIComponent(champs)}&language=fr-FR&timeValidityFilter=present`;
+  const rep = await fetch(u, { signal: AbortSignal.timeout(20000) });
+  if (!rep.ok) return { ok: false, cle: true, erreur: "TomTom HTTP " + rep.status };
+  const j = await rep.json();
+  const pt = (c: number[]) => [Math.round((c[0] - lo0) * kx * 10) / 10, Math.round((c[1] - la0) * ky * 10) / 10];
+  const liste = (j.incidents ?? []).map((f: any) => { const p = f.properties ?? {}, g2 = f.geometry ?? {};
+    const l = g2.type === "LineString" ? g2.coordinates.map(pt).flat() : g2.type === "Point" ? pt(g2.coordinates) : [];
+    return { type: CAT[p.iconCategory] ?? "Incident", cat: p.iconCategory ?? 0, gravite: p.magnitudeOfDelay ?? 0, retard: Math.round(p.delay ?? 0), longueur: Math.round(p.length ?? 0),
+      de: p.from ?? "", vers: p.to ?? "", routes: p.roadNumbers ?? [], texte: (p.events ?? []).map((e: any) => e.description).filter(Boolean).join(" · ").slice(0, 120), fin: p.endTime ?? null, l };
+  }).filter((x: any) => x.l.length >= 2);
+  return { ok: true, cle: true, lu_le: new Date().toISOString(), liste };
+}
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!(await autorise(req))) return json({ erreur: "non autorisé" }, 401);
   const b = await req.json().catch(() => ({}));
   const lieu = b.lieu === "usine" ? "usine" : "maison";   // chez toi, ou ton travail
+  if (b.quoi === "trafic") { try { return json(await traficAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   if (b.quoi === "chantiers") { try { return json(await chantiersAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   const CHEMIN = `cache/quartier-${lieu}.json`;
   const r = Number(b.apercu) || 0;

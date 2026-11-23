@@ -72,7 +72,7 @@ const HOOKS = {
   frame: () => V && V.decalage(viewShiftGoal),
 };
 V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
-  : await (await import("./carte.js?v=carte1")).creerCarte(canvas, HOOKS, { fn: appeler });
+  : await (await import("./carte.js?v=carte2")).creerCarte(canvas, HOOKS, { fn: appeler });
 document.body.classList.toggle("vuecarte", VUE === "carte");
 if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
 // sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)
@@ -1077,6 +1077,7 @@ const REGLAGES = [
   { name: "MEDINLYON_PASSWORD", label: "MédinLyon · mot de passe", help: "", type: "password", ph: "ton mot de passe MédinLyon" },
   { name: "GRANDLYON_ID", label: "TCL (Data Grand Lyon) · e-mail", help: "Ton compte gratuit data.grandlyon.com : il sert aux passages des TCL en temps réel et aux perturbations.", type: "email", ph: "ton e-mail Data Grand Lyon" },
   { name: "GRANDLYON_PASSWORD", label: "TCL (Data Grand Lyon) · mot de passe", help: "", type: "password", ph: "ton mot de passe Data Grand Lyon" },
+  { name: "TOMTOM_KEY", label: "TomTom · clé", help: "Ta clé gratuite TomTom (developer.tomtom.com › Clés) : elle affiche les bouchons, accidents et routes fermées en direct sur ta carte.", type: "password", ph: "ta clé TomTom" },
   { name: "MS_CLIENT_SECRET", label: "Outlook · secret de l’application", help: "La « valeur » du secret client créé dans Microsoft Entra (application Jarvis › Certificats et secrets). Elle sert seulement à lire tes mails.", type: "password", ph: "valeur du secret Microsoft" },
 ];
 /* ---------- La vue de la ville : la vraie carte, ou l'ancienne ville (gardée, remise d'un appui) ---------- */
