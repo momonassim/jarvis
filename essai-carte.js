@@ -201,7 +201,7 @@ function construireSol(sol) {
   for (let k = 0; k < N * N; k++) { const c = cls[k], t = teintes[c === 9 ? 0 : c]; img.data[k * 4] = t[0]; img.data[k * 4 + 1] = t[1]; img.data[k * 4 + 2] = t[2]; img.data[k * 4 + 3] = c === 9 ? 0 : 255; }
   cx.putImageData(img, 0, 0);
   // agrandie et adoucie : les bords en biais deviennent des lignes douces
-  const grand = document.createElement("canvas"); grand.width = grand.height = Math.min(3072, N * 3);   // reste sous la limite des iPhone const gx = grand.getContext("2d");
+  const grand = document.createElement("canvas"); grand.width = grand.height = Math.min(3072, N * 3); const gx = grand.getContext("2d");   // taille limitée pour les iPhone
   gx.imageSmoothingEnabled = true; gx.imageSmoothingQuality = "high"; gx.filter = `blur(${(grand.width / N * 0.55).toFixed(1)}px)`; gx.drawImage(cv, 0, 0, grand.width, grand.height);
   const tex = new THREE.CanvasTexture(grand); tex.colorSpace = THREE.SRGBColorSpace; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const g = new THREE.CircleGeometry(R0 - 0.5, 128); g.rotateX(-Math.PI / 2); g.translate(0, HSOL[0], 0);
