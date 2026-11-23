@@ -107,9 +107,9 @@ async function construire() {
     const w = Math.max(3, Math.min(16, Number(p.largeur_de_chaussee) || (/Chemin|Route empierrée/i.test(nat) ? 3 : Number(p.importance) <= 3 ? 9 : 6)));
     for (const l of anneaux(f.geometry)) { const pts = l.map(pt); if (!dedans(pts)) continue;
       // une « route » qui traverse des bâtiments n'est pas une vraie rue visible (tracé simplifié, passage souterrain…) : on l'enlève
-      let n = 0, dans = 0;
-      for (let i = 0; i < pts.length - 1; i++) { const L = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); for (let s = 0; s < L; s += 3) { const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * s / L, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * s / L; if (x * x + y * y > (R + 60) ** 2) continue; n++; if (distMur(x, y, 1) < 0) dans++; } }
-      if (n && dans / n > 0.08) continue;
+      let suite = 0, traverse = false;   // plus de 6 m d'affilée à l'intérieur d'un bâtiment
+      for (let i = 0; i < pts.length - 1 && !traverse; i++) { const L = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); for (let s = 0; s < L; s += 2) { const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * s / L, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * s / L; if (x * x + y * y > (R + 60) ** 2) { suite = 0; continue; } if (distMur(x, y, 1) < 0) { if (++suite >= 4) { traverse = true; break; } } else suite = 0; } }
+      if (traverse) continue;
       const r = { w, i: Number(p.importance) || 5, n: p.nom_collaboratif_gauche || p.nom_collaboratif_droite || "", pts }; routes.push(r);
       for (let i = 0; i < pts.length - 1; i++) gr.mettre(Math.min(pts[i][0], pts[i + 1][0]) - 8, Math.min(pts[i][1], pts[i + 1][1]) - 8, Math.max(pts[i][0], pts[i + 1][0]) + 8, Math.max(pts[i][1], pts[i + 1][1]) + 8, r); }
   }
