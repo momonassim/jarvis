@@ -204,6 +204,9 @@ function peindreMarquages() {
   // bord de trottoir net : côté trottoir une bande couleur trottoir, côté route un caniveau clair (cache les petites vagues)
   const tc = new THREE.Color(), hex = h => "#" + tc.setHex(h).getHexString();
   gx.lineCap = "round"; gx.lineJoin = "round";
+  for (const { pts: l, w } of ruesSansBordure()) {
+    const ligne = (pl, larg, col) => { gx.strokeStyle = col; gx.lineWidth = larg * k; gx.beginPath(); pl.forEach(([x, y], i) => i ? gx.lineTo(X(x), Y(y)) : gx.moveTo(X(x), Y(y))); gx.stroke(); };
+    ligne(l, w + 3.2, hex(CSOL[0])); ligne(l, w, hex(CSOL[1])); }
   for (const f of SOL.bordures) { const l = pts(f); if (l.length < 2) continue;
     // de quel côté est la route ? on regarde au milieu du trait
     const m = Math.floor((l.length - 1) / 2), [x1, y1] = l[m], [x2, y2] = l[m + 1], L = Math.hypot(x2 - x1, y2 - y1) || 1, nx = -(y2 - y1) / L, ny = (x2 - x1) / L;
@@ -212,7 +215,7 @@ function peindreMarquages() {
     const trait = (pl, w, col) => { gx.strokeStyle = col; gx.lineWidth = w * k; gx.beginPath(); pl.forEach(([x, y], i) => i ? gx.lineTo(X(x), Y(y)) : gx.moveTo(X(x), Y(y))); gx.stroke(); };
     trait(decal(-0.45), 0.8, hex(CSOL[0]));      // trottoir
     trait(decal(0.55), 0.9, hex(CSOL[1]));       // bitume jusqu'au caniveau
-    trait(decal(0.25), 0.4, "#c8c6c1");          // caniveau
+    trait(decal(0.22), 0.3, "#b9b7b1");          // caniveau
   }
   c.strokeStyle = c.fillStyle = "#ffffff"; c.lineCap = "butt";
   // ligne de milieu en tirets (3 m de trait, 3,5 m d'espace) sur les rues assez larges pour deux voies
@@ -222,6 +225,24 @@ function peindreMarquages() {
   c.globalCompositeOperation = "destination-in"; c.imageSmoothingEnabled = false; c.drawImage(SOL.mcv, 0, 0, S, S);
   gx.drawImage(calque, 0, 0); SOL.tex.needsUpdate = true;
 }
+
+/* rues sans bordure dans le plan officiel : on leur donne des bords nets et des bordures « logiques » */
+function ruesSansBordure() {
+  if (SOL.synth) return SOL.synth;
+  const G = new Map(), C = 4, cle = (x, y) => Math.floor(x / C) + "|" + Math.floor(y / C);
+  for (const f of SOL.bordures) { const l = pts(f); for (let i = 0; i < l.length - 1; i++) { const L = Math.hypot(l[i + 1][0] - l[i][0], l[i + 1][1] - l[i][1]); for (let t = 0; t <= L; t += 1) { const x = l[i][0] + (l[i + 1][0] - l[i][0]) * (L ? t / L : 0), y = l[i][1] + (l[i + 1][1] - l[i][1]) * (L ? t / L : 0); (G.get(cle(x, y)) || G.set(cle(x, y), []).get(cle(x, y))).push([x, y]); } } }
+  const bordProche = (x, y, d) => { for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (const [px, py] of G.get((Math.floor(x / C) + a) + "|" + (Math.floor(y / C) + b)) || []) if (Math.hypot(px - x, py - y) < d) return true; return false; };
+  const out = [];
+  for (const r of SOL.routes) { const l = pts(r.p), w = Math.min(r.w, 7); let cur = [];
+    const pousser = () => { if (cur.length > 1) out.push({ pts: cur, w }); cur = []; };
+    for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1);
+      for (let t = 0; t < L; t += 2) { const x = x1 + (x2 - x1) * t / L, y = y1 + (y2 - y1) * t / L;
+        const ok = Math.hypot(x, y) < SOL.R0 - 3 && !bordProche(x, y, w / 2 + 2.5);
+        if (ok) cur.push([x, y]); else pousser(); } }
+    pousser(); }
+  return (SOL.synth = out);
+}
+
 let passages3D = null;
 function poserPassages() {
   if (!SOL) return; if (passages3D) { scene.remove(passages3D); passages3D.geometry.dispose(); }
@@ -296,6 +317,13 @@ function construireSol(sol) {
 /* ---------- deuxième couche : l'habillage (placé « à la logique », pour un rendu vivant) ---------- */
 function habiller(sol) {
   if (!SOL) return;
+  // les rues sans bordure officielle : la chaussée devient nette (pour les passages piétons) et reçoit deux bordures
+  const synth = ruesSansBordure(), kb = [];
+  for (const { pts: l, w } of synth) {
+    for (const [x, y] of l) for (let dx = -w / 2; dx <= w / 2; dx += SOL.P) for (let dy = -w / 2; dy <= w / 2; dy += SOL.P) { if (dx * dx + dy * dy > w * w / 4) continue; const i = Math.floor((x + dx + SOL.R0) / SOL.P), j = Math.floor((SOL.R0 - y - dy) / SOL.P); if (i >= 0 && j >= 0 && i < SOL.N && j < SOL.N && SOL.cls[j * SOL.N + i] !== 9) SOL.cls[j * SOL.N + i] = 1; }
+    for (const sg of [-1, 1]) for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.1) continue; const nx = -(y2 - y1) / L * sg * (w / 2 + 0.1), ny = (x2 - x1) / L * sg * (w / 2 + 0.1);
+      const b = new THREE.BoxGeometry(L + 0.25, 0.15, 0.2); b.rotateY(Math.atan2(y2 - y1, x2 - x1)); b.translate((x1 + x2) / 2 + nx, 0.195, -((y1 + y2) / 2 + ny)); kb.push(b.toNonIndexed()); } }
+  if (kb.length) { const mb = new THREE.Mesh(mergeGeometries(kb), new THREE.MeshStandardMaterial({ color: 0xe4ded3, roughness: 0.9 })); mb.castShadow = mb.receiveShadow = true; scene.add(mb); }
   let graine = 777; const alea = () => { graine = (graine * 1103515245 + 12345) & 0x7fffffff; return graine / 0x7fffffff; };
   const lamp = [], autos = [];
   const passageProche = (x, y, d) => SOL.passages.some(([a, b]) => Math.hypot(a - x, b - y) < d);
@@ -554,7 +582,7 @@ function poserLignes(carte) {
       // tracé redécoupé tous les 3 m, puis chaque point posé sur la rue la plus proche
       const brut = t.map(([la, lo]) => local(la, lo, centre)), fin = [];
       for (let i = 0; i < brut.length; i++) { if (i) { const [x1, y1] = brut[i - 1], [x2, y2] = brut[i], n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 3); for (let k = 1; k < n; k++) fin.push([x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n]); } fin.push(brut[i]); }
-      for (let [x, y] of fin) { const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } const surRoute = !RDETAIL || Math.hypot(x, y) > RDETAIL - 2 || cellSol(x, y) === 1; if (x * x + y * y < R * R && surRoute) seg.push([x, y]); else flush(); }
+      for (let [x, y] of fin) { const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } const surRoute = !RDETAIL || Math.hypot(x, y) > RDETAIL + 5; /* autour de chez toi : pas de tracés de lignes, les bus en direct suffisent */ if (x * x + y * y < R * R && surRoute) seg.push([x, y]); else flush(); }
       // chaque ligne décalée sur le côté (comme des rails parallèles), pour ne jamais se superposer à une autre
 
       flush();
