@@ -655,7 +655,7 @@ function boucle(t) {
 }
 
 /* ---------- démarrage ---------- */
-if (TEST) Object.assign(window, { camera, controls, scene, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
+if (TEST || location.search.includes("regard")) Object.assign(window, { camera, controls, scene, THREE, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
 try {
   const [q, carte] = await Promise.all([fn("jarvis-quartier", {}), fn("jarvis-tcl", { quoi: "carte" })]);
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
