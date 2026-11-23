@@ -34,12 +34,21 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
 .panel:not(.ouvert) .row:nth-of-type(n+3){display:none}
 .msg{position:fixed;inset:0;display:grid;place-items:center;padding:30px;text-align:center;font-weight:700;color:var(--ink2);pointer-events:none}
 .msg[hidden]{display:none}
+.fiche{position:fixed;left:12px;right:12px;top:calc(76px + env(safe-area-inset-top));max-width:520px;margin:0 auto;background:var(--enamel);border:1px solid var(--rim);border-left:6px solid var(--c,#2b3138);box-shadow:0 14px 30px -16px rgba(30,40,55,.45);padding:12px 14px}
+.fiche[hidden]{display:none}
+.fiche b{display:block;font-size:17px;font-weight:800}
+.fiche span{display:block;margin-top:3px;font-size:13.5px;font-weight:600;color:var(--ink2)}
+.fiche div{display:flex;gap:8px;margin-top:10px}
+.fiche a,.fiche button{height:36px;padding:0 12px;display:grid;place-items:center;border:1px solid var(--rim);background:#fff;color:var(--ink);font:700 13px var(--sans);text-decoration:none}
+.fiche a.ok{background:var(--c,#2b3138);color:#fff;border-color:transparent}
+.fiche button{margin-left:auto}
 </style>
 </head>
 <body>
 <canvas id="c" aria-label="Ton quartier en 3D, avec les bus en direct"></canvas>
 <div class="bar"><div><small>Essai · données réelles</small><b><i class="live"></i>Ton quartier en vrai</b></div><button id="moi" type="button">Chez moi</button><button id="travail" type="button">Travail</button><a href="./">Jarvis</a></div>
 <div class="panel" id="panel"><h4 id="tete"><span>Brossolette Genas <em id="plus">▴ tout voir</em></span><span id="maj">…</span></h4><div id="pas"></div></div>
+<div class="fiche" id="fiche" hidden></div>
 <div class="msg" id="msg">Je construis ton quartier…</div>
 <script type="importmap">
 {"imports":{
@@ -48,6 +57,6 @@ canvas{display:block;width:100vw;height:100vh;touch-action:none}
   "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.45.4"
 }}
 </script>
-<script type="module" src="essai-carte.js?v=23"></script>
+<script type="module" src="essai-carte.js?v=24"></script>
 </body>
 </html>

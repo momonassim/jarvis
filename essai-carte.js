@@ -38,7 +38,7 @@ camera.position.set(-260, 330, 380);
 const controls = new OrbitControls(camera, canvas);
 controls.target.set(0, 0, 0);
 controls.enableDamping = true; controls.dampingFactor = 0.08;
-controls.maxPolarAngle = 1.32; controls.minDistance = 40; controls.maxDistance = 1300;
+controls.maxPolarAngle = 1.45; controls.minDistance = 8; controls.maxDistance = 1300; controls.zoomToCursor = true;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 controls.screenSpacePanning = false;
 
@@ -566,6 +566,7 @@ function detaillerMaison(pp, hAt, voisins) {
         const pv = new THREE.BoxGeometry(1.7, 0.05, L2); pv.rotateY(Math.atan2(nx, ny)); pv.translate(cx, 0.16, -cy);
         const mp = new THREE.Mesh(pv, new THREE.MeshStandardMaterial({ color: 0xdedad2, roughness: 0.9 })); mp.receiveShadow = true; scene.add(mp);
         ZONES_LIBRES.push([cx, cy, L2 / 2 + 1.5]); } } }
+  window.MAISON_GARAGE = entreeGarage;
   if (TEST || location.search.includes("regard")) window.MAISON = { poly, garage: entreeGarage };
   // le jardin : pelouse, haie et clôture (muret + grillage vert) autour de l'immeuble, sans jamais déborder sur la route ni chez les voisins
   const env = [...poly].sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
@@ -622,13 +623,13 @@ function construireQuartier(q) {
   dessinerRues(q.routes || []);
   // bâtiments : un seul volume chacun, toit compris ; le sien ressort
   const bg = []; let maison = null, maisonT = 0;
-  const liste = (q.batiments || []).map(b => ({ ...b, pp: pts(b.p) })).filter(b => b.pp.length >= 4);
+  const liste = (q.batiments || []).map(b => ({ ...b, pp: pts(b.p) })).filter(b => b.pp.length >= 4); BATS = liste;
   let mb = liste.find(b => dansPoly(0, 0, b.pp));
   if (!mb) { let bd = 1e9; for (const b of liste) for (const [x, y] of b.pp) { const d = Math.hypot(x, y); if (d < bd) { bd = d; mb = b; } } }
   for (const b of liste) {
     const pente = b.l && aireDe(b.pp) < 250 && b.t - b.h > 1.5;   // petite maison au toit en pente : un vrai toit en pente, aux hauteurs du laser
     const g = b.l && !pente ? batimentLidar(b.pp, b.l) : batiment(b.pp, Math.max(2.5, b.h), Math.max(b.h, b.t || b.h));
-    if (b === mb) { maison = g; maisonPoly = b.pp; maisonH = Math.max(b.h, b.t || b.h); } else bg.push(g);
+    if (b === mb) { b.estMaison = true; maison = g; maisonPoly = b.pp; maisonH = Math.max(b.h, b.t || b.h); } else bg.push(g);
   }
   if (bg.length) {
     const all = mergeGeometries(bg.map(x => { if (!x.attributes.normal) x.computeVertexNormals(); return x; }));
@@ -645,7 +646,6 @@ function construireQuartier(q) {
     // l'anneau suit le pied de l'immeuble (un liseré autour des murs), au lieu d'un cercle qui traverse les voisins
     const ligne = new THREE.BufferGeometry().setFromPoints(maisonPoly.map(([x, y]) => new THREE.Vector3(x, 0.3, -y)));
     const anneau = new THREE.Line(ligne, new THREE.LineBasicMaterial({ color: 0xe9a23b, transparent: true, opacity: 0.9 })); scene.add(anneau);
-    scene.add(etiquette(LIEU === "usine" ? "🏭 Ton travail" : "Chez toi", "#2b3138", "#f5f1e8", { x: cx, y: maisonH + 4, z: -cy }, 0.028));
   }
 }
 const anneaux = []; // (gardé pour la boucle)
@@ -1124,6 +1124,97 @@ function poserChantiers(liste) {
   return { troncons: runs.length, barrieres: barr.length, ateliers: ateliers.map(t => [Math.round(t.x), Math.round(t.y)]) };
 }
 
+/* ---------- les lieux de Jarvis, posés sur la vraie carte ----------
+   Les vrais endroits quand ils sont dans le quartier (adresses trouvées sur internet), sinon un lieu « imaginé »
+   choisi avec logique : un bâtiment de commerces et services proche de chez toi. Toucher un lieu : la caméra y vole. */
+const LIEUX_CARTE = {
+  maison: [
+    { id: "home", e: "🏠", n: "Chez toi", c: "#e9a23b", ici: true, sous: "Ton immeuble, route de Genas" },
+    { id: "garage", e: "🚗", n: "Ta voiture", c: "#8f84c2", garage: true, sous: "Ta DS5, au garage de l'immeuble" },
+    { id: "banque", e: "💶", n: "Ton argent", c: "#d9b52c", ll: [45.7512, 4.914568], sous: "La Banque Postale · 56 rue Séverine" },
+    { id: "medecin", e: "🍼", n: "Le bébé", c: "#4fae7c", ll: [45.751838, 4.913058], sous: "École Albert Camus · 42 rue Séverine" },
+    { id: "clinique", e: "🩺", n: "Ta santé", c: "#e2675c", ll: [45.752297, 4.908565], sous: "MédinLyon · 16 rue des Brosses" },
+    { id: "mairie", e: "🪪", n: "Tes papiers", c: "#c99a52", imagine: true, sous: "Lieu imaginé · la vraie mairie est à Bron (2,2 km)" },
+    { id: "impots", e: "🏛️", n: "Impôts et amendes", c: "#5b7fae", imagine: true, sous: "Lieu imaginé · le vrai centre : 14 rue Albert Camus, Bron" },
+    { id: "orange", e: "📱", n: "Abonnements", c: "#f07a1e", imagine: true, sous: "Lieu imaginé · tes 2 contrats Orange" },
+    { id: "energie", e: "⚡", n: "Gaz et électricité", c: "#7bb33a", imagine: true, sous: "Lieu imaginé · Plenitude" },
+    { id: "usine", e: "🏭", n: "Ton travail", c: "#8a6d52", loin: [45.7125281, 4.8795264], sous: "30 rue Louis Jouvet, Vénissieux · 4,9 km", aller: "usine" },
+  ],
+  usine: [
+    { id: "usine", e: "🏭", n: "Ton travail", c: "#8a6d52", ici: true, sous: "Tokai Cobex · 30 rue Louis Jouvet, Vénissieux" },
+    { id: "home", e: "🏠", n: "Chez toi", c: "#e9a23b", loin: [45.7486618, 4.916994], sous: "Route de Genas · 4,9 km", aller: "maison" },
+  ],
+};
+let BATS = [];   // les bâtiments de la carte (rempli par construireQuartier)
+const PINS = [];
+function poserLieux() {
+  const pris = new Set(), cible = [];
+  const batiPres = (x, y, max = 45) => { let best = null, bd = max; for (const b of BATS) { if (dansPoly(x, y, b.pp)) return b; for (const [px, py] of b.pp) { const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = b; } } } return best; };
+  const centreDe = b => {   // le vrai centre de la forme (et toujours À L'INTÉRIEUR du bâtiment, même en L)
+    const p = b.pp; let A = 0, cx = 0, cy = 0; for (let i = 0; i < p.length - 1; i++) { const [x1, y1] = p[i], [x2, y2] = p[i + 1], k = x1 * y2 - x2 * y1; A += k; cx += (x1 + x2) * k; cy += (y1 + y2) * k; }
+    let c = A ? [cx / (3 * A), cy / (3 * A)] : p[0]; if (dansPoly(c[0], c[1], p)) return c;
+    let best = p[0], bd = 1e9; const [x0, y0, x1, y1] = p.reduce((a, [x, y]) => [Math.min(a[0], x), Math.min(a[1], y), Math.max(a[2], x), Math.max(a[3], y)], [1e9, 1e9, -1e9, -1e9]);
+    for (let x = x0; x <= x1; x += 1.5) for (let y = y0; y <= y1; y += 1.5) if (dansPoly(x, y, p)) { const d = Math.hypot(x - c[0], y - c[1]); if (d < bd) { bd = d; best = [x, y]; } } return best; };
+  // les lieux imaginés : des bâtiments de commerces et services, ni trop près ni trop loin, bien répartis
+  const candidats = BATS.filter(b => /commercial|service/i.test(b.u || "") && aireDe(b.pp) > 140).map(b => ({ b, c: centreDe(b) }))
+    .filter(({ c }) => { const d = Math.hypot(...c); return d > 90 && d < 480; }).sort((p, q) => Math.hypot(...p.c) - Math.hypot(...q.c));
+  for (const L of LIEUX_CARTE[LIEU]) {
+    let b = null, x = 0, y = 0, h = 0;
+    if (L.ici) { b = BATS.find(q => q.estMaison) || batiPres(0, 0); }
+    else if (L.garage && window.MAISON_GARAGE) { const g = window.MAISON_GARAGE; x = g.x + g.nx * 1.5; y = g.y + g.ny * 1.5; h = 3; }
+    else if (L.ll) { [x, y] = local(L.ll[0], L.ll[1], centre); b = batiPres(x, y); }
+    else if (L.imagine) { const c = candidats.find(({ b, c }) => !pris.has(b) && cible.every(([a, d]) => Math.hypot(a - c[0], d - c[1]) > 70)); if (c) b = c.b; }
+    else if (L.loin) { const [lx, ly] = local(L.loin[0], L.loin[1], centre), d = Math.hypot(lx, ly); x = lx / d * 600; y = ly / d * 600; h = 0; L.bord = true; }
+    if (b) { pris.add(b); [x, y] = centreDe(b); h = Math.max(b.h, b.t || b.h); }
+    if (!b && !L.garage && !L.bord && !L.ll) continue;
+    cible.push([x, y]);
+    // le mât et sa tête aux couleurs du lieu, l'étiquette au-dessus ; le pied du bâtiment souligné de la même couleur
+    const g = new THREE.Group(), col = new THREE.Color(L.c), haut = L.bord ? 26 : L.garage ? 6 : 12;
+    const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, emissive: col, emissiveIntensity: 0.25 });
+    const mt = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, haut, 8), new THREE.MeshStandardMaterial({ color: 0x3a3f45 })); mt.position.y = haut / 2;
+    const tete = new THREE.Mesh(new THREE.SphereGeometry(L.bord ? 3.2 : 1.6, 20, 14), mat); tete.position.y = haut + (L.bord ? 3.2 : 1.6);
+    const halo = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.8, 40), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.6, side: THREE.DoubleSide })); halo.position.y = tete.position.y; halo.rotation.x = -Math.PI / 2;
+    g.add(mt, tete, halo); g.position.set(x, h, -y); scene.add(g);
+    const lab = etiquette(L.e + " " + L.n, L.c, "#ffffff", { x: 0, y: tete.position.y + 2.5, z: 0 }, 0.026); g.add(lab);
+    if (b) { const ligne = new THREE.BufferGeometry().setFromPoints(b.pp.map(([px, py]) => new THREE.Vector3(px, 0.35, -py)));
+      scene.add(new THREE.Line(ligne, new THREE.LineBasicMaterial({ color: col }))); }
+    const P = { L, g, tete, lab, halo, x, y, h, b }; PINS.push(P); tete.userData.pin = P; lab.userData.pin = P;
+    const dec = PINS.length * 0.7; ANIMS.push(t => { const s = 1 + 0.5 * ((t / 1600 + dec) % 1); halo.scale.set(s, s, 1); halo.material.opacity = 0.6 * (1 - ((t / 1600 + dec) % 1)); tete.position.y = haut + (L.bord ? 3.2 : 1.6) + Math.sin(t / 700 + dec) * 0.25; });
+  }
+}
+// toucher un lieu (ou son étiquette) : la caméra vole jusqu'à lui et sa fiche s'ouvre
+{ const ray = new THREE.Raycaster(), v = new THREE.Vector2(); let d0 = null;
+  canvas.addEventListener("pointerdown", e => { d0 = [e.clientX, e.clientY]; });
+  canvas.addEventListener("pointerup", e => { if (!d0 || Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 8) return;
+    v.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(v, camera); ray.camera = camera;
+    const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) choisirLieu(hit.object.userData.pin); else fermerFiche(); });
+}
+function choisirLieu(P) {
+  const L = P.L; if (L.bord && L.aller) { allerA(L.aller); return; }
+  // vue de trois quarts, un peu en hauteur, le lieu au centre
+  const R = Math.max(55, P.b ? Math.sqrt(aireDe(P.b.pp)) * 1.8 + P.h * 1.5 : 0), a = Math.atan2(-P.y, -P.x) + 0.5;
+  voler(new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.7, -(P.y + Math.sin(a) * R)), new THREE.Vector3(P.x, P.h + 4, -P.y));
+  const f = $("fiche"); if (!f) return;
+  const [la, lo] = L.ll || (P.b ? (() => { const k = Math.cos(centre.lat * Math.PI / 180) * 111320; return [centre.lat + P.y / 110574, centre.lon + P.x / k]; })() : [centre.lat, centre.lon]);
+  f.style.setProperty("--c", L.c);
+  f.innerHTML = `<b>${L.e} ${L.n}</b><span>${L.sous || ""}</span><div><a href="./" class="ok">Ouvrir dans Jarvis</a>${L.ici || L.garage ? "" : `<a href="https://maps.apple.com/?daddr=${la.toFixed(6)},${lo.toFixed(6)}" target="_blank" rel="noopener">Y aller</a>`}<button type="button" id="ffer">✕</button></div>`;
+  f.hidden = false; $("ffer").onclick = fermerFiche;
+}
+function fermerFiche() { const f = $("fiche"); if (f) f.hidden = true; }
+
+/* ---------- la caméra, comme dans ta ville Jarvis : vols en arc, doux, qu'on interrompt en touchant l'écran ---------- */
+let VOL = null;
+function voler(pos, cible, duree = 1600) {
+  const p0 = camera.position.clone(), t0 = controls.target.clone(), d = Math.hypot(pos.x - p0.x, pos.z - p0.z);
+  let ctrl = null; if (d > 40) { ctrl = p0.clone().lerp(pos, 0.5); ctrl.y = Math.max(p0.y, pos.y) + Math.min(160, d * 0.18); }
+  VOL = { p0, t0, p: pos.clone(), t: cible.clone(), ctrl, debut: performance.now(), duree: Math.min(3200, duree + d * 1.2) };
+}
+controls.addEventListener("start", () => { VOL = null; });
+ANIMS.push(t => { if (!VOL) return; const k = Math.min(1, (performance.now() - VOL.debut) / VOL.duree), e = k * k * (3 - 2 * k);
+  if (VOL.ctrl) { const u = 1 - e; camera.position.set(u * u * VOL.p0.x + 2 * u * e * VOL.ctrl.x + e * e * VOL.p.x, u * u * VOL.p0.y + 2 * u * e * VOL.ctrl.y + e * e * VOL.p.y, u * u * VOL.p0.z + 2 * u * e * VOL.ctrl.z + e * e * VOL.p.z); }
+  else camera.position.lerpVectors(VOL.p0, VOL.p, e);
+  controls.target.lerpVectors(VOL.t0, VOL.t, e); if (k >= 1) VOL = null; });
+
 /* ---------- toi, en direct (GPS du téléphone) ---------- */
 let moiPoint = null;
 function suivreMoi() {
@@ -1163,7 +1254,7 @@ $("tete").addEventListener("click", () => { const o = $("panel").classList.toggl
 function taille() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener("resize", taille); taille();
 // « Chez moi » et « Travail » : on recentre si on y est déjà, sinon on change de quartier
-const allerA = (lieu) => { if (lieu === LIEU) { controls.target.set(maisonCentre ? maisonCentre[0] : 0, 0, maisonCentre ? -maisonCentre[1] : 0); camera.position.set(-150, 190, 220); return; }
+const allerA = (lieu) => { if (lieu === LIEU) { const P = PINS.find(p => p.L.ici); if (P) choisirLieu(P); else voler(new THREE.Vector3(-150, 190, 220), new THREE.Vector3(maisonCentre ? maisonCentre[0] : 0, 0, maisonCentre ? -maisonCentre[1] : 0)); return; }
   const u = new URL(location.href); if (lieu === "usine") u.searchParams.set("lieu", "usine"); else u.searchParams.delete("lieu"); location.href = u.toString(); };
 $("moi").addEventListener("click", () => allerA("maison"));
 if ($("travail")) $("travail").addEventListener("click", () => allerA("usine"));
@@ -1174,7 +1265,7 @@ function boucle(t) {
 }
 
 /* ---------- démarrage ---------- */
-if (TEST || location.search.includes("regard")) Object.assign(window, { camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
+if (TEST || location.search.includes("regard")) Object.assign(window, { PINS_: () => PINS.map(p => [p.L.id, Math.round(p.x), Math.round(p.y), Math.round(p.h), !!p.b]), choisirLieu, PINS, camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
 try {
   const chezMoi = LIEU === "maison";   // les bus TCL suivis sont ceux du bas de chez toi
   if (!chezMoi) { $("panel").hidden = true; const t = document.querySelector(".bar b"); if (t) t.lastChild.textContent = "Ton travail en vrai"; }
@@ -1185,7 +1276,8 @@ try {
   if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); poserPassages(); if (!TEST) chercherPassages(); }
   if (carte && carte.ok) poserLignes(carte);
   if (SOL) habiller(q.sol);   // après les abribus (les bancs se posent à côté)
-  RESEAU = construireReseau(q.routes || []); habillerRues(); lancerCirculation();   // les rues de la carte : ce qui roule les suit
+  RESEAU = construireReseau(q.routes || []); habillerRues(); lancerCirculation();
+  poserLieux();   // tes lieux Jarvis, aux vrais endroits   // les rues de la carte : ce qui roule les suit
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
   // les chantiers en cours (Grand Lyon) et ton point GPS
