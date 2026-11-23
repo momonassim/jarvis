@@ -365,7 +365,21 @@ function habiller(sol) {
       }
     }
   }
+  // petites rues (sans bordure officielle) : des voitures garées d'un côté, et quelques lampadaires
+  for (const { pts: l, w } of ruesSansBordure()) {
+    if (w < 5) continue;
+    for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.5) continue;
+      const ux = (x2 - x1) / L, uy = (y2 - y1) / L, cx = (x1 + x2) / 2 - uy * (w / 2 - 1.0), cy = (y1 + y2) / 2 + ux * (w / 2 - 1.0);
+      if (alea() < 0.55 && !passageProche(cx, cy, 8) && !autos.some(([a, b]) => Math.hypot(a - cx, b - cy) < 5.2)) autos.push([cx, cy, Math.atan2(uy, ux)]);
+      const lx = (x1 + x2) / 2 + uy * (w / 2 + 0.6), ly = (y1 + y2) / 2 - ux * (w / 2 + 0.6);
+      if (!lamp.some(([a, b]) => Math.hypot(a - lx, b - ly) < 22)) lamp.push([lx, ly, Math.atan2(ux, -uy)]); }
+  }
   const o = new THREE.Object3D();
+  // un banc à côté de chaque abribus
+  { const bancs = [];
+    for (const ab of ABRIS) { const b1 = new THREE.BoxGeometry(1.8, 0.08, 0.45); b1.translate(0, 0.45, 0.1); const b2 = new THREE.BoxGeometry(1.8, 0.45, 0.06); b2.translate(0, 0.7, 0.33);
+      for (const b of [b1, b2]) { b.rotateY(ab.ang); b.translate(ab.x + Math.cos(ab.ang) * 3.6, 0.12, -(ab.y + Math.sin(ab.ang) * 3.6)); bancs.push(b.toNonIndexed()); } }
+    if (bancs.length) { const m = new THREE.Mesh(mergeGeometries(bancs), new THREE.MeshStandardMaterial({ color: 0x6b5a48, roughness: 0.8 })); m.castShadow = true; scene.add(m); } }
   if (lamp.length) {
     const mat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6 });
     const mat2 = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xffe2a0, emissiveIntensity: 0.6 });
@@ -602,12 +616,12 @@ function poserLignes(carte) {
     const toit = new THREE.Mesh(new THREE.BoxGeometry(5, 0.25, 1.8), new THREE.MeshStandardMaterial({ color: 0x2b3138 })); toit.position.y = 2.6;
     const vitre = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 0.12), new THREE.MeshStandardMaterial({ color: 0xcfe0e6, transparent: true, opacity: 0.55 })); vitre.position.set(0, 1.3, -0.8);  // la vitre du fond est côté trottoir
     const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.6, 6), new THREE.MeshStandardMaterial({ color: 0x2b3138 })); pot.position.set(3.2, 1.8, 0);
-    abri.add(toit, vitre, pot); abri.position.set(x, RDETAIL ? 0.12 : 0, -y); abri.rotation.y = ang; abri.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    abri.add(toit, vitre, pot); abri.position.set(x, RDETAIL ? 0.12 : 0, -y); abri.rotation.y = ang; ABRIS.push({ x, y, ang }); abri.traverse(o => { if (o.isMesh) o.castShadow = true; });
     scene.add(abri);
     if (!vus.has(a.nom)) { vus.add(a.nom); if (a.nom === "Brossolette Genas") { arretLabel = etiquette("Brossolette Genas", "#2b3138", "#f5f1e8", { x, y: 9, z: -y }, 0.03, "…"); scene.add(arretLabel); arretPos = [x, y]; } }
   }
 }
-let arretLabel = null, arretPos = null;
+let arretLabel = null, arretPos = null; const ABRIS = [];
 
 /* ---------- les bus : une petite maquette par bus, à sa vraie position GPS ---------- */
 const BUS = new Map();
@@ -689,8 +703,9 @@ try {
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;
   construireQuartier(q);
-  if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); habiller(q.sol); poserPassages(); if (!TEST) chercherPassages(); }
+  if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); poserPassages(); if (!TEST) chercherPassages(); }
   if (carte && carte.ok) poserLignes(carte);
+  if (SOL) habiller(q.sol);   // après les abribus (les bancs se posent à côté)
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
   const vivre = async () => { try { const v = await fn("jarvis-tcl", { quoi: "vehicules" }); if (v && v.ok) majBus(v.bus || []); } catch (_) { /* prochain tour */ } };
