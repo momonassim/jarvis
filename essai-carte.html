@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ebe6dc">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="robots" content="noindex,nofollow">
+<title>Jarvis · essai carte réelle</title>
+<link rel="icon" href="favicon.png?v=2" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#2b3138;--ink2:#7a7f88;--enamel:#f5f1e8;--rim:rgba(43,49,56,.16);--sans:"Plus Jakarta Sans",-apple-system,"SF Pro Text",Roboto,Arial,sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#ebe6dc;font-family:var(--sans);color:var(--ink);-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+canvas{display:block;width:100vw;height:100vh;touch-action:none}
+.bar{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;background:var(--enamel);border:1px solid var(--rim);box-shadow:0 14px 30px -16px rgba(30,40,55,.45)}
+.bar div{flex:1;min-width:0}
+.bar small{display:block;font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2)}
+.bar b{display:block;font-size:15px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar a,.bar button{flex:none;height:38px;padding:0 12px;display:grid;place-items:center;border:1px solid var(--rim);background:#fff;color:var(--ink);font:700 13px var(--sans);text-decoration:none}
+.live{display:inline-block;width:7px;height:7px;border-radius:50%;background:#1f9d63;margin-right:6px;vertical-align:1px;animation:r 1.6s ease-in-out infinite}
+@keyframes r{50%{opacity:.3}}
+.panel{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));max-width:520px;margin:0 auto;background:var(--enamel);border:1px solid var(--rim);box-shadow:0 14px 30px -16px rgba(30,40,55,.45);padding:10px 12px}
+.panel h4{margin:0 0 8px;font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--ink2);display:flex;justify-content:space-between}
+.row{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--rim)}
+.row:first-of-type{border-top:0}
+.bl{flex:none;min-width:38px;height:24px;padding:0 6px;display:grid;place-items:center;font-size:12.5px;font-weight:800}
+.row span{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row strong{font-size:13.5px;font-weight:800;white-space:nowrap}
+.msg{position:fixed;inset:0;display:grid;place-items:center;padding:30px;text-align:center;font-weight:700;color:var(--ink2);pointer-events:none}
+.msg[hidden]{display:none}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Ton quartier en 3D, avec les bus en direct"></canvas>
+<div class="bar"><div><small>Essai · données réelles</small><b><i class="live"></i>Ton quartier en vrai</b></div><button id="moi" type="button">Chez moi</button><a href="./">Jarvis</a></div>
+<div class="panel" id="panel"><h4><span>Brossolette Genas</span><span id="maj">…</span></h4><div id="pas"></div></div>
+<div class="msg" id="msg">Je construis ton quartier…</div>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "@supabase/supabase-js":"https://esm.sh/@supabase/supabase-js@2.45.4"
+}}
+</script>
+<script type="module" src="essai-carte.js?v=1"></script>
+</body>
+</html>
