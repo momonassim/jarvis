@@ -218,31 +218,46 @@ function peindreMarquages() {
   c.lineWidth = Math.max(1.5, 0.2 * k); c.setLineDash([3 * k, 3.5 * k]);
   for (const r of SOL.routes) { if (r.w < 6) continue; const l = pts(r.p); c.beginPath(); l.forEach(([x, y], i) => i ? c.lineTo(X(x), Y(y)) : c.moveTo(X(x), Y(y))); c.stroke(); }
   c.setLineDash([]);
-  // passages piétons : bandes de 50 cm, parallèles à la rue, sur toute la largeur de la chaussée
-  for (const [px, py] of SOL.passages) {
-    const r = surLaRue(px, py, 15); if (!r) continue;
-    const ux = Math.cos(r.ang), uy = Math.sin(r.ang), nx = -uy, ny = ux;   // u : le long de la rue, n : en travers
-    // jusqu'où va la chaussée de chaque côté (un îlot ou un refuge de moins de 6 m ne coupe pas le passage)
-    const bout = (sg) => { let t = 0, dernier = 0, trou = 0; while (t < 18) { t += 0.3; if (cellSol(px + sg * nx * t, py + sg * ny * t) === 1) { dernier = t; trou = 0; } else if ((trou += 0.3) > 6) break; } return dernier; };
-    const a = bout(-1), b = bout(1);
-    if (a + b < 2) continue;
-    for (let t = -a + 0.3; t < b - 0.3; t += 1) {   // une bande tous les mètres (50 cm peints, 50 cm de vide)
-      const cx0 = px + nx * t, cy0 = py + ny * t, L = 1.5;
-      c.beginPath(); c.moveTo(X(cx0 - ux * L), Y(cy0 - uy * L)); c.lineTo(X(cx0 + ux * L), Y(cy0 + uy * L)); c.lineTo(X(cx0 + ux * L + nx * 0.5), Y(cy0 + uy * L + ny * 0.5)); c.lineTo(X(cx0 - ux * L + nx * 0.5), Y(cy0 - uy * L + ny * 0.5)); c.closePath(); c.fill(); }
-  }
   c.globalCompositeOperation = "destination-in"; c.imageSmoothingEnabled = false; c.drawImage(SOL.mcv, 0, 0, S, S);
   gx.drawImage(calque, 0, 0); SOL.tex.needsUpdate = true;
+}
+let passages3D = null;
+function poserPassages() {
+  if (!SOL) return; if (passages3D) { scene.remove(passages3D); passages3D.geometry.dispose(); }
+  // aux carrefours : un passage sur chaque branche, à 6 m du croisement, s'il n'y en a pas déjà un tout près (placé « à la logique »)
+  const liste = SOL.passages.slice(), noeuds = new Map();
+  for (const r of SOL.routes) { const l = pts(r.p); for (const [x, y] of [l[0], l[l.length - 1]]) { const k = Math.round(x) + "|" + Math.round(y); const n = noeuds.get(k) || { x, y, b: [] }; n.b.push(l[0][0] === x && l[0][1] === y ? l[1] : l[l.length - 2]); noeuds.set(k, n); } }
+  for (const n of noeuds.values()) { if (n.b.length < 3 || Math.hypot(n.x, n.y) > SOL.R0 - 10) continue;
+    for (const [bx, by] of n.b) { const L = Math.hypot(bx - n.x, by - n.y) || 1, px = n.x + (bx - n.x) / L * 9, py = n.y + (by - n.y) / L * 9;
+      if (cellSol(px, py) === 1 && !liste.some(([a, c]) => Math.hypot(a - px, c - py) < 12)) liste.push([px, py]); } }
+  const bandes = [];
+  for (const [px, py] of liste) {
+    const r = surLaRue(px, py, 15); if (!r) continue;
+    const ux = Math.cos(r.ang), uy = Math.sin(r.ang), nx = -uy, ny = ux;
+    const bout = (sg) => { let t = 0, dernier = 0, trou = 0; while (t < 18) { t += 0.3; if (cellSol(px + sg * nx * t, py + sg * ny * t) === 1) { dernier = t; trou = 0; } else if ((trou += 0.3) > 6) break; } return dernier; };
+    const a = bout(-1), b = bout(1); if (a + b < 3) continue;
+    for (let t = -a + 0.45; t < b - 0.3; t += 1) { const cx = px + nx * t, cy = py + ny * t; if (cellSol(cx, cy) !== 1) continue;
+      const g = new THREE.BoxGeometry(2.8, 0.025, 0.5); g.rotateY(r.ang); g.translate(cx, 0.135, -cy); bandes.push(g.toNonIndexed()); }
+  }
+  if (!bandes.length) return;
+  passages3D = new THREE.Mesh(mergeGeometries(bandes), new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7 })); passages3D.receiveShadow = true; scene.add(passages3D);
 }
 async function chercherPassages() {   // les vrais passages piétons (OpenStreetMap), chargés après coup pour ne pas ralentir l'ouverture
   try {
     const q = `[out:json][timeout:20];node["highway"="crossing"](around:${Math.round(SOL.R0 + 20)},${centre.lat},${centre.lon});out;`;
     const rep = await fetch("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(q), { signal: AbortSignal.timeout(20000) });
-    const j = await rep.json(); SOL.passages = (j.elements || []).map(e => local(e.lat, e.lon, centre)); peindreMarquages();
+    const j = await rep.json(); SOL.passages = (j.elements || []).map(e => local(e.lat, e.lon, centre)); poserPassages();
   } catch (_) { /* pas grave : la carte reste sans passages piétons */ }
 }
 function construireSol(sol) {
   const N = sol.n, P = sol.pas, R0 = sol.r, cls = new Uint8Array(N * N);
   sol.lignes.split("|").forEach((l, j) => { let i = 0; for (const t of l.match(/[a-z]\d+/g) || []) { const c = t[0] === "z" ? 9 : t.charCodeAt(0) - 97, n = +t.slice(1); cls.fill(c, j * N + i, j * N + i + n); i += n; } });
+  // nettoyage : les petites taches isolées (moins de 5 m²) prennent la couleur de ce qui les entoure
+  { const vu = new Uint8Array(N * N), pile = [], comp = [];
+    for (let k0 = 0; k0 < N * N; k0++) { if (vu[k0] || cls[k0] === 9) continue; const c0 = cls[k0] === 2 ? 1 : cls[k0]; comp.length = 0; pile.push(k0); vu[k0] = 1; const voisins = new Map();
+      while (pile.length) { const k = pile.pop(); comp.push(k); const i = k % N, j = (k / N) | 0;
+        for (const q of [i > 0 ? k - 1 : -1, i < N - 1 ? k + 1 : -1, j > 0 ? k - N : -1, j < N - 1 ? k + N : -1]) { if (q < 0) continue; const cq = cls[q] === 2 ? 1 : cls[q]; if (cq === c0) { if (!vu[q]) { vu[q] = 1; pile.push(q); } } else if (cq !== 9) voisins.set(cq, (voisins.get(cq) || 0) + 1); } }
+      if (comp.length < 32 && voisins.size) { let best = -1, bn = -1; for (const [c, n] of voisins) if (n > bn) { bn = n; best = c; } for (const k of comp) cls[k] = best; } } }
   // le sol est peint comme une image (un point = 40 cm) puis lissé : les limites restent nettes mais sans « escalier »
   const cv = document.createElement("canvas"); cv.width = N; cv.height = N; const cx = cv.getContext("2d"), img = cx.createImageData(N, N), c3 = new THREE.Color();
   const teintes = CSOL.map(h => { c3.setHex(h); return [Math.round(c3.r * 255), Math.round(c3.g * 255), Math.round(c3.b * 255)]; });
@@ -435,16 +450,19 @@ function poserLignes(carte) {
     COUL[l.ligne] = l.couleur;
     for (const t of l.traits) {
       let seg = [];
-      const rang = Object.keys(COUL).indexOf(l.ligne), dec = (rang % 2 ? 1 : -1) * (0.55 + Math.floor(rang / 2) * 1.1);
+      const rang = Math.max(0, (carte.lignes || []).findIndex(x => x.ligne === l.ligne)), dec = (rang - ((carte.lignes || []).length - 1) / 2) * 0.55;   // chaque ligne sur son propre « rail », 55 cm d'écart
       const decaler = (pl) => pl.map(([x, y], i) => { const A = pl[Math.max(0, i - 1)], B = pl[Math.min(pl.length - 1, i + 1)]; let dx = B[0] - A[0], dy = B[1] - A[1]; if (dx < 0 || (dx === 0 && dy < 0)) { dx = -dx; dy = -dy; } const L = Math.hypot(dx, dy) || 1; return [x - dy / L * dec, y + dx / L * dec]; });   // même côté quel que soit le sens du bus
-      const flush = () => { if (seg.length > 1) (g[l.couleur] ||= []).push(...ruban(decaler(seg), 0.9, 0.3 + rang * 0.04)); seg = []; };
-      for (const [la, lo] of t) { let [x, y] = local(la, lo, centre); const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } if (x * x + y * y < R * R) seg.push([x, y]); else flush(); }
+      const flush = () => { if (seg.length > 1) (g[l.couleur] ||= []).push(...ruban(decaler(seg), 0.32, 0.3 + rang * 0.03)); seg = []; };
+      // tracé redécoupé tous les 3 m, puis chaque point posé sur la rue la plus proche
+      const brut = t.map(([la, lo]) => local(la, lo, centre)), fin = [];
+      for (let i = 0; i < brut.length; i++) { if (i) { const [x1, y1] = brut[i - 1], [x2, y2] = brut[i], n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 3); for (let k = 1; k < n; k++) fin.push([x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n]); } fin.push(brut[i]); }
+      for (let [x, y] of fin) { const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } const surRoute = !RDETAIL || Math.hypot(x, y) > RDETAIL - 2 || cellSol(x, y) === 1; if (x * x + y * y < R * R && surRoute) seg.push([x, y]); else flush(); }
       // chaque ligne décalée sur le côté (comme des rails parallèles), pour ne jamais se superposer à une autre
 
       flush();
     }
   }
-  for (const [c, gs] of Object.entries(g)) scene.add(new THREE.Mesh(mergeGeometries(gs), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.8 })));
+  for (const [c, gs] of Object.entries(g)) scene.add(new THREE.Mesh(mergeGeometries(gs), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.75, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
   // abribus : petit toit + poteau, aux vrais emplacements
   const vus = new Set();
   for (const a of carte.arrets || []) {
@@ -545,7 +563,7 @@ try {
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;
   construireQuartier(q);
-  if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); habiller(q.sol); if (!TEST) chercherPassages(); }
+  if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); habiller(q.sol); poserPassages(); if (!TEST) chercherPassages(); }
   if (carte && carte.ok) poserLignes(carte);
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
