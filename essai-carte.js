@@ -191,7 +191,42 @@ function batimentLidar(p, L) {
 function aireDe(p) { let s = 0; for (let i = 0; i < p.length - 1; i++) s += p[i][0] * p[i + 1][1] - p[i + 1][0] * p[i][1]; return Math.abs(s / 2); }
 
 /* ---------- sol détaillé (PCRS du Grand Lyon) : chaussée en bas, trottoirs surélevés, bordures ---------- */
-const HSOL = [0.12, 0.12, 0.12, 0.12], CSOL = [0xf3efe8, 0xe8e3da, 0xe8e3da, 0xd5dec8];
+const HSOL = [0.12, 0.12, 0.12, 0.12], CSOL = [0xf1ede6, 0xdcd7ce, 0xdcd7ce, 0xd5dec8];
+/* ---------- marquages au sol : lignes de milieu de rue et passages piétons ---------- */
+let SOL = null;
+function cellSol(x, y) { if (!SOL) return 9; const i = Math.floor((x + SOL.R0) / SOL.P), j = Math.floor((SOL.R0 - y) / SOL.P); return i < 0 || j < 0 || i >= SOL.N || j >= SOL.N ? 9 : SOL.cls[j * SOL.N + i]; }
+function peindreMarquages() {
+  if (!SOL) return; const { S, k, R0, gx } = SOL;
+  gx.globalCompositeOperation = "source-over"; gx.drawImage(SOL.fondCv, 0, 0);
+  const calque = document.createElement("canvas"); calque.width = calque.height = S; const c = calque.getContext("2d");
+  const X = x => (x + R0) * k, Y = y => (R0 - y) * k;
+  c.strokeStyle = c.fillStyle = "#ffffff"; c.lineCap = "butt";
+  // ligne de milieu en tirets (3 m de trait, 3,5 m d'espace) sur les rues assez larges pour deux voies
+  c.lineWidth = Math.max(1, 0.15 * k); c.setLineDash([3 * k, 3.5 * k]);
+  for (const r of SOL.routes) { if (r.w < 6) continue; const l = pts(r.p); c.beginPath(); l.forEach(([x, y], i) => i ? c.lineTo(X(x), Y(y)) : c.moveTo(X(x), Y(y))); c.stroke(); }
+  c.setLineDash([]);
+  // passages piétons : bandes de 50 cm, parallèles à la rue, sur toute la largeur de la chaussée
+  for (const [px, py] of SOL.passages) {
+    const r = surLaRue(px, py, 15); if (!r) continue;
+    const ux = Math.cos(r.ang), uy = Math.sin(r.ang), nx = -uy, ny = ux;   // u : le long de la rue, n : en travers
+    // jusqu'où va la chaussée de chaque côté (un îlot ou un refuge de moins de 6 m ne coupe pas le passage)
+    const bout = (sg) => { let t = 0, dernier = 0, trou = 0; while (t < 18) { t += 0.3; if (cellSol(px + sg * nx * t, py + sg * ny * t) === 1) { dernier = t; trou = 0; } else if ((trou += 0.3) > 6) break; } return dernier; };
+    const a = bout(-1), b = bout(1);
+    if (a + b < 2) continue;
+    for (let t = -a + 0.3; t < b - 0.3; t += 1) {   // une bande tous les mètres (50 cm peints, 50 cm de vide)
+      const cx0 = px + nx * t, cy0 = py + ny * t, L = 1.5;
+      c.beginPath(); c.moveTo(X(cx0 - ux * L), Y(cy0 - uy * L)); c.lineTo(X(cx0 + ux * L), Y(cy0 + uy * L)); c.lineTo(X(cx0 + ux * L + nx * 0.5), Y(cy0 + uy * L + ny * 0.5)); c.lineTo(X(cx0 - ux * L + nx * 0.5), Y(cy0 - uy * L + ny * 0.5)); c.closePath(); c.fill(); }
+  }
+  c.globalCompositeOperation = "destination-in"; c.imageSmoothingEnabled = false; c.drawImage(SOL.mcv, 0, 0, S, S);
+  gx.drawImage(calque, 0, 0); SOL.tex.needsUpdate = true;
+}
+async function chercherPassages() {   // les vrais passages piétons (OpenStreetMap), chargés après coup pour ne pas ralentir l'ouverture
+  try {
+    const q = `[out:json][timeout:20];node["highway"="crossing"](around:${Math.round(SOL.R0 + 20)},${centre.lat},${centre.lon});out;`;
+    const rep = await fetch("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(q), { signal: AbortSignal.timeout(20000) });
+    const j = await rep.json(); SOL.passages = (j.elements || []).map(e => local(e.lat, e.lon, centre)); peindreMarquages();
+  } catch (_) { /* pas grave : la carte reste sans passages piétons */ }
+}
 function construireSol(sol) {
   const N = sol.n, P = sol.pas, R0 = sol.r, cls = new Uint8Array(N * N);
   sol.lignes.split("|").forEach((l, j) => { let i = 0; for (const t of l.match(/[a-z]\d+/g) || []) { const c = t[0] === "z" ? 9 : t.charCodeAt(0) - 97, n = +t.slice(1); cls.fill(c, j * N + i, j * N + i + n); i += n; } });
@@ -203,7 +238,20 @@ function construireSol(sol) {
   // agrandie et adoucie : les bords en biais deviennent des lignes douces
   const grand = document.createElement("canvas"); grand.width = grand.height = Math.min(3072, N * 3); const gx = grand.getContext("2d");   // taille limitée pour les iPhone
   gx.imageSmoothingEnabled = true; gx.imageSmoothingQuality = "high"; gx.filter = `blur(${(grand.width / N * 0.55).toFixed(1)}px)`; gx.drawImage(cv, 0, 0, grand.width, grand.height);
-  const tex = new THREE.CanvasTexture(grand); tex.colorSpace = THREE.SRGBColorSpace; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  // grain du bitume (chaussée plus marquée, trottoir très fin) — toujours le même dessin d'une ouverture à l'autre
+  const S = grand.width, k = S / (2 * R0), fond = gx.getImageData(0, 0, S, S), d = fond.data; let graine = 12345;
+  const alea = () => { graine = (graine * 1103515245 + 12345) & 0x7fffffff; return graine / 0x7fffffff; };
+  for (let py = 0; py < S; py++) { const j = Math.min(N - 1, (py / S * N) | 0);
+    for (let px = 0; px < S; px++) { const c = cls[j * N + Math.min(N - 1, (px / S * N) | 0)], o = (py * S + px) * 4; if (c === 9) continue;
+      const amp = c === 1 || c === 2 ? 16 : 7, n = (alea() - 0.5) * amp + (alea() < 0.015 ? -18 : 0); d[o] += n; d[o + 1] += n; d[o + 2] += n; } }
+  gx.filter = "none"; gx.putImageData(fond, 0, 0);
+  const fondCv = document.createElement("canvas"); fondCv.width = fondCv.height = S; fondCv.getContext("2d").drawImage(grand, 0, 0);
+  // masque « chaussée » : les marquages ne débordent jamais sur le trottoir
+  const mcv = document.createElement("canvas"); mcv.width = mcv.height = N; const mctx = mcv.getContext("2d"), mimg = mctx.createImageData(N, N);
+  for (let q = 0; q < N * N; q++) mimg.data[q * 4 + 3] = cls[q] === 1 ? 255 : 0; mctx.putImageData(mimg, 0, 0);
+  const tex = new THREE.CanvasTexture(grand);
+  SOL = { cls, N, P, R0, S, k, grand, gx, fondCv, mcv, tex, routes: [] , passages: [] };
+  tex.colorSpace = THREE.SRGBColorSpace; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const g = new THREE.CircleGeometry(R0 - 0.5, 128); g.rotateX(-Math.PI / 2); g.translate(0, HSOL[0], 0);
   const uv = g.attributes.uv, ps = g.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, (ps.getX(i) + R0) / (2 * R0), 1 - (R0 + ps.getZ(i)) / (2 * R0) );
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, roughness: 1, transparent: true })); m.receiveShadow = true; scene.add(m);
@@ -217,7 +265,7 @@ function construireSol(sol) {
 
 let RDETAIL = 0;
 function construireQuartier(q) {
-  if (q.sol) RDETAIL = construireSol(q.sol);
+  if (q.sol) { RDETAIL = construireSol(q.sol); SOL.routes = (q.routes || []).filter(r => pts(r.p).some(([x, y]) => Math.hypot(x, y) < RDETAIL)); }
   indexerRues(q.routes || []);
   // verdure : taches vert sauge
   const vg = [];
@@ -304,8 +352,12 @@ function poserLignes(carte) {
     COUL[l.ligne] = l.couleur;
     for (const t of l.traits) {
       let seg = [];
-      const flush = () => { if (seg.length > 1) (g[l.couleur] ||= []).push(...ruban(seg, 1.4, 0.34)); seg = []; };
+      const rang = Object.keys(COUL).indexOf(l.ligne), dec = (rang % 2 ? 1 : -1) * (0.55 + Math.floor(rang / 2) * 1.1);
+      const decaler = (pl) => pl.map(([x, y], i) => { const A = pl[Math.max(0, i - 1)], B = pl[Math.min(pl.length - 1, i + 1)]; let dx = B[0] - A[0], dy = B[1] - A[1]; if (dx < 0 || (dx === 0 && dy < 0)) { dx = -dx; dy = -dy; } const L = Math.hypot(dx, dy) || 1; return [x - dy / L * dec, y + dx / L * dec]; });   // même côté quel que soit le sens du bus
+      const flush = () => { if (seg.length > 1) (g[l.couleur] ||= []).push(...ruban(decaler(seg), 0.9, 0.3 + rang * 0.04)); seg = []; };
       for (const [la, lo] of t) { let [x, y] = local(la, lo, centre); const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } if (x * x + y * y < R * R) seg.push([x, y]); else flush(); }
+      // chaque ligne décalée sur le côté (comme des rails parallèles), pour ne jamais se superposer à une autre
+
       flush();
     }
   }
@@ -404,12 +456,13 @@ function boucle(t) {
 }
 
 /* ---------- démarrage ---------- */
-if (TEST) Object.assign(window, { camera, controls });
+if (TEST) Object.assign(window, { camera, controls, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
 try {
   const [q, carte] = await Promise.all([fn("jarvis-quartier", {}), fn("jarvis-tcl", { quoi: "carte" })]);
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;
   construireQuartier(q);
+  if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); if (!TEST) chercherPassages(); }
   if (carte && carte.ok) poserLignes(carte);
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
