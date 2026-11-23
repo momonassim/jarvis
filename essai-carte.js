@@ -202,7 +202,7 @@ function peindreMarquages() {
   const calque = document.createElement("canvas"); calque.width = calque.height = S; const c = calque.getContext("2d");
   const X = x => (x + R0) * k, Y = y => (R0 - y) * k;
   // bord de trottoir net : côté trottoir une bande couleur trottoir, côté route un caniveau clair (cache les petites vagues)
-  const tc = new THREE.Color(), hex = h => "#" + tc.setHex(h).getHexString();
+  const tc = new THREE.Color(), hex = h => { tc.setHex(h); return `rgb(${Math.round(tc.r * 255)},${Math.round(tc.g * 255)},${Math.round(tc.b * 255)})`; };   // même calcul de teinte que le fond
   gx.lineCap = "round"; gx.lineJoin = "round";
   for (const { pts: l, w } of ruesSansBordure()) {
     const ligne = (pl, larg, col) => { gx.strokeStyle = col; gx.lineWidth = larg * k; gx.beginPath(); pl.forEach(([x, y], i) => i ? gx.lineTo(X(x), Y(y)) : gx.moveTo(X(x), Y(y))); gx.stroke(); };
