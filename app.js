@@ -72,7 +72,7 @@ const HOOKS = {
   frame: () => V && V.decalage(viewShiftGoal),
 };
 V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
-  : await (await import("./carte.js?v=carte3")).creerCarte(canvas, HOOKS, { fn: appeler });
+  : await (await import("./carte.js?v=carte4")).creerCarte(canvas, HOOKS, { fn: appeler });
 document.body.classList.toggle("vuecarte", VUE === "carte");
 if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
 // sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)

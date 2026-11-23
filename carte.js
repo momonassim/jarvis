@@ -1230,12 +1230,30 @@ function approcher(p) {   // on se rapproche du point touché, en gardant l'angl
 }
 function choisirLieu(P, naviguer = true) {
   const L = P.L; if (L.bord && L.aller && naviguer) { allerA(L.aller); return; }
-  SUIVI = null;
+  SUIVI = null; DECOR.sel = L.id;
+  // ta voiture : elle sort du garage et se gare le long du trottoir ; la caméra vient tout près et tourne autour d'elle
+  const gare = L.garage && cheminGarage() ? DECOR.garage.chemin.getPoint(1) : null;
   // comme dans ta ville : on lève d'abord les yeux vers le lieu (vue haute), puis on descend de trois quarts, et la caméra tourne doucement autour
-  const R = Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5, cible = new THREE.Vector3(P.x, P.h * 0.5, -P.y);
-  const fin = new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.55, -(P.y + Math.sin(a) * R));
+  const R = gare ? 13 : Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5, cible = gare ? gare.clone().setY(1.2) : new THREE.Vector3(P.x, P.h * 0.5, -P.y);
+  const fin = gare ? new THREE.Vector3(cible.x + Math.cos(a) * R, 6.5, cible.z - Math.sin(a) * R) : new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.55, -(P.y + Math.sin(a) * R));
+  const it = !gare && DECOR.T && DECOR.T[L.id];
+  if (it) {   // comme dans l'ancienne ville : la caméra vient se placer face aux infos du lieu, sur sa façade
+    const c = it.tab.position.clone(), nn = new THREE.Vector3(it.f.nx, 0, -it.f.ny), pr = it.tab.geometry.parameters, fv = camera.fov * Math.PI / 360, asp = innerWidth / innerHeight;
+    let hh = pr.height, cc = c.clone(); if (it.nrg) { const top = it.nrg.g.position.y + 2; hh = top - (c.y - pr.height / 2); cc.y = (top + c.y - pr.height / 2) / 2; }
+    const d = Math.max(hh / (2 * Math.tan(fv)), pr.width / (2 * Math.tan(fv) * asp)) * 1.3 + 3;
+    // on cherche l'angle le plus bas d'où rien ne cache la façade (les immeubles d'en face) : de face si possible, sinon un peu plus en hauteur
+    let fin2 = null; const ray = new THREE.Raycaster(), obst = []; scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && o !== it.tab && o.visible && !(o.material && o.material.transparent)) obst.push(o); });
+    for (let pitch = 0.18; pitch <= 1.25 && !fin2; pitch += 0.12) { const dir = nn.clone().multiplyScalar(Math.cos(pitch)).add(new THREE.Vector3(0, Math.sin(pitch), 0)).normalize(), dd = d / Math.max(0.55, Math.cos(pitch) * 0.6 + 0.4);
+      const cam = cc.clone().add(dir.clone().multiplyScalar(dd)); let libre = true;
+      for (const dy of [0, -pr.height / 2 + 0.2, pr.height / 2 - 0.2, -hh / 2 + 0.2]) { const a = cc.clone().add(new THREE.Vector3(0, dy, 0)).add(nn.clone().multiplyScalar(0.5)), v = cam.clone().sub(a), L = v.length();
+        ray.set(a, v.normalize()); ray.far = L; if (ray.intersectObjects(obst, false).length) { libre = false; break; } }
+      if (libre) fin2 = cam; }
+    if (!fin2) fin2 = cc.clone().add(new THREE.Vector3(nn.x * d * 0.35, d * 0.95, nn.z * d * 0.35));
+    FOCUS = null; ORBITE = null;
+    voler(fin2, cc, 1600, 40, () => { LACHE = 0; });
+  } else {
   FOCUS = { P, cible, R, h: fin.y - cible.y };
-  voler(fin, cible, 1600, 40, () => { ORBITE = null; LACHE = 0; });   // arrivé : le tour lent démarre tout de suite
+  voler(fin, cible, 1600, 40, () => { ORBITE = null; LACHE = 0; }); }   // arrivé : le tour lent démarre tout de suite
   const f = $("fiche"); if (!f) return;
   const [la, lo] = L.ll || (P.b ? (() => { const k = Math.cos(centre.lat * Math.PI / 180) * 111320; return [centre.lat + P.y / 110574, centre.lon + P.x / k]; })() : [centre.lat, centre.lon]);
   f.style.setProperty("--c", L.c);
@@ -1249,7 +1267,7 @@ function suivreBus(o) {   // la caméra se met derrière le bus et le suit, comm
   f.innerHTML = `<b>🚌 Ligne ${o.ligne}</b><span>Position en direct (TCL) · la caméra le suit</span><div><button type="button" id="ffer">✕</button></div>`;
   f.hidden = false; $("ffer").onclick = fermerFiche;
 }
-function fermerFiche() { const f = $("fiche"); if (f) f.hidden = true; FOCUS = null; ORBITE = null; SUIVI = null; }
+function fermerFiche() { const f = $("fiche"); if (f) f.hidden = true; DECOR.sel = null; FOCUS = null; ORBITE = null; SUIVI = null; }
 
 /* ---------- la caméra, comme dans ta ville Jarvis ----------
    vols en arc (on monte, on traverse, on redescend), angle de vue qui s'ouvre en douceur, tour lent autour du lieu choisi
@@ -1359,6 +1377,180 @@ function boucle(t) {
   renderer.render(scene, camera); requestAnimationFrame(boucle);
 }
 
+
+/* =========================================================
+   LE DÉCOR QUI PARLE — tout ce que faisait l'ancienne ville, posé sur les vrais bâtiments :
+   - chaque lieu affiche ses infos sur sa façade (ou en enseigne sur le toit s'il est bas) ;
+   - chez toi : ta fenêtre (chaude = tout va bien, rouge = problème, éteinte = coupure) et l'enveloppe des nouveaux papiers ;
+   - gaz et électricité : les prix en 3D au-dessus, en points lumineux « électriques » ;
+   - abonnements : l'antenne du toit envoie des ondes (vert = ok, orange = hors forfait, rouge = facture à payer) ;
+   - travail : la pointeuse (aujourd'hui, demain) et la fumée de la cheminée quand tu es en poste ;
+   - santé : la croix verte qui pulse et le bandeau du prochain rendez-vous ;
+   - papiers : le drapeau français de la mairie, au vent ;
+   - ta voiture : la DS5 sort du garage, se gare le long du trottoir, la caméra tourne autour, infos au-dessus et au sol.
+   ========================================================= */
+const DECOR = { sel: null, items: [], fait: false };
+const DD = id => DONNEES.find(d => d.id === id) || { id, facts: [], alerts: [], c: (couleurs[id] || "#888") };
+const ENCRE = "#2f343c", GRIS = "#6b7079", ROUGE_TXT = "#c9483a", FNTD = '"Plus Jakarta Sans", Arial';
+function faceRue(b) {   // la façade qui donne sur la rue : la plus longue, la plus proche d'une chaussée
+  const p = b.pp, n = p.length - 1; let A = 0; for (let i = 0; i < n; i++) A += p[i][0] * p[i + 1][1] - p[i + 1][0] * p[i][1];
+  const s = A > 0 ? 1 : -1; let best = null;
+  const distRue = (x, y) => { if (!RESEAU) return 30; let d = 60; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [aid, k] of RESEAU.gS.get((Math.floor(x / 20) + i) + "|" + (Math.floor(y / 20) + j)) || []) { const q = RESEAU.aretes[aid].p[k]; d = Math.min(d, Math.hypot(q[0] - x, q[1] - y)); } return d; };
+  for (let i = 0; i < n; i++) { const [x1, y1] = p[i], [x2, y2] = p[i + 1], dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy); if (L < 4) continue;
+    const nx = s * dy / L, ny = -s * dx / L, mx = (x1 + x2) / 2, my = (y1 + y2) / 2, sc = Math.min(L, 16) - distRue(mx + nx * 4, my + ny * 4) * 0.6;
+    if (!best || sc > best.sc) best = { sc, mx, my, ux: dx / L, uy: dy / L, nx, ny, L }; }
+  return best;
+}
+function poserFace(m, f, y, decal = 0.25, along = 0) { m.position.set(f.mx + f.nx * decal + f.ux * along, y, -(f.my + f.ny * decal + f.uy * along)); m.rotation.y = Math.atan2(f.nx, -f.ny); }
+function toile(w, h, ppu = 90) { const c = document.createElement("canvas"); c.width = Math.min(2048, Math.round(w * ppu)); c.height = Math.min(2048, Math.round(h * ppu));
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, transparent: true, toneMapped: false, side: THREE.DoubleSide }));
+  m.userData = { c, t }; return m; }
+function ajuste(x, s, maxW, size, w) { let f = size; x.font = `${w} ${f}px ${FNTD}`; while (x.measureText(s).width > maxW && f > 12) { f -= 2; x.font = `${w} ${f}px ${FNTD}`; } }
+/* le tableau d'un lieu : bandeau à sa couleur, puis ses vraies infos (une ligne par info, les alertes en rouge). Pas de coins arrondis. */
+function dessinTableau(m, D, titre, lignes) {
+  const { c, t } = m.userData, x = c.getContext("2d"), W = c.width, H = c.height, S = W / 1000; x.setTransform(S, 0, 0, S, 0, 0); const h = H / S;
+  x.clearRect(0, 0, 1000, h); x.fillStyle = "rgba(250,248,243,0.96)"; x.fillRect(0, 0, 1000, h);
+  x.fillStyle = D.c || "#888"; x.fillRect(0, 0, 1000, 120); x.fillStyle = "#fff"; x.textBaseline = "middle"; ajuste(x, titre, 920, 60, 800); x.fillText(titre, 40, 62);
+  const R = lignes.length ? lignes : [{ l: D.status || "Rien de nouveau", v: "—" }], rh = Math.min(170, (h - 150) / Math.max(1, R.length));
+  R.forEach((r, i) => { const y = 140 + i * rh; if (y + rh * 0.6 > h) return;
+    if (i) { x.fillStyle = "rgba(47,52,60,.1)"; x.fillRect(40, y, 920, 3); }
+    x.fillStyle = r.rouge ? ROUGE_TXT : GRIS; ajuste(x, r.l, 920, Math.min(44, rh * 0.3), 600); x.fillText(r.l, 40, y + rh * 0.3);
+    x.fillStyle = r.rouge ? ROUGE_TXT : ENCRE; ajuste(x, r.v, 920, Math.min(84, rh * 0.48), 800); x.fillText(r.v, 40, y + rh * 0.7); });
+  t.needsUpdate = true;
+}
+function lignesDe(D, max = 4) { const L = [];
+  for (const a of D.alerts || []) L.push({ l: "À regarder", v: a.t, rouge: true });
+  for (const [a, b] of D.facts || []) L.push({ l: a, v: String(b) });
+  if (D.nDocs) L.push({ l: "Papiers rangés", v: D.nDocs + " dans Jarvis" });
+  return L.slice(0, max); }
+/* des chiffres faits de points lumineux (comme dans l'ancienne ville) */
+const DOT = (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.35, "rgba(255,255,255,.8)"); g.addColorStop(1, "rgba(255,255,255,0)"); x.fillStyle = g; x.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); return t; })();
+function nuagePoints(str, couleur, largeur) {
+  const c = document.createElement("canvas"); c.width = 640; c.height = 150; const x = c.getContext("2d"); x.fillStyle = "#fff"; x.textAlign = "center"; x.textBaseline = "middle";
+  ajuste(x, str, 620, 120, 800); x.fillText(str, 320, 78); const d = x.getImageData(0, 0, 640, 150).data, P = [], k = largeur / 640;
+  for (let j = 0; j < 150; j += 3) for (let i = 0; i < 640; i += 3) if (d[(j * 640 + i) * 4 + 3] > 128) P.push((i - 320) * k, (75 - j) * k, 0);
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3)); g.userData.base = Float32Array.from(P);
+  return new THREE.Points(g, new THREE.PointsMaterial({ map: DOT, color: couleur, size: largeur / 70, transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }));
+}
+function cle(o) { return JSON.stringify(o); }
+
+function construireDecor() {
+  if (DECOR.fait) return; DECOR.fait = true;
+  const T = { };
+  for (const P of PINS) {
+    const L = P.L, id = L.id; if (L.bord) continue;
+    if (L.garage) { DECOR.garage = { P }; continue; }
+    if (!P.b) continue;
+    const f = faceRue(P.b); if (!f) continue;
+    const hb = Math.max(P.b.h || 3, 3), w = Math.min(f.L * 0.7, 12), bas = hb < 7;
+    const hT = bas ? Math.min(5, w * 0.6) : Math.min(hb - 2.8, w * 0.75, 9);
+    const tab = toile(w, hT); tab.renderOrder = 4;
+    if (bas) { poserFace(tab, f, hb + hT / 2 + 0.4, -0.2); }   // bâtiment bas : une enseigne posée sur le toit, côté rue
+    else poserFace(tab, f, 2.4 + hT / 2);
+    scene.add(tab);
+    const it = { id, P, f, tab, k: "" }; DECOR.items.push(it); T[id] = it;
+    // ---- chez toi : la fenêtre et l'enveloppe
+    if (id === "home") {
+      const fen = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.3), new THREE.MeshBasicMaterial({ color: 0xffbf5e, transparent: true, toneMapped: false }));
+      poserFace(fen, f, Math.max(4, hb - 2.2), 0.3, Math.min(f.L / 2 - 1.5, w / 2 + 2)); scene.add(fen);
+      const lueur = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.8), new THREE.MeshBasicMaterial({ map: DOT, color: 0xffbf5e, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+      lueur.position.copy(fen.position); lueur.rotation.copy(fen.rotation); lueur.translateZ(0.05); scene.add(lueur);
+      const env = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.05), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4dc, emissiveIntensity: 0.4 }));
+      poserFace(env, f, 1.3, 0.45, -(w / 2 + 1)); scene.add(env); it.home = { fen, lueur, env, k: 0 };
+    }
+    // ---- gaz et électricité : les prix en points lumineux au-dessus du toit
+    if (id === "energie") it.nrg = { g: new THREE.Group(), nums: {} }, it.nrg.g.position.set(P.x, (P.b.t || hb) + 6, -P.y), scene.add(it.nrg.g);
+    // ---- abonnements : l'antenne et ses ondes
+    if (id === "orange") { const top = (P.b.t || hb), mat = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.3, 7, 8), new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.4, roughness: 0.4 }));
+      mat.position.set(P.x + 3, top + 3.5, -P.y); scene.add(mat); const ondes = [];
+      for (let i = 0; i < 3; i++) { const o = new THREE.Mesh(new THREE.TorusGeometry(1, 0.08, 6, 40), new THREE.MeshBasicMaterial({ color: 0x5fae8c, transparent: true, toneMapped: false })); o.rotation.x = Math.PI / 2; o.position.set(P.x + 3, top + 7, -P.y); o.userData.ph = i / 3; scene.add(o); ondes.push(o); }
+      it.ondes = ondes; }
+    // ---- travail : la cheminée qui fume quand tu es en poste
+    if (id === "usine") { const top = (P.b.t || hb), ch = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 10, 12), new THREE.MeshStandardMaterial({ color: 0xb9b2a8, roughness: 0.8 }));
+      const cx = P.x - f.nx * 6, cy = P.y - f.ny * 6; ch.position.set(cx, top + 5, -cy); ch.castShadow = true; scene.add(ch);
+      const fum = []; for (let i = 0; i < 14; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: DOT, color: 0xe9e6e1, transparent: true, depthWrite: false })); s.userData.ph = i / 14; scene.add(s); fum.push(s); }
+      it.usine = { fum, top: new THREE.Vector3(cx, top + 10, -cy), k: 0 }; }
+    // ---- santé : la croix verte en points + le bandeau qui défile
+    if (id === "clinique") { const cr = toile(3, 3, 85); poserFace(cr, f, Math.min(hb - 1.6, 2.4 + hT + 2), 0.3, w / 2 + 2.2); scene.add(cr);
+      const bd = toile(Math.min(w, 10), 0.9, 110); poserFace(bd, f, 1.8, 0.35); scene.add(bd); it.cln = { cr, bd }; }
+    // ---- papiers : le drapeau français de la mairie, au vent (doucement)
+    if (id === "mairie") { const top = (P.b.t || hb), mat2 = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 6, 6), new THREE.MeshStandardMaterial({ color: 0xd8d8d8, metalness: 0.5 }));
+      mat2.position.set(P.x, top + 3, -P.y); scene.add(mat2);
+      const c = document.createElement("canvas"); c.width = 96; c.height = 64; const x = c.getContext("2d"); [["#1f3a93", 0], ["#ffffff", 32], ["#e1252b", 64]].forEach(([col, a]) => { x.fillStyle = col; x.fillRect(a, 0, 32, 64); });
+      const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
+      const geo = new THREE.PlaneGeometry(2.4, 1.6, 16, 4); geo.translate(1.2, 0, 0); geo.userData.base = Float32Array.from(geo.attributes.position.array);
+      const dr = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tx, side: THREE.DoubleSide, roughness: 0.8 })); dr.position.set(P.x, top + 5.1, -P.y); scene.add(dr); it.drapeau = dr; }
+  }
+  DECOR.T = T; majDecor(true);
+}
+function majDecor(force) {
+  for (const it of DECOR.items) { const D = DD(it.id); let titre = (it.P.L.e ? it.P.L.e + " " : "") + it.P.L.n, L = lignesDe(D);
+    if (it.id === "usine") L = [{ l: "Aujourd'hui", v: D.aujTxt || "—" }, { l: "Demain", v: D.demTxt || "—" }, ...lignesDe(D, 3).filter(r => r.rouge)];
+    if (it.id === "clinique" && D.prochain) L = [{ l: "Prochain rendez-vous", v: [D.prochain.qui, D.prochain.quand].filter(Boolean).join(" · ") }, ...L].slice(0, 5);
+    if (it.id === "home" && D.gest) L = [...L.slice(0, 3), { l: "Ton gestionnaire (interphone)", v: String(D.gest).slice(0, 40) }];
+    const k = cle([titre, L, D.c]); if (k !== it.k || force) { it.k = k; dessinTableau(it.tab, D, titre, L); }
+    if (it.nrg) { const val = re => { const f = (D.facts || []).find(r => re.test(r[0])); return f ? String(f[1]).replace(/\s*par mois/, "") : null; };
+      for (const [key, re, col, y] of [["elec", /électri/i, NUIT ? 0x7ff4ff : 0x00b8ff, 0], ["gaz", /gaz/i, NUIT ? 0xffb35c : 0xff7a12, -3.4]]) { const s = val(re), o = it.nrg.nums[key];
+        if (o && o.s === s) continue; if (o) { it.nrg.g.remove(o.p); o.p.geometry.dispose(); delete it.nrg.nums[key]; }
+        if (!s) continue; const p = nuagePoints((key === "elec" ? "⚡ " : "🔥 ") + s, col, 16); p.position.y = y * 1.4; it.nrg.g.add(p); it.nrg.nums[key] = { s, p }; } }
+  }
+}
+/* la voiture : du garage jusqu'au trottoir, garée dans le sens de la rue */
+function cheminGarage() {
+  const G = DECOR.garage, g = window.MAISON_GARAGE; if (!G || !g || !DS5 || G.chemin) return G && G.chemin;
+  let sR = 10; if (RESEAU) for (let s = 3; s < 30; s += 0.5) { const x = g.x + g.nx * s, y = g.y + g.ny * s; let surRoute = false;
+    for (const [aid, k] of RESEAU.gS.get(Math.floor(x / 20) + "|" + Math.floor(y / 20)) || []) { const a = RESEAU.aretes[aid], q = a.p[k]; if (Math.hypot(q[0] - x, q[1] - y) < Math.max(2, a.hw[k] - 0.5)) { surRoute = true; break; } }
+    if (surRoute) { sR = s; break; } }
+  const A = new THREE.Vector3(g.x + g.nx * 3.2, 0.12, -(g.y + g.ny * 3.2)), B = new THREE.Vector3(g.x + g.nx * (sR + 1.6), 0.12, -(g.y + g.ny * (sR + 1.6))), C = B.clone().add(new THREE.Vector3(g.ux * 8, 0, -g.uy * 8));
+  G.chemin = new THREE.QuadraticBezierCurve3(A, B, C); G.k = 0; G.repos = DS5.rotation.y;
+  // les infos : un tableau au-dessus de la voiture (toujours tourné vers toi) et un autre peint au sol, devant elle
+  G.haut = toile(5, 2.6, 110); G.haut.visible = false; scene.add(G.haut);
+  G.sol = toile(7, 4.2, 90); G.sol.rotation.x = -Math.PI / 2; G.sol.visible = false; G.sol.material.depthWrite = false; G.sol.renderOrder = 2; scene.add(G.sol);
+  return G.chemin;
+}
+function majVoiture(dt, t) {
+  const G = DECOR.garage; if (!G || !cheminGarage()) return; const veut = DECOR.sel === "garage" ? 1 : 0;
+  if (veut === 0 && G.k < 0.001) { G.haut.visible = G.sol.visible = false; return; }
+  const k0 = G.k; G.k += Math.sign(veut - G.k) * Math.min(Math.abs(veut - G.k), dt / 5.5);
+  const u = G.k * G.k * (3 - 2 * G.k), p = G.chemin.getPoint(u), tg = G.chemin.getTangent(Math.min(0.999, Math.max(0.001, u)));
+  DS5.position.copy(p); DS5.rotation.y = Math.atan2(tg.x, tg.z);
+  const D = DD("garage"), L = lignesDe(D, 4), k = cle(L);
+  if (G.kk !== k) { G.kk = k; dessinTableau(G.haut, D, "🚗 Ta DS5", L.slice(0, 2)); dessinTableau(G.sol, D, "Ta voiture", L); }
+  G.haut.visible = G.sol.visible = G.k > 0.85; const a = Math.min(1, (G.k - 0.85) / 0.15);
+  G.haut.material.opacity = G.sol.material.opacity = a;
+  G.haut.position.set(p.x, 3.4 + Math.sin(t / 900) * 0.08, p.z); G.haut.quaternion.copy(camera.quaternion);
+  const av = G.chemin.getTangent(1); G.sol.position.set(p.x + av.x * 6, 0.2, p.z + av.z * 6); G.sol.rotation.set(-Math.PI / 2, 0, Math.atan2(av.x, av.z) + Math.PI);
+  G.pos = p; if (G.P && G.P.g) G.P.g.position.set(p.x, 1.6, p.z);   // le repère « Ta voiture » suit la voiture
+}
+ANIMS.push(t => {
+  if (!DECOR.fait) return; const dt = DECOR.t0 == null ? 0 : Math.min(0.1, (t - DECOR.t0) / 1000); DECOR.t0 = t; const s = t / 1000;
+  for (const it of DECOR.items) { const D = DD(it.id);
+    if (it.home) { const e = D.etat || "ok", h = it.home, col = e === "rouge" ? 0xe5604f : e === "coupure" ? 0x262b33 : 0xffbf5e;
+      h.fen.material.color.lerp(new THREE.Color(col), Math.min(1, dt * 3)); const op = e === "veille" ? 0.45 + 0.25 * (0.5 + 0.5 * Math.sin(s * 1.6)) : 1;
+      h.fen.material.opacity = op; h.lueur.material.color.copy(h.fen.material.color); h.lueur.material.opacity = e === "coupure" ? 0 : 0.55 * op;
+      h.k += ((D.nouveau > 0 ? 1 : 0) - h.k) * Math.min(1, dt * 1.2); h.env.visible = h.k > 0.02; h.env.scale.setScalar(Math.max(0.01, h.k)); h.env.rotation.z = Math.sin(s * 1.3) * 0.05; }
+    if (it.nrg) for (const key in it.nrg.nums) { const p = it.nrg.nums[key].p, a = p.geometry.attributes.position, b = p.geometry.userData.base, al = (D.alerts || []).length ? 0.12 : 0.03;
+      for (let i = 0; i < a.count; i++) { a.array[i * 3] = b[i * 3] + (Math.random() - 0.5) * al; a.array[i * 3 + 1] = b[i * 3 + 1] + (Math.random() - 0.5) * al; } a.needsUpdate = true;
+      p.material.opacity = 0.75 + 0.25 * Math.sin(s * 3 + (key === "gaz" ? 1 : 0)); }
+    if (it.nrg) it.nrg.g.quaternion.copy(camera.quaternion);
+    if (it.ondes) { const col = D.urgent ? 0xe5604f : D.hf ? 0xf08a24 : 0x5fae8c;
+      for (const o of it.ondes) { const f = (s * 0.45 + o.userData.ph) % 1; o.scale.setScalar(1 + f * 7); o.material.color.setHex(col); o.material.opacity = 0.8 * (1 - f); } }
+    if (it.usine) { const U = it.usine; U.k += ((D.enPoste ? 1 : 0) - U.k) * Math.min(1, dt * 0.8);
+      for (const sp of U.fum) { const f = (sp.userData.ph + s * 0.06) % 1; sp.position.set(U.top.x + f * 5 + Math.sin(s * 0.5 + sp.userData.ph * 9) * 0.6, U.top.y + 0.4 + f * 11, U.top.z + f * 2);
+        const sc = 1.6 + f * 6; sp.scale.set(sc, sc, 1); sp.material.opacity = U.k * 0.55 * (1 - f) * Math.min(1, f * 6); sp.visible = sp.material.opacity > 0.005; } }
+    if (it.cln) { const nx = D.prochain, on = !!nx, { c, t: tx } = it.cln.cr.userData, x = c.getContext("2d"), n = 11, st = c.width / n; x.clearRect(0, 0, c.width, c.height);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { if (!((i >= 4 && i <= 6) || (j >= 4 && j <= 6))) continue; const lit = on ? 0.75 + 0.25 * Math.sin(s * 2.2 - (Math.abs(i - 5) + Math.abs(j - 5)) * 0.5) : 0.35;
+        x.fillStyle = on ? `rgba(60,220,120,${lit})` : `rgba(160,170,165,${lit})`; x.beginPath(); x.arc(i * st + st / 2, j * st + st / 2, st * 0.36, 0, 7); x.fill(); } tx.needsUpdate = true;
+      const b = it.cln.bd.userData, y = b.c.getContext("2d"), msg = on ? `  PROCHAIN RENDEZ-VOUS · ${nx.qui || ""} · ${nx.quand || ""} · ${nx.centre || ""}  ✚  ` : "  AUCUN RENDEZ-VOUS PRÉVU · touche le lieu pour en prendre un  ✚  ";
+      y.fillStyle = "#0d1210"; y.fillRect(0, 0, b.c.width, b.c.height); y.font = `800 ${Math.round(b.c.height * 0.62)}px ${FNTD}`; y.fillStyle = on ? "#4be38a" : "#e8b04a"; y.textBaseline = "middle";
+      const w = y.measureText(msg).width, off = (s * 120) % w; y.fillText(msg, -off, b.c.height / 2); y.fillText(msg, w - off, b.c.height / 2); b.t.needsUpdate = true; }
+    if (it.drapeau) { const a = it.drapeau.geometry.attributes.position, b = it.drapeau.geometry.userData.base;
+      for (let i = 0; i < a.count; i++) { const x0 = b[i * 3]; a.array[i * 3 + 2] = Math.sin(x0 * 2.2 - s * 2.4) * 0.12 * (x0 / 2.4); } a.needsUpdate = true; it.drapeau.geometry.computeVertexNormals(); }
+  }
+  majVoiture(dt, t);
+});
 
 /* ---------- ce qui vit autour : stations-service (prix du jour), Vélo'v (vélos libres), parkings ----------
    Petits objets posés au bon endroit, et leur étiquette n'apparaît que quand on s'approche (pour ne pas encombrer). */
@@ -1528,11 +1720,11 @@ function cinemaStop() { if (!CINE.on) return; CINE.on = false; controls.enabled 
 const API = {
   camera, controls, renderer, scene, lieu: LIEU, demarrer,
   ouvrir(id) { const P = PINS.find(p => p.L.id === id); if (!P) { ATTENTE = id; return; } if (CINE.on) cinemaStop(); choisirLieu(P, false); },
-  fermer() { FOCUS = null; ORBITE = null; SUIVI = null; },
+  fermer() { FOCUS = null; ORBITE = null; SUIVI = null; DECOR.sel = null; },
   ensemble() { API.fermer(); vue("quartier"); },
   vue(k) { vue(k); },
   quartier(l) { allerA(l || (LIEU === "maison" ? "usine" : "maison")); },
-  setDonnees(list) { DONNEES = list || []; majAlertes(); },
+  setDonnees(list) { DONNEES = list || []; majAlertes(); if (DECOR.fait) majDecor(); },
   setNuit(n) { nuit(!!n); },
   decalage(k) { SHIFT = k; },
   // Claude (connecteur) : tourner de X degrés, zoomer, vue du dessus ou rasante — toujours en vol doux
@@ -1567,6 +1759,7 @@ DEMARRE = (async () => { try {
   $("msg").hidden = true;
   if (ATTENTE) { const id = ATTENTE; ATTENTE = null; API.ouvrir(id); }
   if (VOITURE_URL) chargerVoiture(VOITURE_URL).catch(e => console.warn("DS5", e));
+  construireDecor();
   majAlertes(); if (NUIT) { lum.sol = null; NUIT = false; nuit(true); }   // le quartier vient d'être construit : on rallume ses lampadaires
   // les chantiers en cours (Grand Lyon) et ton point GPS
   (async () => { try { const ch = await fn("jarvis-quartier", { quoi: "chantiers", lieu: LIEU }); if (ch && ch.ok) window.__chantiers = poserChantiers(ch.liste || []); } catch (_) { /* tant pis : la carte reste sans chantiers */ } })();
