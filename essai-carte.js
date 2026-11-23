@@ -1243,7 +1243,7 @@ function voler(pos, cible, duree = 1600, fov = null, puis = null) {
   ORBITE = null; controls.autoRotate = false;
   VOL = { p0, t0, p: pos.clone(), t: cible.clone(), ctrl, f0: camera.fov, f: fov || camera.fov, puis, debut: performance.now(), duree: Math.min(3200, duree + d * 1.2) };
 }
-controls.addEventListener("start", () => { VOL = null; TOUCHE = true; controls.autoRotate = false; if (ORBITE) ORBITE.pause = true; });
+controls.addEventListener("start", () => { VOL = null; TOUCHE = true; controls.autoRotate = false; ORBITE = null; if (FOCUS) FOCUS.libre = true; SUIVI = null; });   // tu touches : tu reprends la main, plus rien ne bouge tout seul
 controls.addEventListener("end", () => { TOUCHE = false; LACHE = performance.now(); });
 canvas.addEventListener("pointerdown", () => { controls.autoRotate = false; LACHE = performance.now(); });
 const _p = new THREE.Vector3(), _t = new THREE.Vector3();
@@ -1258,8 +1258,8 @@ ANIMS.push(t => {
     if (VOL.f !== VOL.f0) { camera.fov = VOL.f0 + (VOL.f - VOL.f0) * e; camera.updateProjectionMatrix(); }
     if (k >= 1) { const cb = VOL.puis; VOL = null; cb && cb(); } }
   // 2) le lieu choisi : va-et-vient lent autour de lui (reprend 2,5 s après que tu as lâché)
-  else if (FOCUS && !TOUCHE && now - LACHE > 2500) {
-    if (!ORBITE || ORBITE.pause) ORBITE = { a0: Math.atan2(camera.position.z - FOCUS.cible.z, camera.position.x - FOCUS.cible.x), t0: now, r: Math.hypot(camera.position.x - FOCUS.cible.x, camera.position.z - FOCUS.cible.z), h: camera.position.y - FOCUS.cible.y, k: 0 };
+  else if (FOCUS && !FOCUS.libre && !TOUCHE) {
+    if (!ORBITE) ORBITE = { a0: Math.atan2(camera.position.z - FOCUS.cible.z, camera.position.x - FOCUS.cible.x), t0: now, r: Math.hypot(camera.position.x - FOCUS.cible.x, camera.position.z - FOCUS.cible.z), h: camera.position.y - FOCUS.cible.y, k: 0 };
     ORBITE.k = Math.min(1, ORBITE.k + dt / 2);   // le mouvement démarre en douceur
     const a = ORBITE.a0 + 0.35 * Math.sin((now - ORBITE.t0) / 1000 * 0.18) * ORBITE.k, r = ORBITE.r || FOCUS.R;
     _p.set(FOCUS.cible.x + Math.cos(a) * r, FOCUS.cible.y + (ORBITE.h || FOCUS.h), FOCUS.cible.z + Math.sin(a) * r);
@@ -1271,7 +1271,6 @@ ANIMS.push(t => {
     if (!TOUCHE) { camera.position.lerp(_p, 1 - Math.exp(-dt * 1.6)); }
     controls.target.lerp(_t, 1 - Math.exp(-dt * 4)); }
   // 4) au repos (rien touché depuis 25 s, rien de choisi) : la caméra tourne très lentement autour du quartier
-  else if (!TOUCHE && !FOCUS && !SUIVI && now - LACHE > 25000) { controls.autoRotate = true; controls.autoRotateSpeed = 0.18; }
   // 5) fiche ouverte en haut : on décale la vue vers le bas pour que le lieu ne soit pas caché
   const ouvert = $("fiche") && !$("fiche").hidden, but = ouvert ? 1 : 0; DECALE += (but - DECALE) * Math.min(1, dt * 4);
   if (DECALE > 0.002) camera.setViewOffset(innerWidth, innerHeight, 0, -innerHeight * 0.12 * DECALE, innerWidth, innerHeight); else camera.clearViewOffset();
