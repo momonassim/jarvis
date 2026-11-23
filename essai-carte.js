@@ -1193,38 +1193,102 @@ function poserLieux() {
     const dec = PINS.length * 0.7; ANIMS.push(t => { const s = 1 + 0.5 * ((t / 1600 + dec) % 1); halo.scale.set(s, s, 1); halo.material.opacity = 0.6 * (1 - ((t / 1600 + dec) % 1)); tete.position.y = haut + rt + Math.sin(t / 700 + dec) * 0.2; });
   }
 }
-// toucher un lieu (ou son étiquette) : la caméra vole jusqu'à lui et sa fiche s'ouvre
-{ const ray = new THREE.Raycaster(), v = new THREE.Vector2(); let d0 = null;
+// toucher : un lieu (ou son étiquette) → la caméra y vole et sa fiche s'ouvre ; un bus → la caméra le suit ;
+// double-toucher le sol → la caméra s'approche de cet endroit ; ailleurs → on referme
+{ const ray = new THREE.Raycaster(), v = new THREE.Vector2(), plan = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); let d0 = null, dernier = 0;
   canvas.addEventListener("pointerdown", e => { d0 = [e.clientX, e.clientY]; });
   canvas.addEventListener("pointerup", e => { if (!d0 || Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 8) return;
     v.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(v, camera); ray.camera = camera;
-    const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) choisirLieu(hit.object.userData.pin); else fermerFiche(); });
+    const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) { choisirLieu(hit.object.userData.pin); dernier = 0; return; }
+    const bus = [...BUS.values()].find(o => ray.intersectObject(o.m, true).length); if (bus) { suivreBus(bus); dernier = 0; return; }
+    const now = performance.now();
+    if (now - dernier < 320) { const p = new THREE.Vector3(); if (ray.ray.intersectPlane(plan, p)) approcher(p); dernier = 0; return; }   // double toucher
+    dernier = now; setTimeout(() => { if (dernier === now && (FOCUS || SUIVI)) fermerFiche(); }, 330); });
+}
+function approcher(p) {   // on se rapproche du point touché, en gardant l'angle de vue
+  const dir = camera.position.clone().sub(controls.target), d = Math.max(controls.minDistance + 4, dir.length() * 0.45);
+  voler(p.clone().add(dir.normalize().multiplyScalar(d)), p);
 }
 function choisirLieu(P) {
   const L = P.L; if (L.bord && L.aller) { allerA(L.aller); return; }
-  // vue de trois quarts, un peu en hauteur, le lieu au centre
-  const R = Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5;
-  voler(new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.55, -(P.y + Math.sin(a) * R)), new THREE.Vector3(P.x, P.h * 0.5, -P.y));
+  SUIVI = null;
+  // comme dans ta ville : on lève d'abord les yeux vers le lieu (vue haute), puis on descend de trois quarts, et la caméra tourne doucement autour
+  const R = Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5, cible = new THREE.Vector3(P.x, P.h * 0.5, -P.y);
+  const fin = new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.55, -(P.y + Math.sin(a) * R));
+  FOCUS = { P, cible, R, h: fin.y - cible.y };
+  voler(fin, cible, 1600, 40, () => { ORBITE = null; LACHE = 0; });   // arrivé : le tour lent démarre tout de suite
   const f = $("fiche"); if (!f) return;
   const [la, lo] = L.ll || (P.b ? (() => { const k = Math.cos(centre.lat * Math.PI / 180) * 111320; return [centre.lat + P.y / 110574, centre.lon + P.x / k]; })() : [centre.lat, centre.lon]);
   f.style.setProperty("--c", L.c);
   f.innerHTML = `<b>${L.e} ${L.n}</b><span>${L.sous || ""}</span><div><a href="./" class="ok">Ouvrir dans Jarvis</a>${L.ici || L.garage ? "" : `<a href="https://maps.apple.com/?daddr=${la.toFixed(6)},${lo.toFixed(6)}" target="_blank" rel="noopener">Y aller</a>`}<button type="button" id="ffer">✕</button></div>`;
   f.hidden = false; $("ffer").onclick = fermerFiche;
 }
-function fermerFiche() { const f = $("fiche"); if (f) f.hidden = true; }
+function suivreBus(o) {   // la caméra se met derrière le bus et le suit, comme une caméra de poursuite
+  FOCUS = null; ORBITE = null; SUIVI = o; VOL = null;
+  const f = $("fiche"); if (!f) return; const c = COUL[o.ligne] || "#2b3138";
+  f.style.setProperty("--c", c);
+  f.innerHTML = `<b>🚌 Ligne ${o.ligne}</b><span>Position en direct (TCL) · la caméra le suit</span><div><button type="button" id="ffer">✕</button></div>`;
+  f.hidden = false; $("ffer").onclick = fermerFiche;
+}
+function fermerFiche() { const f = $("fiche"); if (f) f.hidden = true; FOCUS = null; ORBITE = null; SUIVI = null; }
 
-/* ---------- la caméra, comme dans ta ville Jarvis : vols en arc, doux, qu'on interrompt en touchant l'écran ---------- */
-let VOL = null;
-function voler(pos, cible, duree = 1600) {
+/* ---------- la caméra, comme dans ta ville Jarvis ----------
+   vols en arc (on monte, on traverse, on redescend), angle de vue qui s'ouvre en douceur, tour lent autour du lieu choisi
+   qui reprend tout seul 2,5 s après que tu as lâché l'écran, vue décalée quand une fiche est ouverte, et au repos
+   la caméra tourne très lentement autour du quartier. Toucher l'écran coupe tout, tout de suite. */
+let VOL = null, FOCUS = null, ORBITE = null, SUIVI = null, TOUCHE = false, LACHE = performance.now(), DECALE = 0;
+function voler(pos, cible, duree = 1600, fov = null, puis = null) {
   const p0 = camera.position.clone(), t0 = controls.target.clone(), d = Math.hypot(pos.x - p0.x, pos.z - p0.z);
   let ctrl = null; if (d > 40) { ctrl = p0.clone().lerp(pos, 0.5); ctrl.y = Math.max(p0.y, pos.y) + Math.min(160, d * 0.18); }
-  VOL = { p0, t0, p: pos.clone(), t: cible.clone(), ctrl, debut: performance.now(), duree: Math.min(3200, duree + d * 1.2) };
+  ORBITE = null; controls.autoRotate = false;
+  VOL = { p0, t0, p: pos.clone(), t: cible.clone(), ctrl, f0: camera.fov, f: fov || camera.fov, puis, debut: performance.now(), duree: Math.min(3200, duree + d * 1.2) };
 }
-controls.addEventListener("start", () => { VOL = null; });
-ANIMS.push(t => { if (!VOL) return; const k = Math.min(1, (performance.now() - VOL.debut) / VOL.duree), e = k * k * (3 - 2 * k);
-  if (VOL.ctrl) { const u = 1 - e; camera.position.set(u * u * VOL.p0.x + 2 * u * e * VOL.ctrl.x + e * e * VOL.p.x, u * u * VOL.p0.y + 2 * u * e * VOL.ctrl.y + e * e * VOL.p.y, u * u * VOL.p0.z + 2 * u * e * VOL.ctrl.z + e * e * VOL.p.z); }
-  else camera.position.lerpVectors(VOL.p0, VOL.p, e);
-  controls.target.lerpVectors(VOL.t0, VOL.t, e); if (k >= 1) VOL = null; });
+controls.addEventListener("start", () => { VOL = null; TOUCHE = true; controls.autoRotate = false; if (ORBITE) ORBITE.pause = true; });
+controls.addEventListener("end", () => { TOUCHE = false; LACHE = performance.now(); });
+canvas.addEventListener("pointerdown", () => { controls.autoRotate = false; LACHE = performance.now(); });
+const _p = new THREE.Vector3(), _t = new THREE.Vector3();
+let _avant = null;
+ANIMS.push(t => {
+  const now = performance.now(), dt = _avant == null ? 0.016 : Math.min(0.1, (now - _avant) / 1000); _avant = now;
+  // 1) le vol en cours
+  if (VOL) { const k = Math.min(1, (now - VOL.debut) / VOL.duree), e = k * k * (3 - 2 * k);
+    if (VOL.ctrl) { const u = 1 - e; camera.position.set(u * u * VOL.p0.x + 2 * u * e * VOL.ctrl.x + e * e * VOL.p.x, u * u * VOL.p0.y + 2 * u * e * VOL.ctrl.y + e * e * VOL.p.y, u * u * VOL.p0.z + 2 * u * e * VOL.ctrl.z + e * e * VOL.p.z); }
+    else camera.position.lerpVectors(VOL.p0, VOL.p, e);
+    controls.target.lerpVectors(VOL.t0, VOL.t, e);
+    if (VOL.f !== VOL.f0) { camera.fov = VOL.f0 + (VOL.f - VOL.f0) * e; camera.updateProjectionMatrix(); }
+    if (k >= 1) { const cb = VOL.puis; VOL = null; cb && cb(); } }
+  // 2) le lieu choisi : va-et-vient lent autour de lui (reprend 2,5 s après que tu as lâché)
+  else if (FOCUS && !TOUCHE && now - LACHE > 2500) {
+    if (!ORBITE || ORBITE.pause) ORBITE = { a0: Math.atan2(camera.position.z - FOCUS.cible.z, camera.position.x - FOCUS.cible.x), t0: now, r: Math.hypot(camera.position.x - FOCUS.cible.x, camera.position.z - FOCUS.cible.z), h: camera.position.y - FOCUS.cible.y, k: 0 };
+    ORBITE.k = Math.min(1, ORBITE.k + dt / 2);   // le mouvement démarre en douceur
+    const a = ORBITE.a0 + 0.35 * Math.sin((now - ORBITE.t0) / 1000 * 0.18) * ORBITE.k, r = ORBITE.r || FOCUS.R;
+    _p.set(FOCUS.cible.x + Math.cos(a) * r, FOCUS.cible.y + (ORBITE.h || FOCUS.h), FOCUS.cible.z + Math.sin(a) * r);
+    camera.position.lerp(_p, 1 - Math.exp(-dt * 2.5)); controls.target.lerp(FOCUS.cible, 1 - Math.exp(-dt * 3)); }
+  // 3) un bus suivi : la caméra se place derrière lui, un peu en hauteur, et le suit en souplesse
+  else if (SUIVI && SUIVI.m.parent) {
+    const m = SUIVI.m, avant = new THREE.Vector3(0, 0, -1).applyQuaternion(m.quaternion);
+    _t.copy(m.position).add(new THREE.Vector3(0, 2, 0)); _p.copy(m.position).addScaledVector(avant, -32).add(new THREE.Vector3(0, 16, 0));
+    if (!TOUCHE) { camera.position.lerp(_p, 1 - Math.exp(-dt * 1.6)); }
+    controls.target.lerp(_t, 1 - Math.exp(-dt * 4)); }
+  // 4) au repos (rien touché depuis 25 s, rien de choisi) : la caméra tourne très lentement autour du quartier
+  else if (!TOUCHE && !FOCUS && !SUIVI && now - LACHE > 25000) { controls.autoRotate = true; controls.autoRotateSpeed = 0.18; }
+  // 5) fiche ouverte en haut : on décale la vue vers le bas pour que le lieu ne soit pas caché
+  const ouvert = $("fiche") && !$("fiche").hidden, but = ouvert ? 1 : 0; DECALE += (but - DECALE) * Math.min(1, dt * 4);
+  if (DECALE > 0.002) camera.setViewOffset(innerWidth, innerHeight, 0, -innerHeight * 0.12 * DECALE, innerWidth, innerHeight); else camera.clearViewOffset();
+});
+// les vues toutes prêtes, comme les boutons de ta ville : rue, quartier, ciel
+function vue(k) {
+  fermerFiche(); const P = PINS.find(p => p.L.ici), cx = P ? P.x : 0, cy = P ? P.y : 0;
+  if (k === "rue") {   // à hauteur d'homme (un peu au-dessus), de l'autre côté de la rue, en biais pour voir la façade et la chaussée
+    const g = LIEU === "maison" && window.MAISON_GARAGE;
+    const ox = g ? g.x + g.nx * 24 - g.ux * 22 : cx - 40, oy = g ? g.y + g.ny * 24 - g.uy * 22 : cy - 40, tx = g ? g.x + g.ux * 14 : cx, ty = g ? g.y + g.uy * 14 : cy;
+    voler(new THREE.Vector3(ox, 7, -oy), new THREE.Vector3(tx, 6, -ty), 1600, 55); }
+  else if (k === "quartier") voler(new THREE.Vector3(cx - 150, 150, -(cy - 190)), new THREE.Vector3(cx, 0, -cy), 1600, 38);
+  else voler(new THREE.Vector3(cx + 1, 760, -(cy - 120)), new THREE.Vector3(cx, 0, -cy), 1800, 38);
+}
+for (const b of document.querySelectorAll("[data-vue]")) b.addEventListener("click", () => vue(b.dataset.vue));
+
+
 
 /* ---------- toi, en direct (GPS du téléphone) ---------- */
 let moiPoint = null;
@@ -1276,7 +1340,7 @@ function boucle(t) {
 }
 
 /* ---------- démarrage ---------- */
-if (TEST || location.search.includes("regard")) Object.assign(window, { PINS_: () => PINS.map(p => [p.L.id, Math.round(p.x), Math.round(p.y), Math.round(p.h), !!p.b]), choisirLieu, PINS, camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
+if (TEST || location.search.includes("regard")) Object.assign(window, { vue, suivreBus, ETAT: () => ({ s: !!SUIVI, f: !!FOCUS, v: !!VOL, t: TOUCHE, ar: controls.autoRotate }), PINS_: () => PINS.map(p => [p.L.id, Math.round(p.x), Math.round(p.y), Math.round(p.h), !!p.b]), choisirLieu, PINS, camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
 try {
   const chezMoi = LIEU === "maison";   // les bus TCL suivis sont ceux du bas de chez toi
   if (!chezMoi) { $("panel").hidden = true; const t = document.querySelector(".bar b"); if (t) t.lastChild.textContent = "Ton travail"; }
