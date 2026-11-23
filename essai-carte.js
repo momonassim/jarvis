@@ -750,6 +750,156 @@ function animerBus(t) {
   }
 }
 
+/* ---------- les chantiers réels du Grand Lyon, mis en scène (symbolique) ----------
+   Autour de chaque zone de travaux : barrières de chantier vertes et blanches (comme sur la route de Genas),
+   et à quelques endroits un « atelier » : pelleteuse qui creuse, deux ouvriers en gilet orange, cônes, panneau « travaux »,
+   et une petite file de voitures qui avance au ralenti à côté (le bouchon). Rien de tout ça n'est exact : ça montre où ça bouge. */
+const ANIMS = [];
+function grilleChantier() {   // panneau de barrière : cadre blanc, grillage vert
+  const c = document.createElement("canvas"); c.width = 128; c.height = 64; const x = c.getContext("2d");
+  x.clearRect(0, 0, 128, 64); x.strokeStyle = "#3f8a55"; x.lineWidth = 2;
+  for (let i = 4; i < 124; i += 6) { x.beginPath(); x.moveTo(i, 4); x.lineTo(i, 60); x.stroke(); }
+  for (let j = 4; j < 60; j += 12) { x.beginPath(); x.moveTo(4, j); x.lineTo(124, j); x.stroke(); }
+  x.fillStyle = "#f2f2ee"; x.fillRect(0, 0, 128, 5); x.fillRect(0, 59, 128, 5); x.fillRect(0, 0, 5, 64); x.fillRect(123, 0, 5, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function panneauTravaux() {   // triangle rouge, pictogramme « travaux »
+  const c = document.createElement("canvas"); c.width = 128; c.height = 128; const x = c.getContext("2d");
+  x.fillStyle = "#d8262f"; x.beginPath(); x.moveTo(64, 6); x.lineTo(124, 116); x.lineTo(4, 116); x.closePath(); x.fill();
+  x.fillStyle = "#ffffff"; x.beginPath(); x.moveTo(64, 30); x.lineTo(104, 104); x.lineTo(24, 104); x.closePath(); x.fill();
+  x.fillStyle = "#1d1d1d"; x.beginPath(); x.arc(58, 56, 7, 0, 7); x.fill(); x.fillRect(52, 64, 10, 22); x.fillRect(46, 70, 26, 5); x.fillRect(70, 62, 4, 28);
+  x.beginPath(); x.moveTo(64, 98); x.lineTo(90, 98); x.lineTo(80, 84); x.closePath(); x.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function pelleteuse() {
+  const g = new THREE.Group(), jaune = new THREE.MeshStandardMaterial({ color: 0xf2b215, roughness: 0.55 }), noir = new THREE.MeshStandardMaterial({ color: 0x2a2d30, roughness: 0.8 });
+  const vitre = new THREE.MeshStandardMaterial({ color: 0x33424d, roughness: 0.2, metalness: 0.3 });
+  for (const s of [-1, 1]) { const ch = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.75, 0.6), noir); ch.position.set(0, 0.38, s * 1.0); g.add(ch); }
+  const tour = new THREE.Group(); tour.position.y = 0.85; g.add(tour);
+  const corps = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 2.2), jaune); corps.position.set(-0.3, 0.5, 0); tour.add(corps);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.35, 1.0), jaune); cab.position.set(0.45, 1.65, 0.55); tour.add(cab);
+  const vit = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.75, 0.9), vitre); vit.position.set(0.47, 1.85, 0.55); tour.add(vit);
+  const bras = new THREE.Group(); bras.position.set(0.8, 1.0, -0.4); tour.add(bras);
+  const b1 = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.32, 0.32), jaune); b1.position.x = 1.3; bras.add(b1);
+  const coude = new THREE.Group(); coude.position.x = 2.6; bras.add(coude);
+  const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.9, 0.28), jaune); b2.position.y = -0.95; coude.add(b2);
+  const godet = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.75), noir); godet.position.set(0.2, -1.95, 0); coude.add(godet);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return { g, tour, bras, coude };
+}
+function ouvrier(gilet) {
+  const g = new THREE.Group(), peau = new THREE.MeshStandardMaterial({ color: 0xc89b7b, roughness: 0.8 });
+  const jambes = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.85, 0.24), new THREE.MeshStandardMaterial({ color: 0x2f3a4a })); jambes.position.y = 0.43;
+  const buste = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.62, 0.28), new THREE.MeshStandardMaterial({ color: gilet, roughness: 0.6, emissive: gilet, emissiveIntensity: 0.15 })); buste.position.y = 1.17;
+  const tete = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), peau); tete.position.y = 1.62;
+  const casque = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf4f4f0 })); casque.position.y = 1.66;
+  const bras = new THREE.Group(); bras.position.set(0.27, 1.42, 0); const b = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.12), new THREE.MeshStandardMaterial({ color: gilet })); b.position.y = -0.28; bras.add(b);
+  const pelle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.1, 0.05), new THREE.MeshStandardMaterial({ color: 0x7a5a3a })); pelle.position.set(0, -0.6, 0.15); pelle.rotation.x = 0.5; bras.add(pelle);
+  g.add(jambes, buste, tete, casque, bras); g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, bras };
+}
+function poserChantiers(liste) {
+  const surRoute = (x, y) => { if (SOL && Math.hypot(x, y) < RDETAIL - 2) return cellSol(x, y) === 1; const r = surLaRue(x, y, 14); return !!r && r.d < r.w / 2 + 0.5; };
+  const prisPar = [];   // ce qui est déjà posé (pour ne rien empiler)
+  const pris = (x, y, d) => prisPar.some(([a, b]) => Math.hypot(a - x, b - y) < d);
+  const barr = [], cones = [], panneaux = [], ateliers = [];
+  const actifs = liste.filter(c => c.en_cours).slice(0, 30);
+  for (const c of actifs) {
+    for (const f of c.l) {
+      const p = pts(f); if (p.length < 2) continue;
+      // les barrières, le long du contour de la zone, seulement là où il y a de la route
+      for (let i = 0; i < p.length - 1; i++) {
+        const [x1, y1] = p[i], [x2, y2] = p[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 1) continue;
+        for (let t = 1; t < L - 1; t += 2.15) { const x = x1 + (x2 - x1) * t / L, y = y1 + (y2 - y1) * t / L;
+          if (x * x + y * y > 900 * 900 || !surRoute(x, y) || barr.length > 1400) continue;
+          barr.push([x, y, Math.atan2(y2 - y1, x2 - x1)]); } }
+      // les ateliers : un endroit de la zone, sur la route, tous les ~110 m
+      if (p.length < 4) continue;
+      let [x0, y0, x1, y1] = [1e9, 1e9, -1e9, -1e9]; for (const [x, y] of p) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      const cand = []; for (let x = x0; x <= x1; x += 3) for (let y = y0; y <= y1; y += 3) if (dansPoly(x, y, p) && surRoute(x, y) && x * x + y * y < 850 * 850) cand.push([x, y]);
+      cand.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));   // les plus proches de chez toi d'abord
+      // tout l'atelier (pelleteuse, trou, tas, ouvriers) doit tenir sur la chaussée, loin des entrées (garage, portillon)
+      const tient = (x, y, ang) => { const ux = Math.cos(ang), uy = Math.sin(ang);
+        for (let u = -4.5; u <= 6; u += 1.5) for (const v of [-2.6, 0, 2.6]) { const qx = x + ux * u - uy * v, qy = y + uy * u + ux * v; if (!surRoute(qx, qy) || ZONES_LIBRES.some(([a, b, r]) => Math.hypot(a - qx, b - qy) < r)) return false; } return true; };
+      for (const [x, y] of cand) { if (pris(x, y, 110) || ateliers.length >= 8) continue; const r = surLaRue(x, y, 20); const ang = r ? r.ang : 0; if (!tient(x, y, ang)) continue;
+        ateliers.push({ x, y, ang, w: r ? r.w : 7, fort: c.fort }); prisPar.push([x, y]); }
+    }
+  }
+  const o = new THREE.Object3D();
+  if (barr.length) {
+    const panneau = new THREE.PlaneGeometry(2.1, 1.1); panneau.translate(0, 0.75, 0);
+    const pied = new THREE.BoxGeometry(0.55, 0.16, 0.22); pied.translate(-1.05, 0.08, 0);
+    const ip = new THREE.InstancedMesh(panneau, new THREE.MeshStandardMaterial({ map: grilleChantier(), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.7 }), barr.length);
+    const ie = new THREE.InstancedMesh(pied, new THREE.MeshStandardMaterial({ color: 0xb9b5ad, roughness: 0.9 }), barr.length);
+    barr.forEach(([x, y, a], i) => { o.position.set(x, 0.14, -y); o.rotation.set(0, a, 0); o.updateMatrix(); ip.setMatrixAt(i, o.matrix); ie.setMatrixAt(i, o.matrix); });
+    ip.castShadow = true; scene.add(ip, ie);
+  }
+  const triangle = new THREE.MeshStandardMaterial({ map: panneauTravaux(), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
+  const orange = new THREE.MeshStandardMaterial({ color: 0xf06a1d, roughness: 0.6, emissive: 0xf06a1d, emissiveIntensity: 0.1 });
+  const blancM = new THREE.MeshStandardMaterial({ color: 0xf6f6f2 });
+  const teintes = [0xf4f2ee, 0x2e3237, 0x9aa1a8, 0xb8442f, 0x2f4d6e, 0xd9d4c7];
+  let k = 0;
+  for (const a of ateliers) {
+    const ux = Math.cos(a.ang), uy = Math.sin(a.ang), nx = -uy, ny = ux, z0 = 0.14;
+    const P = (u, v) => [a.x + ux * u + nx * v, a.y + uy * u + ny * v];
+    const grp = new THREE.Group(); scene.add(grp);
+    // le trou, en terre
+    const trou = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.06, 2.4), new THREE.MeshStandardMaterial({ color: 0x6b5340, roughness: 1 }));
+    { const [x, y] = P(1.5, 0); trou.position.set(x, z0 + 0.02, -y); trou.rotation.y = a.ang; grp.add(trou); }
+    const tas = new THREE.Mesh(new THREE.ConeGeometry(1.0, 0.9, 7), new THREE.MeshStandardMaterial({ color: 0x8a6c50, roughness: 1, flatShading: true }));
+    { const [x, y] = P(4.6, 1.2); tas.position.set(x, z0 + 0.45, -y); grp.add(tas); }
+    // la pelleteuse : la tourelle pivote, le bras plonge dans le trou puis vide sur le tas
+    const pel = pelleteuse(); { const [x, y] = P(-2.2, 0); pel.g.position.set(x, z0, -y); pel.g.rotation.y = a.ang; grp.add(pel.g); }
+    const dec = k * 1.7;
+    ANIMS.push(t => { const s = t / 1000 + dec, c = (Math.sin(s * 0.7) + 1) / 2;
+      pel.tour.rotation.y = -0.15 + 0.9 * Math.max(0, Math.sin(s * 0.35)); pel.bras.rotation.z = 0.15 - 0.35 * c; pel.coude.rotation.z = -0.25 + 0.55 * c; });
+    // deux ouvriers : l'un pellette, l'autre fait signe aux voitures
+    for (const [u, v, gi] of [[2.6, -1.6, 0], [-0.5, 2.4, 1]]) {
+      const ov = ouvrier(gi ? 0xf2c100 : 0xf06a1d); const [x, y] = P(u, v); ov.g.position.set(x, z0, -y); ov.g.rotation.y = a.ang + (gi ? Math.PI : Math.PI / 2); grp.add(ov.g);
+      const d2 = dec + gi * 0.8;
+      ANIMS.push(gi ? (t => { ov.bras.rotation.z = 2.2 + 0.5 * Math.sin(t / 260 + d2); }) : (t => { const s = Math.sin(t / 420 + d2); ov.bras.rotation.x = -0.6 + 0.6 * s; ov.g.position.y = z0 + Math.max(0, s) * 0.03; }));
+    }
+    // cônes autour, et le panneau « travaux » de chaque côté
+    for (let i = -3; i <= 6; i += 1.5) for (const v of [-2.3, 2.3]) { const [x, y] = P(i, v); if (!pris(x, y, 0.5)) cones.push([x, y]); }
+    for (const s of [-1, 1]) { const [x, y] = P(s * 12, (a.w / 2 - 0.5) * s);
+      const pan = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), triangle); pan.position.set(x, z0 + 1.75, -y); pan.rotation.y = a.ang + (s > 0 ? Math.PI / 2 : -Math.PI / 2); grp.add(pan);
+      const mat = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 6), blancM); mat.position.set(x, z0 + 0.6, -y); grp.add(mat); }
+    // le bouchon : une petite file de voitures qui avance au pas sur l'autre moitié de la route, puis repart
+    if (k < 4) {
+      const n = a.fort ? 6 : 4, file = [];
+      for (let i = 0; i < n; i++) { const v = new THREE.Group();
+        const caisse = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.72, 1.7), new THREE.MeshStandardMaterial({ color: teintes[(i + k) % teintes.length], roughness: 0.45 })); caisse.position.y = 0.6;
+        const haut = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.5, 1.48), new THREE.MeshStandardMaterial({ color: 0x2b333b, roughness: 0.2 })); haut.position.set(-0.2, 1.2, 0);
+        const feux = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 1.4), new THREE.MeshStandardMaterial({ color: 0xff2a2a, emissive: 0xff2a2a, emissiveIntensity: 1.2 })); feux.position.set(-2.02, 0.75, 0);
+        v.add(caisse, haut, feux); v.traverse(m => { if (m.isMesh) m.castShadow = true; }); grp.add(v); file.push(v); }
+      const voie = -Math.min(a.w / 2 - 1.2, 2.2), long = 7 + n * 5.6, d3 = dec;
+      ANIMS.push(t => { const s = t / 1000 + d3;
+        file.forEach((v, i) => { // chaque voiture avance par à-coups, et la file défile lentement
+          const pas = Math.floor(s / 3 + i * 0.37), frac = Math.min(1, ((s / 3 + i * 0.37) % 1) * 2.5), u = ((pas + frac) * 2.2 + i * 5.6) % long - long - 6;
+          const [x, y] = P(u, voie); v.position.set(x, z0, -y); v.rotation.y = a.ang; }); });
+    }
+    k++;
+  }
+  if (cones.length) { const g = new THREE.ConeGeometry(0.2, 0.6, 8); g.translate(0, 0.3, 0); const im = new THREE.InstancedMesh(g, orange, cones.length);
+    cones.forEach(([x, y], i) => { o.position.set(x, 0.14, -y); o.rotation.set(0, 0, 0); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }); im.castShadow = true; scene.add(im); }
+  return { barrieres: barr.length, ateliers: ateliers.map(a => [Math.round(a.x), Math.round(a.y)]) };
+}
+
+/* ---------- toi, en direct (GPS du téléphone) ---------- */
+let moiPoint = null;
+function suivreMoi() {
+  if (!navigator.geolocation || TEST) return;
+  const g = new THREE.Group();
+  const point = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.3, 24), new THREE.MeshStandardMaterial({ color: 0x2f7cf6, emissive: 0x2f7cf6, emissiveIntensity: 0.5 })); point.position.y = 0.4;
+  const bord = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.25, 24), new THREE.MeshStandardMaterial({ color: 0xffffff })); bord.position.y = 0.32;
+  const halo = new THREE.Mesh(new THREE.RingGeometry(2.2, 3.2, 32), new THREE.MeshBasicMaterial({ color: 0x2f7cf6, transparent: true, opacity: 0.4, side: THREE.DoubleSide })); halo.rotation.x = -Math.PI / 2; halo.position.y = 0.35;
+  g.add(bord, point, halo); g.visible = false; scene.add(g);
+  ANIMS.push(t => { const s = 1 + ((t / 1400) % 1) * 1.6; halo.scale.set(s, s, 1); halo.material.opacity = 0.5 * (1 - ((t / 1400) % 1)); });
+  navigator.geolocation.watchPosition(p => { const [x, y] = local(p.coords.latitude, p.coords.longitude, centre);
+    if (x * x + y * y > 1500 * 1500) { g.visible = false; return; } g.visible = true; g.position.set(x, 0.12, -y); moiPoint = [x, y]; },
+    () => { g.visible = false; }, { enableHighAccuracy: true, maximumAge: 5000 });
+}
+
 /* ---------- le panneau du bas : prochains passages ---------- */
 function panneau(p) {
   const box = $("pas"); box.innerHTML = "";
@@ -775,7 +925,7 @@ function taille() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h
 addEventListener("resize", taille); taille();
 $("moi").addEventListener("click", () => { controls.target.set(maisonCentre ? maisonCentre[0] : 0, 0, maisonCentre ? -maisonCentre[1] : 0); camera.position.set(-150, 190, 220); });
 function boucle(t) {
-  controls.update(); animerBus(t);
+  controls.update(); animerBus(t); for (const f of ANIMS) f(t);
   for (const a of anneaux) { const s = 1 + 0.04 * Math.sin(t / 700); a.scale.set(s, s, 1); a.material.opacity = 0.55 + 0.25 * Math.sin(t / 700); }
   renderer.render(scene, camera); requestAnimationFrame(boucle);
 }
@@ -792,6 +942,9 @@ try {
   if (SOL) habiller(q.sol);   // après les abribus (les bancs se posent à côté)
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
+  // les chantiers en cours (Grand Lyon) et ton point GPS
+  (async () => { try { const ch = await fn("jarvis-quartier", { quoi: "chantiers" }); if (ch && ch.ok) window.__chantiers = poserChantiers(ch.liste || []); } catch (_) { /* tant pis : la carte reste sans chantiers */ } })();
+  suivreMoi();
   const vivre = async () => { try { const v = await fn("jarvis-tcl", { quoi: "vehicules" }); if (v && v.ok) majBus(v.bus || []); } catch (_) { /* prochain tour */ } };
   const passages = async () => { try { const p = await fn("jarvis-tcl", { quoi: "passages" }); if (p && p.ok) panneau(p); } catch (_) { /* prochain tour */ } };
   vivre(); passages(); setInterval(vivre, 15000); setInterval(passages, 30000);

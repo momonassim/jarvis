@@ -1,6 +1,6 @@
 // Jarvis — fonction « jarvis-quartier » : le vrai quartier autour de chez lui, en données officielles IGN (BD TOPO),
 // réduit à l'essentiel pour la carte 3D : bâtiments (avec leur vraie hauteur), routes (avec leur largeur), verdure.
-// Coordonnées en mètres autour de la maison (x vers l'est, y vers le nord). Gardé en cache 7 jours dans le coffre.
+// Coordonnées en mètres autour de la maison (x vers l'est, y vers le nord). Gardé en cache dans le coffre (refait seulement sur demande : « refaire »).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
 const admin = createClient(URL_SB, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -313,15 +313,41 @@ function apercu(q: any, r: number) {
   const pres = (f: number[]) => { for (let i = 0; i < f.length; i += 2) if (f[i] * f[i] + f[i + 1] * f[i + 1] < r * r) return true; return false; };
   return { ...q, rayon: r, batiments: q.batiments.filter((b: any) => pres(b.p)), routes: q.routes.filter((b: any) => pres(b.p)), verdure: q.verdure.filter((b: any) => pres(b.p)), arbres: q.arbres.filter(([x, y]: number[]) => x * x + y * y < r * r), sol: q.sol ? couperSol(q.sol, r) : null };
 }
+// les chantiers du Grand Lyon autour de la maison, en direct (pas de cache : ça change tous les jours)
+function champ(r: Record<string, any>, ...motifs: RegExp[]) {
+  for (const m of motifs) for (const [k, v] of Object.entries(r)) if (m.test(k) && v != null && String(v).trim()) return Array.isArray(v) ? v.join(", ") : String(v);
+  return "";
+}
+async function chantiersAutour() {
+  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g.maison; if (!m) throw new Error("maison absente");
+  const la0 = m.lat, lo0 = m.lon, kx = Math.cos(la0 * Math.PI / 180) * 111320, ky = 110574;
+  const pt = (p: number[]) => [Math.round((p[0] - lo0) * kx * 10) / 10, Math.round((p[1] - la0) * ky * 10) / 10];
+  const fs = await coucheGL("pvo_patrimoine_voirie.pvochantierperturbant", la0, lo0, R);
+  const td = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+  const liste: any[] = [];
+  for (const f of fs) {
+    const p = f.properties ?? {};
+    const fin = champ(p, /fin/i).slice(0, 10), debut = champ(p, /debut|début/i).slice(0, 10);
+    if (fin && fin < td) continue;
+    const gene = champ(p, /mesure|circulation|restriction|perturbation|impact/i);
+    const l = anneaux(f.geometry).map(a => a.map(pt).flat()).filter(a => a.length >= 2);
+    if (f.geometry?.type === "Point" || f.geometry?.type === "MultiPoint") { const c = f.geometry.type === "Point" ? [f.geometry.coordinates] : f.geometry.coordinates; for (const q of c) l.push(pt(q)); }
+    if (!l.length) continue;
+    liste.push({ nom: (champ(p, /^nom$/i, /libelle|intitule|objet|nature|titre/i) || "Chantier").slice(0, 80), gene: gene.slice(0, 80), debut, fin,
+      fort: /interdit|altern|sens unique|ferm/i.test(gene), en_cours: !debut || debut <= td, l });
+  }
+  return { ok: true, centre: { lat: la0, lon: lo0 }, liste, cles: fs[0] ? Object.keys(fs[0].properties ?? {}) : [] };
+}
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!(await autorise(req))) return json({ erreur: "non autorisé" }, 401);
   const b = await req.json().catch(() => ({}));
+  if (b.quoi === "chantiers") { try { return json(await chantiersAutour()); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   const CHEMIN = "cache/quartier-maison.json";
   const r = Number(b.apercu) || 0;
   if (!b.refaire) {
     const { data } = await admin.storage.from("papiers").download(CHEMIN);
-    if (data) { const t = await data.text(); try { const j = JSON.parse(t); if (j.version === 5 && Date.now() - new Date(j.fait_le).getTime() < 7 * 864e5) return r ? json(apercu(j, r)) : new Response(t, { headers: { ...CORS, "Content-Type": "application/json" } }); } catch (_) { /* on refait */ } }
+    if (data) { const t = await data.text(); try { const j = JSON.parse(t); if (j.version === 5) return r ? json(apercu(j, r)) : new Response(t, { headers: { ...CORS, "Content-Type": "application/json" } }); } catch (_) { /* on refait */ } }
   }
   try {
     const q = await construire();
