@@ -201,8 +201,8 @@ function detail(ign: any[], routesIgn: any[], pcrs: any[], troncons: any[], verd
   return { sol, toits, arbres, retires };
 }
 
-async function construire() {
-  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g.maison; if (!m) throw new Error("maison absente");
+async function construire(lieu = "maison") {
+  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g[lieu]; if (!m) throw new Error(lieu + " absent");
   const la0 = m.lat, lo0 = m.lon, kx = Math.cos(la0 * Math.PI / 180) * 111320, ky = 110574;
   const pt = (p: number[]) => [Math.round((p[0] - lo0) * kx * 10) / 10, Math.round((p[1] - la0) * ky * 10) / 10];
   const dedans = (pts: number[][]) => pts.some(([x, y]) => x * x + y * y < (R + 60) ** 2);
@@ -318,8 +318,8 @@ function champ(r: Record<string, any>, ...motifs: RegExp[]) {
   for (const m of motifs) for (const [k, v] of Object.entries(r)) if (m.test(k) && v != null && String(v).trim()) return Array.isArray(v) ? v.join(", ") : String(v);
   return "";
 }
-async function chantiersAutour() {
-  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g.maison; if (!m) throw new Error("maison absente");
+async function chantiersAutour(lieu = "maison") {
+  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g[lieu]; if (!m) throw new Error(lieu + " absent");
   const la0 = m.lat, lo0 = m.lon, kx = Math.cos(la0 * Math.PI / 180) * 111320, ky = 110574;
   const pt = (p: number[]) => [Math.round((p[0] - lo0) * kx * 10) / 10, Math.round((p[1] - la0) * ky * 10) / 10];
   const fs = await coucheGL("pvo_patrimoine_voirie.pvochantierperturbant", la0, lo0, R);
@@ -342,15 +342,16 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!(await autorise(req))) return json({ erreur: "non autorisé" }, 401);
   const b = await req.json().catch(() => ({}));
-  if (b.quoi === "chantiers") { try { return json(await chantiersAutour()); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
-  const CHEMIN = "cache/quartier-maison.json";
+  const lieu = b.lieu === "usine" ? "usine" : "maison";   // chez toi, ou ton travail
+  if (b.quoi === "chantiers") { try { return json(await chantiersAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
+  const CHEMIN = `cache/quartier-${lieu}.json`;
   const r = Number(b.apercu) || 0;
   if (!b.refaire) {
     const { data } = await admin.storage.from("papiers").download(CHEMIN);
     if (data) { const t = await data.text(); try { const j = JSON.parse(t); if (j.version === 5) return r ? json(apercu(j, r)) : new Response(t, { headers: { ...CORS, "Content-Type": "application/json" } }); } catch (_) { /* on refait */ } }
   }
   try {
-    const q = await construire();
+    const q = { ...(await construire(lieu)), lieu };
     const t = JSON.stringify(q);
     await admin.storage.from("papiers").upload(CHEMIN, new Blob([t], { type: "application/json" }), { upsert: true });
     if (r) return json(apercu(q, r));
