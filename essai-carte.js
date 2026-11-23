@@ -257,17 +257,22 @@ let passages3D = null;
 function poserPassages() {
   if (!SOL) return; if (passages3D) { scene.remove(passages3D); passages3D.geometry.dispose(); }
   // aux carrefours : un passage sur chaque branche, à 6 m du croisement, s'il n'y en a pas déjà un tout près (placé « à la logique »)
-  const liste = SOL.passages.slice(), noeuds = new Map();
+  const liste = [], noeuds = new Map();   // pas deux passages l'un sur l'autre (ex. de part et d'autre d'un îlot)
+  for (const q of SOL.passages) if (!liste.some(([a, c]) => Math.hypot(a - q[0], c - q[1]) < 8)) liste.push(q);
   for (const r of SOL.routes) { const l = pts(r.p); for (const [x, y] of [l[0], l[l.length - 1]]) { const k = Math.round(x) + "|" + Math.round(y); const n = noeuds.get(k) || { x, y, b: [] }; n.b.push(l[0][0] === x && l[0][1] === y ? l[1] : l[l.length - 2]); noeuds.set(k, n); } }
   for (const n of noeuds.values()) { if (n.b.length < 3 || Math.hypot(n.x, n.y) > SOL.R0 - 10) continue;
     for (const [bx, by] of n.b) { const L = Math.hypot(bx - n.x, by - n.y) || 1, px = n.x + (bx - n.x) / L * 9, py = n.y + (by - n.y) / L * 9;
       if (cellSol(px, py) === 1 && !liste.some(([a, c]) => Math.hypot(a - px, c - py) < 12)) liste.push([px, py]); } }
-  const bandes = []; SOL.zebras = liste;
+  const bandes = [], poses = []; SOL.zebras = liste;
   for (const [px, py] of liste) {
     const r = surLaRue(px, py, 15); if (!r) continue;
     const ux = Math.cos(r.ang), uy = Math.sin(r.ang), nx = -uy, ny = ux;
     const bout = (sg) => { let t = 0, dernier = 0, trou = 0; while (t < 18) { t += 0.3; if (cellSol(px + sg * nx * t, py + sg * ny * t) === 1) { dernier = t; trou = 0; } else if ((trou += 0.3) > 6) break; } return dernier; };
-    const a = bout(-1), b = bout(1); if (a + b < 3) continue;
+    const lim = r.w / 2 + 1.5, a = Math.min(lim, bout(-1)), b = Math.min(lim, bout(1)); if (a + b < 5) continue;   // jamais plus large que la rue (pas à travers tout le carrefour)
+    // ce passage ne doit pas croiser ni toucher un passage déjà posé
+    const seg = []; for (let t = -a; t <= b; t += 0.5) seg.push([px + nx * t, py + ny * t]);
+    if (poses.some(s2 => seg.some(([x1, y1]) => s2.some(([x2, y2]) => Math.hypot(x1 - x2, y1 - y2) < 1.1)))) continue;
+    poses.push(seg);
     for (let t = -a + 0.45; t < b - 0.3; t += 1) { const cx = px + nx * t, cy = py + ny * t; if (cellSol(cx, cy) !== 1) continue;
       const g = new THREE.BoxGeometry(2.8, 0.025, 0.5); g.rotateY(r.ang); g.translate(cx, 0.135, -cy); bandes.push(g.toNonIndexed()); }
   }
@@ -1161,7 +1166,9 @@ function poserLieux() {
     .filter(({ c }) => { const d = Math.hypot(...c); return d > 90 && d < 480; }).sort((p, q) => Math.hypot(...p.c) - Math.hypot(...q.c));
   for (const L of LIEUX_CARTE[LIEU]) {
     let b = null, x = 0, y = 0, h = 0;
-    if (L.ici) { b = BATS.find(q => q.estMaison) || batiPres(0, 0); }
+    if (L.ici && LIEU === "usine") {   // l'adresse de l'usine tombe sur l'entrée, côté rue : le site, c'est le plus grand bâtiment industriel juste derrière
+      b = BATS.filter(q => /industr/i.test(q.u || "") && Math.hypot(...centreDe(q)) < 320).sort((p, q) => aireDe(q.pp) - aireDe(p.pp))[0] || batiPres(0, 0); }
+    else if (L.ici) { b = BATS.find(q => q.estMaison) || batiPres(0, 0); }
     else if (L.garage && window.MAISON_GARAGE) { const g = window.MAISON_GARAGE; x = g.x + g.nx * 5; y = g.y + g.ny * 5; h = 0.2; }   // sur la rampe, devant la porte du garage
     else if (L.ll) { [x, y] = local(L.ll[0], L.ll[1], centre); b = batiPres(x, y); }
     else if (L.imagine) { const ok = ({ b, c }) => !pris.has(b) && cible.every(([a, d]) => Math.hypot(a - c[0], d - c[1]) > 70);
@@ -1281,7 +1288,8 @@ try {
   if (carte && carte.ok) poserLignes(carte);
   if (SOL) habiller(q.sol);   // après les abribus (les bancs se posent à côté)
   RESEAU = construireReseau(q.routes || []); habillerRues(); lancerCirculation();
-  poserLieux();   // tes lieux Jarvis, aux vrais endroits   // les rues de la carte : ce qui roule les suit
+  poserLieux();   // tes lieux Jarvis, aux vrais endroits
+  if (LIEU === "usine") { const P = PINS.find(p => p.L.ici); if (P) setTimeout(() => choisirLieu(P), 600); }   // au travail : on arrive directement sur l'usine   // les rues de la carte : ce qui roule les suit
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
   // les chantiers en cours (Grand Lyon) et ton point GPS
