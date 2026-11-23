@@ -233,11 +233,12 @@ function ruesSansBordure() {
   for (const f of SOL.bordures) { const l = pts(f); for (let i = 0; i < l.length - 1; i++) { const L = Math.hypot(l[i + 1][0] - l[i][0], l[i + 1][1] - l[i][1]); for (let t = 0; t <= L; t += 1) { const x = l[i][0] + (l[i + 1][0] - l[i][0]) * (L ? t / L : 0), y = l[i][1] + (l[i + 1][1] - l[i][1]) * (L ? t / L : 0); (G.get(cle(x, y)) || G.set(cle(x, y), []).get(cle(x, y))).push([x, y]); } } }
   const bordProche = (x, y, d) => { for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (const [px, py] of G.get((Math.floor(x / C) + a) + "|" + (Math.floor(y / C) + b)) || []) if (Math.hypot(px - x, py - y) < d) return true; return false; };
   const out = [];
-  for (const r of SOL.routes) { const l = pts(r.p), w = Math.min(r.w, 7); let cur = [];
+  for (const r of SOL.routes) { if (r.i <= 4 || r.w > 7) continue;   // grands axes : jamais traités comme « petite rue »
+    const l = pts(r.p), w = r.w; let cur = [];
     const pousser = () => { if (cur.length > 1) out.push({ pts: cur, w }); cur = []; };
     for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1);
       for (let t = 0; t < L; t += 2) { const x = x1 + (x2 - x1) * t / L, y = y1 + (y2 - y1) * t / L;
-        const ok = Math.hypot(x, y) < SOL.R0 - 3 && !bordProche(x, y, w / 2 + 2.5);
+        const ok = Math.hypot(x, y) < SOL.R0 - 3 && !bordProche(x, y, w / 2 + 4) && cellSol(x, y) !== 9;
         if (ok) cur.push([x, y]); else pousser(); } }
     pousser(); }
   return (SOL.synth = out);
