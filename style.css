@@ -497,3 +497,4 @@ body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!im
 .bmbus span{display:grid;place-items:center;height:22px;min-width:34px;padding:0 5px;border-radius:6px;font:800 12px var(--sans);box-shadow:0 0 0 2px #fff,0 4px 10px -3px rgba(0,0,0,.45)}
 .bmhome{font-size:22px;line-height:30px;text-align:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
 .busmap .leaflet-container{font-family:var(--sans);background:#f2efe9}
+.busmap .leaflet-tile-pane{filter:grayscale(1) brightness(1.06) contrast(.82)}

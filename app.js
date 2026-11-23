@@ -692,7 +692,8 @@ async function ouvrirCarteBus() {
   const L = window.L; if (!L) return;
   if (!busCarte) {
     const m = L.map("bmCarte", { zoomControl: false, attributionControl: true }).setView([45.7487, 4.917], 15);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19, attribution: "© OpenStreetMap · © CARTO · TCL / Data Grand Lyon" }).addTo(m);
+    // fond OpenStreetMap (gratuit, sans clé), passé en gris clair pour que seules les lignes TCL ressortent
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap · TCL / Data Grand Lyon" }).addTo(m);
     busCarte = { m, bus: L.layerGroup().addTo(m), t: null };
     try { const c = await tcl("carte"); if (c.ok) {
       const leg = $("bmLeg"); leg.innerHTML = ""; const faites = new Set();
