@@ -435,7 +435,7 @@ function detaillerMaison(pp, hAt, voisins) {
   const poly = pp.slice(0, -1), n = poly.length;
   let aire = 0; for (let i = 0; i < n; i++) { const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % n]; aire += x1 * y2 - x2 * y1; }
   const sens = aire > 0 ? 1 : -1;   // pour trouver « l'extérieur » de chaque façade
-  const vitres = [], volets = [], cadres = [], dalles = [], verres = [], ajoures = [], garage = [], beton = [], rails = [], socle = [], portes = [], boites = [], lampes = [];
+  const vitres = [], volets = [], cadres = [], dalles = [], verres = [], ajoures = [], garage = [], beton = [], rails = [], socle = [], portes = [], boites = [], lampes = [], metal = [], bois = [];
   let entreeGarage = null;
   const boite = (arr, w, h, d, x, y, z, ang) => { const b = new THREE.BoxGeometry(w, h, d); b.rotateY(ang); b.translate(x, z, -y); arr.push(b.toNonIndexed()); };
   const ETAGE = 2.9, RDC = 3.1;
@@ -457,16 +457,35 @@ function detaillerMaison(pp, hAt, voisins) {
         boite(cadres, 3.7, 2.55, 0.12, gx0 + nx * 0.03, gy0 + ny * 0.03, 1.27, ang);
         boite(garage, 3.4, 2.35, 0.14, gx0 + nx * 0.05, gy0 + ny * 0.05, 1.17, ang);
         entreeGarage = { x: gx0, y: gy0, nx, ny, ux, uy, ang };
-        // entrée de l'immeuble à côté : porte vitrée sous un petit auvent, boîtes aux lettres et interphone devant
-        const ex = x1 + ux * 6.2, ey = y1 + uy * 6.2;
-        boite(cadres, 1.75, 2.45, 0.1, ex + nx * 0.04, ey + ny * 0.04, 1.22, ang);
-        boite(portes, 0.62, 2.2, 0.12, ex + nx * 0.06 - ux * 0.33, ey + ny * 0.06 - uy * 0.33, 1.12, ang);
-        boite(portes, 0.62, 2.2, 0.12, ex + nx * 0.06 + ux * 0.33, ey + ny * 0.06 + uy * 0.33, 1.12, ang);
-        boite(rails, 0.04, 0.6, 0.15, ex + nx * 0.1 + ux * 0.06, ey + ny * 0.1 + uy * 0.06, 1.1, ang);
-        boite(lampes, 0.3, 0.12, 0.16, ex + nx * 0.1, ey + ny * 0.1, 2.65, ang);
+        // à côté du garage (vu sur Street View) : l'entrée piétonne est un portillon en métal, au bout de l'immeuble,
+        // sous un auvent plat qui couvre aussi un abri en lattes de bois sombre ; boîtes aux lettres blanches devant
+        const ex = x1 - ux * 0.95, ey = y1 - uy * 0.95;
+        boite(metal, 0.08, 2.0, 0.08, ex - ux * 0.62, ey - uy * 0.62, 1.0, ang);
+        boite(metal, 0.08, 2.0, 0.08, ex + ux * 0.62, ey + uy * 0.62, 1.0, ang);
+        for (let b = -0.5; b <= 0.51; b += 0.1) boite(metal, 0.025, 1.8, 0.025, ex + ux * b, ey + uy * b, 1.05, ang);
+        boite(metal, 1.2, 0.06, 0.05, ex, ey, 1.95, ang); boite(metal, 1.2, 0.06, 0.05, ex, ey, 0.2, ang); boite(metal, 1.2, 0.06, 0.05, ex, ey, 1.05, ang);
+        boite(rails, 0.05, 0.16, 0.08, ex + ux * 0.42 + nx * 0.05, ey + uy * 0.42 + ny * 0.05, 1.05, ang);   // poignée
+        // l'abri en lattes de bois, juste à gauche du portillon
+        const ax = x1 - ux * 3.7 - nx * 0.4, ay = y1 - uy * 3.7 - ny * 0.4;
+        boite(bois, 3.9, 2.45, 3.0, ax, ay, 1.36, ang);
+        // l'auvent plat blanc au-dessus des deux
+        boite(dalles, 6.3, 0.18, 3.8, x1 - ux * 2.9 - nx * 0.2, y1 - uy * 2.9 - ny * 0.2, 2.72, ang);
+        boite(metal, 0.1, 2.6, 0.1, x1 - ux * 0.3 + nx * 1.6, y1 - uy * 0.3 + ny * 1.6, 1.42, ang);
+        boite(lampes, 0.25, 0.06, 0.25, ex + nx * 0.4, ey + ny * 0.4, 2.6, ang);
         entreeGarage.porte = [ex, ey];
-        boite(beton, 2.2, 1.35, 0.5, ex + nx * 1.9 + ux * 1.6, ey + ny * 1.9 + uy * 1.6, 0.8, ang);
-        boite(boites, 1.9, 1.0, 0.04, ex + nx * 2.16 + ux * 1.6, ey + ny * 2.16 + uy * 1.6, 0.85, ang);
+        ZONES_LIBRES.push([ax, ay, 2.6], [ex, ey, 1.3]);
+        // boîtes aux lettres et interphone : deux blocs blancs bas devant, entre le portillon et le garage
+        const bx = x1 + ux * 0.0 + nx * 2.3, by = y1 + uy * 0.0 + ny * 2.3;
+        boite(beton, 1.5, 1.15, 0.55, bx, by, 0.72, ang);
+        boite(boites, 1.3, 0.75, 0.04, bx + nx * 0.29, by + ny * 0.29, 0.8, ang);
+        boite(beton, 0.45, 1.45, 0.45, bx - ux * 1.05, by - uy * 1.05, 0.87, ang);   // pilier de l'interphone
+        boite(rails, 0.22, 0.3, 0.04, bx - ux * 1.05 + nx * 0.24, by - uy * 1.05 + ny * 0.24, 1.25, ang);
+        // à droite du garage : bloc blanc (local poubelles) et deux grandes portes-fenêtres à volets
+        const cx2 = x1 + ux * 5.0 + nx * 1.2, cy2 = y1 + uy * 5.0 + ny * 1.2;
+        boite(beton, 1.6, 1.0, 0.9, cx2, cy2, 0.65, ang);
+        for (const tt of [5.4, 7.3]) { const qx = x1 + ux * tt + nx * 0.04, qy = y1 + uy * tt + ny * 0.04;
+          boite(cadres, 1.25, 2.45, 0.05, qx, qy, 1.4, ang); boite(vitres, 1.05, 2.25, 0.07, qx, qy, 1.35, ang);
+          boite(volets, 1.05, tt > 6 ? 2.2 : 1.6, 0.09, qx, qy, tt > 6 ? 1.38 : 1.68, ang); }
         garagePose = true; boitesPosees = true;
       }
       if (versRue && garagePose && t < 8.2) { /* rez-de-chaussée : place du garage et de l'entrée */ }
@@ -517,8 +536,10 @@ function detaillerMaison(pp, hAt, voisins) {
     ajoures: new THREE.MeshStandardMaterial({ map: motifAjoure(), alphaTest: 0.5, transparent: true, side: THREE.DoubleSide, roughness: 0.6 }),
     garage: new THREE.MeshStandardMaterial({ map: lames(0xc4c8cb, 0xa9aeb2, 9), roughness: 0.45, metalness: 0.3 }),
     beton: new THREE.MeshStandardMaterial({ color: 0xe6e2d9, roughness: 0.9 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0x6e7376, roughness: 0.5, metalness: 0.6 }),
+    bois: new THREE.MeshStandardMaterial({ map: (() => { const t = lames(0x5b4a3c, 0x2e2620, 22); t.center.set(0.5, 0.5); t.rotation = Math.PI / 2; return t; })(), roughness: 0.85 }),
   };
-  for (const [nom, arr] of Object.entries({ vitres, volets, cadres, dalles, verres, ajoures, garage, beton, rails, socle, portes, boites, lampes })) {
+  for (const [nom, arr] of Object.entries({ vitres, volets, cadres, dalles, verres, ajoures, garage, beton, rails, socle, portes, boites, lampes, metal, bois })) {
     if (!arr.length) continue; const m = new THREE.Mesh(mergeGeometries(arr), mat[nom]); m.castShadow = nom !== "verres"; m.receiveShadow = true; scene.add(m);
   }
   // l'accès au garage : une rampe en enrobé du garage jusqu'à la chaussée, qui passe par-dessus la bordure (bateau)
@@ -533,7 +554,7 @@ function detaillerMaison(pp, hAt, voisins) {
       ZONES_LIBRES.push([x + nx * d / 2, y + ny * d / 2, d / 2 + 2]);
       // le parvis de l'entrée : dalles claires de la porte jusqu'au trottoir (pas de pelouse devant)
       if (entreeGarage.porte) { const [ex, ey] = entreeGarage.porte, L2 = Math.max(1, d - 0.8), cx = ex + nx * L2 / 2, cy = ey + ny * L2 / 2;
-        const pv = new THREE.BoxGeometry(3.4, 0.05, L2); pv.rotateY(Math.atan2(nx, ny)); pv.translate(cx, 0.16, -cy);
+        const pv = new THREE.BoxGeometry(1.7, 0.05, L2); pv.rotateY(Math.atan2(nx, ny)); pv.translate(cx, 0.16, -cy);
         const mp = new THREE.Mesh(pv, new THREE.MeshStandardMaterial({ color: 0xdedad2, roughness: 0.9 })); mp.receiveShadow = true; scene.add(mp);
         ZONES_LIBRES.push([cx, cy, L2 / 2 + 1.5]); } } }
   if (TEST || location.search.includes("regard")) window.MAISON = { poly, garage: entreeGarage };
