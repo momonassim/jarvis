@@ -55,8 +55,151 @@ function grilleDe<T>(taille: number) {
     autour(x: number, y: number, r: number) { const s = new Set<T>(); for (let gx = Math.floor((x - r) / taille); gx <= Math.floor((x + r) / taille); gx++) for (let gy = Math.floor((y - r) / taille); gy <= Math.floor((y + r) / taille); gy++) for (const o of m.get(gx + "|" + gy) ?? []) s.add(o); return [...s]; },
   };
 }
+function pts2(f: number[]) { const o: number[][] = []; for (let i = 0; i < f.length; i += 2) o.push([f[i], f[i + 1]]); return o; }
 function boite(p: number[][]) { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (const [x, y] of p) { a = Math.min(a, x); b = Math.min(b, y); c = Math.max(c, x); d = Math.max(d, y); } return [a, b, c, d]; }
 function aleat(graine: number) { let s = graine >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+
+/* ================= DÉTAIL autour de la maison (rayon R2) =================
+   - sol : chaussée / trottoir / bordure / verdure, au pas de C mètres, d'après le PCRS du Grand Lyon (bords de voirie
+     relevés au centimètre) : on « remplit » la chaussée depuis l'axe de chaque rue, sans franchir une bordure,
+     et sans s'éloigner de l'axe plus que la largeur officielle de la rue (+ 1,5 m).
+   - toits : hauteur réelle mesurée par le LiDAR HD de l'IGN (MNH : hauteur au-dessus du sol), dans le contour IGN.
+   - arbres : sommets de végétation du LiDAR (tous les arbres, y compris cours et jardins). */
+const R2 = 200, C = 0.4, N = Math.round(2 * R2 / C);
+async function mnhLidar(la0: number, lo0: number, kx: number, ky: number) {
+  const n = Math.round(2 * R2 / 0.6), dla = R2 / ky, dlo = R2 / kx;
+  const u = `https://data.geopf.fr/wms-r/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=IGNF_LIDAR-HD_MNH_ELEVATION.ELEVATIONGRIDCOVERAGE.WGS84G&STYLES=normal&CRS=EPSG:4326&BBOX=${la0 - dla},${lo0 - dlo},${la0 + dla},${lo0 + dlo}&WIDTH=${n}&HEIGHT=${n}&FORMAT=image/x-bil;bits=32`;
+  let dernier = "";
+  for (let essai = 0; essai < 3; essai++) {
+    try {
+      const rep = await fetch(u, { signal: AbortSignal.timeout(60000) });
+      const buf = await rep.arrayBuffer();
+      if (!rep.ok || buf.byteLength !== n * n * 4) { dernier = `HTTP ${rep.status}, ${buf.byteLength} octets : ` + new TextDecoder().decode(buf.slice(0, 160)); continue; }
+      const dv = new DataView(buf), le = new Float32Array(n * n), be = new Float32Array(n * n); let ok1 = 0, ok2 = 0;
+      for (let i = 0; i < n * n; i++) { le[i] = dv.getFloat32(i * 4, true); be[i] = dv.getFloat32(i * 4, false); if (le[i] > -2 && le[i] < 150) ok1++; if (be[i] > -2 && be[i] < 150) ok2++; }
+      const h = ok1 >= ok2 ? le : be;
+      for (let i = 0; i < h.length; i++) if (!(h[i] > -2 && h[i] < 150)) h[i] = 0;
+      return { n, pas: 2 * R2 / n, h, valides: Math.max(ok1, ok2) / (n * n) };
+    } catch (e) { dernier = String(e); }
+  }
+  throw new Error("LiDAR : " + dernier);
+}
+function rle(cl: Uint8Array) {   // une ligne = suite de « lettre de classe + longueur »
+  const L = "abcdz"; const lignes: string[] = [];
+  for (let j = 0; j < N; j++) { let s = "", c = cl[j * N], n = 0; for (let i = 0; i < N; i++) { const v = cl[j * N + i]; if (v === c) n++; else { s += L[c === 9 ? 4 : c] + n; c = v; n = 1; } } s += L[c === 9 ? 4 : c] + n; lignes.push(s); }
+  return lignes.join("|");
+}
+function detail(ign: any[], routesIgn: any[], pcrs: any[], troncons: any[], verdure: any[], mnh: any, distMur: (x: number, y: number, r: number) => number) {
+  const cx = (x: number) => Math.floor((x + R2) / C), cy = (y: number) => Math.floor((R2 - y) / C);
+  const dans = (i: number, j: number) => i >= 0 && j >= 0 && i < N && j < N;
+  const barr = new Uint8Array(N * N), masque = new Uint8Array(N * N), cl = new Uint8Array(N * N);
+  const tampon = (x1: number, y1: number, x2: number, y2: number, r: number, t: Uint8Array, v: number) => {
+    const L = Math.hypot(x2 - x1, y2 - y1), pas = C / 3, k = Math.ceil(r / C);
+    for (let s = 0; s <= L; s += pas) { const x = x1 + (x2 - x1) * (L ? s / L : 0), y = y1 + (y2 - y1) * (L ? s / L : 0), i0 = cx(x), j0 = cy(y);
+      for (let dj = -k; dj <= k; dj++) for (let di = -k; di <= k; di++) { const i = i0 + di, j = j0 + dj; if (!dans(i, j)) continue; if (k && Math.hypot(di * C, dj * C) > r) continue; t[j * N + i] = v; } }
+  };
+  const remplir = (p: number[][], f: (k: number) => void) => {   // remplissage d'un polygone ligne par ligne
+    let y0 = 1e9, y1 = -1e9; for (const q of p) { y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+    for (let j = Math.max(0, cy(y1)); j <= Math.min(N - 1, cy(y0)); j++) {
+      const y = R2 - (j + 0.5) * C, xs: number[] = [];
+      for (let a = 0, b = p.length - 1; a < p.length; b = a++) { const [xa, ya] = p[a], [xb, yb] = p[b]; if ((ya > y) !== (yb > y)) xs.push(xa + (y - ya) * (xb - xa) / (yb - ya)); }
+      xs.sort((u, v) => u - v);
+      for (let m = 0; m + 1 < xs.length; m += 2) for (let i = Math.max(0, Math.ceil((xs[m] + R2) / C - 0.5)); i <= Math.min(N - 1, Math.floor((xs[m + 1] + R2) / C - 0.5)); i++) f(j * N + i);
+    }
+  };
+  // barrières : bâtiments (1) et bords de voirie du PCRS (2)
+  for (const b of ign) remplir(b.pts, (k) => { barr[k] = 1; });
+  // (3 = petite boucle fermée : îlot, refuge, fosse d'arbre — elle arrête la chaussée mais ne « cache » pas l'axe de la rue)
+  for (const l of pcrs) { let per = 0; for (let i = 0; i < l.length - 1; i++) per += Math.hypot(l[i + 1][0] - l[i][0], l[i + 1][1] - l[i][1]);
+    const boucle = l.length > 3 && Math.hypot(l[0][0] - l[l.length - 1][0], l[0][1] - l[l.length - 1][1]) < 0.3 && per < 40;
+    for (let i = 0; i < l.length - 1; i++) tampon(l[i][0], l[i][1], l[i + 1][0], l[i + 1][1], 0, barr, boucle ? 3 : 2); }
+  // zone autorisée autour de chaque axe (largeur officielle + 2,5 m), et points de départ sur l'axe
+  const graines: number[] = [];
+  const axe = (pts: number[][], larg: number, marge: number) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      tampon(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], larg / 2 + marge, masque, 1);
+      const L = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+      for (let s = 0; s <= L; s += 1) { const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * s / L, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * s / L, a = cx(x), b = cy(y); if (dans(a, b)) graines.push(b * N + a); }
+    }
+  };
+  // les largeurs officielles du Grand Lyon sont fiables (+1 m de tolérance) ; celles de l'IGN, à peine (+0,5 m)
+  for (const t of troncons) axe(t.pts, t.w, 1);
+  for (const r of routesIgn) axe(r.pts, r.w, 0.5);
+  // remplissage de la chaussée (4 voisins : une bordure tracée en diagonale suffit à l'arrêter)
+  const file = new Int32Array(N * N); let tete = 0, fin = 0;
+  for (const g of graines) if (masque[g] && !barr[g] && cl[g] !== 1) { cl[g] = 1; file[fin++] = g; }
+  while (tete < fin) { const k = file[tete++], i = k % N, j = (k / N) | 0;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj; if (!dans(a, b)) continue; const q = b * N + a; if (cl[q] === 1 || barr[q] || !masque[q]) continue; cl[q] = 1; file[fin++] = q; } }
+  // fuites : par une entrée de garage ou un passage, le remplissage peut passer derrière une bordure.
+  // Chaque case de chaussée doit « voir » l'axe de rue le plus proche sans traverser de bordure, sinon c'est du trottoir.
+  const src = new Int32Array(N * N).fill(-1); tete = 0; fin = 0;
+  for (const g of graines) if (masque[g] && src[g] < 0) { src[g] = g; file[fin++] = g; }
+  while (tete < fin) { const k = file[tete++], i = k % N, j = (k / N) | 0;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj; if (!dans(a, b)) continue; const q = b * N + a; if (src[q] >= 0 || !masque[q]) continue; src[q] = src[k]; file[fin++] = q; } }
+  for (let k = 0; k < N * N; k++) { if (cl[k] !== 1 || src[k] < 0) continue;
+    let i0 = k % N, j0 = (k / N) | 0; const i1 = src[k] % N, j1 = (src[k] / N) | 0, di = Math.abs(i1 - i0), dj = -Math.abs(j1 - j0), si = i0 < i1 ? 1 : -1, sj = j0 < j1 ? 1 : -1; let e = di + dj, coupe = false;
+    while (!(i0 === i1 && j0 === j1)) { const e2 = 2 * e; if (e2 >= dj) { e += dj; i0 += si; } if (e2 <= di) { e += di; j0 += sj; } if (barr[j0 * N + i0] === 2) { coupe = true; break; } }
+    if (coupe) cl[k] = 0; }
+  // bordures : les traits du PCRS qui touchent la chaussée ; verdure ; hors du disque : vide
+  for (let k = 0; k < N * N; k++) if ((barr[k] === 2 || barr[k] === 3) && cl[k] !== 1) { const i = k % N, j = (k / N) | 0; if ((i > 0 && cl[k - 1] === 1) || (i < N - 1 && cl[k + 1] === 1) || (j > 0 && cl[k - N] === 1) || (j < N - 1 && cl[k + N] === 1)) cl[k] = 2; }
+  for (const v of verdure) remplir(v.pts, (k) => { if (cl[k] === 0 && barr[k] !== 1) cl[k] = 3; });
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const x = -R2 + (i + 0.5) * C, y = R2 - (j + 0.5) * C; if (x * x + y * y > R2 * R2) cl[j * N + i] = 9; }
+  // les bordures à dessiner en relief : les traits du PCRS qui longent vraiment une chaussée
+  const bordures: number[][] = [];
+  for (const l of pcrs) { let touche = 0, n = 0;
+    for (let i = 0; i < l.length - 1; i++) { const L = Math.hypot(l[i + 1][0] - l[i][0], l[i + 1][1] - l[i][1]); for (let s = 0; s <= L; s += C) { const a = cx(l[i][0] + (l[i + 1][0] - l[i][0]) * (L ? s / L : 0)), b = cy(l[i][1] + (l[i + 1][1] - l[i][1]) * (L ? s / L : 0)); if (!dans(a, b)) continue; n++; if (cl[b * N + a] === 2) touche++; } }
+    if (n && touche / n > 0.3 && l.some(([x, y]: number[]) => x * x + y * y < R2 * R2)) bordures.push(l.flat().map((v: number) => Math.round(v * 100) / 100)); }
+  const sol = { r: R2, pas: C, n: N, lignes: rle(cl), bordures };
+  if (!mnh) return { sol, toits: new Map(), arbres: null, retires: new Set() };
+  // ---- LiDAR : hauteur au-dessus du sol en (x, y)
+  const H = (x: number, y: number) => { const i = Math.floor((x + R2) / mnh.pas), j = Math.floor((R2 - y) / mnh.pas); return i >= 0 && j >= 0 && i < mnh.n && j < mnh.n ? mnh.h[j * mnh.n + i] : 0; };
+  const med = (a: number[]) => { const b = [...a].sort((u, v) => u - v); return b[b.length >> 1]; };
+  const toits = new Map<any, any>(), retires = new Set<any>();
+  for (const b of ign) {
+    if (!b.pts.every(([x, y]: number[]) => x * x + y * y < (R2 - 2) ** 2)) continue;
+    const [minx, miny, maxx, maxy] = b.bx, x0 = Math.floor(minx), y0 = Math.floor(miny), W = Math.ceil(maxx) - x0, Hh = Math.ceil(maxy) - y0;
+    if (W * Hh > 40000) continue;
+    const z = new Float32Array(W * Hh).fill(NaN); const vals: number[] = [];
+    const bord = (x: number, y: number) => { let d = 1e9; for (let i = 0; i < b.pts.length - 1; i++) d = Math.min(d, distSeg(x, y, b.pts[i][0], b.pts[i][1], b.pts[i + 1][0], b.pts[i + 1][1])); return d; };
+    for (let v = 0; v < Hh; v++) for (let u = 0; u < W; u++) { const x = x0 + u + 0.5, y = y0 + v + 0.5; if (!dansPoly(x, y, b.pts) || bord(x, y) < 0.7) continue;
+      const m = med([H(x - 0.25, y - 0.25), H(x + 0.25, y - 0.25), H(x - 0.25, y + 0.25), H(x + 0.25, y + 0.25)]); z[v * W + u] = m; vals.push(m); }
+    if (vals.length < 3) continue;
+    if (vals.length >= 10 && vals.filter(v => v < 1.5).length / vals.length > 0.85) { retires.add(b); continue; }   // le LiDAR ne voit plus rien : démoli
+    // les bords (et les petits trous) prennent la hauteur du voisin intérieur le plus proche
+    for (let pass = 0; pass < 12; pass++) { let reste = 0; const z2 = z.slice();
+      for (let v = 0; v < Hh; v++) for (let u = 0; u < W; u++) { if (!isNaN(z[v * W + u])) continue; const nb: number[] = [];
+        for (const [du, dv] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const a = u + du, c = v + dv; if (a >= 0 && c >= 0 && a < W && c < Hh && !isNaN(z[c * W + a])) nb.push(z[c * W + a]); }
+        if (nb.length) z2[v * W + u] = Math.max(...nb); else reste++; }
+      z.set(z2); if (!reste) break; }
+    const mm = med(vals); for (let i = 0; i < z.length; i++) if (isNaN(z[i])) z[i] = mm;
+    // lissage doux (médiane 3×3) pour enlever les antennes et le bruit du laser
+    const zs = new Float32Array(z.length);
+    for (let v = 0; v < Hh; v++) for (let u = 0; u < W; u++) { const nb: number[] = []; for (let dv = -1; dv <= 1; dv++) for (let du = -1; du <= 1; du++) { const a = u + du, c = v + dv; if (a >= 0 && c >= 0 && a < W && c < Hh) nb.push(z[c * W + a]); } zs[v * W + u] = Math.max(2.5, med(nb)); }
+    const tri = [...vals].sort((u, v) => u - v);
+    toits.set(b, { x0, y0, w: W, h: Hh, z: Array.from(zs, v => Math.round(v * 10)), bas: Math.max(2.5, tri[Math.floor(tri.length * 0.1)]), haut: tri[tri.length - 1] });
+  }
+  // ---- arbres : sommets de végétation hors bâtiments (au moins 4 m, une vraie couronne, 3 m entre deux sommets)
+  const n = mnh.n, P = mnh.pas, hh = mnh.h, bat = new Uint8Array(n * n);
+  for (const b of ign) { if (retires.has(b)) continue; let [minx, miny, maxx, maxy] = b.bx; minx -= 1; miny -= 1; maxx += 1; maxy += 1;
+    for (let j = Math.max(0, Math.floor((R2 - maxy) / P)); j <= Math.min(n - 1, Math.floor((R2 - miny) / P)); j++) for (let i = Math.max(0, Math.floor((minx + R2) / P)); i <= Math.min(n - 1, Math.floor((maxx + R2) / P)); i++) {
+      const x = -R2 + (i + 0.5) * P, y = R2 - (j + 0.5) * P; if (dansPoly(x, y, b.pts) || bord2(x, y, b.pts) < 1) bat[j * n + i] = 1; } }
+  function bord2(x: number, y: number, p: number[][]) { let d = 1e9; for (let i = 0; i < p.length - 1; i++) d = Math.min(d, distSeg(x, y, p[i][0], p[i][1], p[i + 1][0], p[i + 1][1])); return d; }
+  const k4 = Math.round(2 / P), pics: number[][] = [];
+  for (let j = k4; j < n - k4; j++) for (let i = k4; i < n - k4; i++) { const v = hh[j * n + i]; if (v < 4 || bat[j * n + i]) continue;
+    let max = true, couronne = 0;
+    for (let dj = -k4; dj <= k4 && max; dj++) for (let di = -k4; di <= k4; di++) { const w = hh[(j + dj) * n + i + di]; if (w > v || (w === v && (dj < 0 || (dj === 0 && di < 0)))) { max = false; break; } if (w >= v * 0.5 && !bat[(j + dj) * n + i + di]) couronne++; }
+    if (!max || couronne < 10) continue;
+    pics.push([i, j, v]); }
+  pics.sort((a, b) => b[2] - a[2]);
+  const arbres: number[][] = [];
+  for (const [i, j, v] of pics) { const x = -R2 + (i + 0.5) * P, y = R2 - (j + 0.5) * P; if (x * x + y * y > (R2 - 3) ** 2) continue;
+    if (arbres.some(([ax, ay]) => Math.hypot(ax - x, ay - y) < 3)) continue;
+    let s = 0; for (let a = 0; a < 8; a++) { const dx = Math.cos(a * Math.PI / 4), dy = Math.sin(a * Math.PI / 4); let r = P; while (r < 8 && H(x + dx * r, y + dy * r) >= v * 0.45) r += P; s += r; }
+    let r = Math.min(7, Math.max(1.2, s / 8)); const dm = distMur(x, y, r + 2); if (dm < 0) continue; r = Math.min(r, dm - 0.3); if (r < 1) continue;
+    arbres.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10, Math.round(v * 10) / 10, Math.round(r * 10) / 10]); }
+  return { sol, toits, arbres, retires };
+}
 
 async function construire() {
   const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"); const m = g.maison; if (!m) throw new Error("maison absente");
@@ -67,6 +210,11 @@ async function construire() {
   // Seuls les arbres viennent du Grand Lyon (positions GPS mesurées), et on les écarte des murs et des chaussées.
   const [bat, rou, veg, arb] = await Promise.all([couche("BDTOPO_V3:batiment", la0, lo0, R), couche("BDTOPO_V3:troncon_de_route", la0, lo0, R + 100), couche("BDTOPO_V3:zone_de_vegetation", la0, lo0, R).catch(() => []),
     coucheGL("abr_arbres_alignement.abrarbre", la0, lo0, R).catch(() => [])]);
+  const info: any = {};
+  const [pcrsF, tronF, mnh] = await Promise.all([
+    coucheGL("pub_pcrs.limitevoiriepcrs", la0, lo0, R2 + 30).catch((e) => { info.pcrs = String(e); return []; }),
+    coucheGL("pvo_patrimoine_voirie.pvochausseetrottoir", la0, lo0, R2 + 60).catch((e) => { info.troncons = String(e); return []; }),
+    mnhLidar(la0, lo0, kx, ky).catch((e) => { info.lidar = String(e); return null; })]);
   const aire = (p: number[][]) => { let s = 0; for (let i = 0, j = p.length - 1; i < p.length; j = i++) s += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]); return Math.abs(s / 2); };
   // 1) bâtiments : la forme au sol, la hauteur des murs (gouttière) et celle du haut du toit
   let ign: any[] = [];
@@ -139,13 +287,31 @@ async function construire() {
       const t = [Math.round(x * 10) / 10, Math.round(y * 10) / 10, Math.round(h * 10) / 10, Math.round(r * 10) / 10]; arbres.push(t); ga.mettre(x, y, x, y, t);
     }
   }
-  const batiments = ign.map(b => ({ h: b.h, t: b.t, u: b.u, p: b.pts.flat() }));
-  return { centre: { lat: la0, lon: lo0 }, rayon: R, fait_le: new Date().toISOString(), version: 4, batiments, routes: routes.map(r => ({ w: r.w, i: r.i, n: r.n, p: r.pts.flat() })), verdure, arbres };
+  // ---- le détail autour de la maison
+  const pcrs: number[][][] = []; for (const f of pcrsF) for (const l of anneaux(f.geometry)) { const p = l.map(pt); if (p.length > 1) pcrs.push(p); }
+  const troncons: any[] = []; for (const f of tronF) { const p = f.properties ?? {}; const w = (Number(p.largeurchaussee) || 0) + (Number(p.largeurcouloirbus) || 0); if (w <= 0) continue; for (const l of anneaux(f.geometry)) troncons.push({ w, pts: l.map(pt) }); }
+  const proche = (pts: number[][]) => pts.some(([x, y]) => x * x + y * y < (R2 + 30) ** 2);
+  const d = detail(ign.filter(b => proche(b.pts)), routes.filter(r => proche(r.pts)), pcrs, troncons.filter(t => proche(t.pts)),
+    verdure.map(v => ({ pts: pts2(v.p) })).filter(v => proche(v.pts)), mnh, distMur);
+  info.pcrs ??= pcrs.length; info.troncons ??= troncons.length; info.lidar ??= mnh ? `ok (${Math.round(mnh.valides * 100)} % de mesures)` : "absent";
+  info.toits_lidar = d.toits.size; info.demolis = d.retires.size; info.arbres_lidar = d.arbres ? d.arbres.length : 0;
+  // dans le cercle détaillé, les arbres du LiDAR remplacent les autres
+  const arbresFinal = d.arbres ? [...arbres.filter(([x, y]) => x * x + y * y > R2 * R2), ...d.arbres] : arbres;
+  const batiments = ign.filter(b => !d.retires.has(b)).map(b => { const t = d.toits.get(b); return t ? { h: Math.round(t.bas * 10) / 10, t: Math.round(t.haut * 10) / 10, u: b.u, p: b.pts.flat(), l: { x0: t.x0, y0: t.y0, w: t.w, h: t.h, z: t.z } } : { h: b.h, t: b.t, u: b.u, p: b.pts.flat() }; });
+  return { centre: { lat: la0, lon: lo0 }, rayon: R, fait_le: new Date().toISOString(), version: 5, info, batiments, routes: routes.map(r => ({ w: r.w, i: r.i, n: r.n, p: r.pts.flat() })), verdure, arbres: arbresFinal, sol: d.sol };
+}
+function couperSol(sol: any, r: number) {   // le sol, réduit au carré de côté 2r autour de la maison
+  const k = Math.max(0, Math.floor((sol.r - r) / sol.pas)), m = sol.n - 2 * k;
+  const lignes = sol.lignes.split("|").slice(k, k + m).map((l: string) => {
+    const cells: string[] = []; for (const t of l.match(/[a-z]\d+/g) ?? []) { for (let i = 0; i < Number(t.slice(1)); i++) cells.push(t[0]); }
+    const c = cells.slice(k, k + m); let out = "", cur = c[0], n = 0; for (const v of c) { if (v === cur) n++; else { out += cur + n; cur = v; n = 1; } } return out + cur + n; });
+  const pres = (f: number[]) => { for (let i = 0; i < f.length; i += 2) if (Math.abs(f[i]) < r && Math.abs(f[i + 1]) < r) return true; return false; };
+  return { r: (m * sol.pas) / 2, pas: sol.pas, n: m, lignes: lignes.join("|"), bordures: (sol.bordures || []).filter(pres) };
 }
 // aperçu : seulement ce qui touche un petit cercle (pour vérifier sans tout télécharger)
 function apercu(q: any, r: number) {
   const pres = (f: number[]) => { for (let i = 0; i < f.length; i += 2) if (f[i] * f[i] + f[i + 1] * f[i + 1] < r * r) return true; return false; };
-  return { ...q, rayon: r, batiments: q.batiments.filter((b: any) => pres(b.p)), routes: q.routes.filter((b: any) => pres(b.p)), verdure: q.verdure.filter((b: any) => pres(b.p)), arbres: q.arbres.filter(([x, y]: number[]) => x * x + y * y < r * r) };
+  return { ...q, rayon: r, batiments: q.batiments.filter((b: any) => pres(b.p)), routes: q.routes.filter((b: any) => pres(b.p)), verdure: q.verdure.filter((b: any) => pres(b.p)), arbres: q.arbres.filter(([x, y]: number[]) => x * x + y * y < r * r), sol: q.sol ? couperSol(q.sol, r) : null };
 }
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -155,7 +321,7 @@ Deno.serve(async (req) => {
   const r = Number(b.apercu) || 0;
   if (!b.refaire) {
     const { data } = await admin.storage.from("papiers").download(CHEMIN);
-    if (data) { const t = await data.text(); try { const j = JSON.parse(t); if (j.version === 4 && Date.now() - new Date(j.fait_le).getTime() < 7 * 864e5) return r ? json(apercu(j, r)) : new Response(t, { headers: { ...CORS, "Content-Type": "application/json" } }); } catch (_) { /* on refait */ } }
+    if (data) { const t = await data.text(); try { const j = JSON.parse(t); if (j.version === 5 && Date.now() - new Date(j.fait_le).getTime() < 7 * 864e5) return r ? json(apercu(j, r)) : new Response(t, { headers: { ...CORS, "Content-Type": "application/json" } }); } catch (_) { /* on refait */ } }
   }
   try {
     const q = await construire();

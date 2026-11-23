@@ -122,7 +122,102 @@ function batiment(p, h, t) {
   }
   return parts.length > 1 ? mergeGeometries(parts) : parts[0];
 }
+
+/* ---------- toit mesuré au laser (LiDAR HD), rangé en grands plateaux nets ----------
+   Les mesures (une par m²) sont regroupées en zones de même hauteur (écart < 0,5 m entre voisins) :
+   toit principal, attique, aile basse, cage d'ascenseur… Chaque zone devient un plateau plat à sa hauteur mesurée,
+   avec une marche verticale entre deux plateaux. Résultat : la vraie silhouette, sans l'aspect « pâte fondue ». */
+function batimentLidar(p, L) {
+  const W = L.w, H = L.h, z = L.z, reg = new Int32Array(W * H).fill(-1), hauts = [];
+  for (let k0 = 0; k0 < W * H; k0++) { if (reg[k0] >= 0) continue; const id = hauts.length, pile = [k0], vals = []; reg[k0] = id;
+    while (pile.length) { const k = pile.pop(), u = k % W, v = (k / W) | 0; vals.push(z[k]);
+      for (const [du, dv] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = u + du, b = v + dv; if (a < 0 || b < 0 || a >= W || b >= H) continue; const q = b * W + a; if (reg[q] >= 0 || Math.abs(z[q] - z[k]) > 5) continue; reg[q] = id; pile.push(q); } }
+    vals.sort((x, y) => x - y); hauts.push({ h: vals[vals.length >> 1] / 10, n: vals.length }); }
+  // les toutes petites zones (bruit, antenne) rejoignent leur voisine la plus proche en hauteur
+  for (let pass = 0; pass < 3; pass++) for (let k = 0; k < W * H; k++) { const r = reg[k]; if (hauts[r].n >= 6) continue; const u = k % W, v = (k / W) | 0; let best = -1, bd = 1e9;
+    for (const [du, dv] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = u + du, b = v + dv; if (a < 0 || b < 0 || a >= W || b >= H) continue; const r2 = reg[b * W + a]; if (r2 === r || hauts[r2].n < 6) continue; const d = Math.abs(hauts[r2].h - hauts[r].h); if (d < bd) { bd = d; best = r2; } }
+    if (best >= 0) { reg[k] = best; hauts[best].n++; hauts[r].n--; } }
+  const hCell = (a, b) => hauts[reg[Math.max(0, Math.min(H - 1, b)) * W + Math.max(0, Math.min(W - 1, a))]].h;
+  const hAt = (x, y) => hCell(Math.floor(x - L.x0), Math.floor(y - L.y0));
+  const poly = p.slice(0, -1), v = [];
+  const clip = (pts, dedans, coupe) => { const o = []; for (let k = 0; k < pts.length; k++) { const A = pts[k], B = pts[(k + 1) % pts.length], ia = dedans(A), ib = dedans(B); if (ia) o.push(A); if (ia !== ib) o.push(coupe(A, B)); } return o; };
+  const surX = (X) => (A, B) => [X, A[1] + (B[1] - A[1]) * (X - A[0]) / (B[0] - A[0])];
+  const surY = (Y) => (A, B) => [A[0] + (B[0] - A[0]) * (Y - A[1]) / (B[1] - A[1]), Y];
+  // un pan vertical de P à Q, tourné vers le point (vx, vy) : les faces regardent toujours vers l'extérieur (ombres propres)
+  const quad = (P, Q, h1, h2, vx, vy) => {
+    if (vx !== undefined) { const ex = Q[0] - P[0], ey = Q[1] - P[1], mx = (P[0] + Q[0]) / 2, my = (P[1] + Q[1]) / 2; if (ey * (vx - mx) - ex * (vy - my) < 0) { const t = P; P = Q; Q = t; } }
+    v.push(P[0], h1, -P[1], Q[0], h1, -Q[1], Q[0], h2, -Q[1], P[0], h1, -P[1], Q[0], h2, -Q[1], P[0], h2, -P[1]); };
+  // dessus : chaque case d'1 m découpée par le contour, posée à la hauteur de sa zone
+  for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) {
+    const x0 = L.x0 + a, x1 = x0 + 1, y0 = L.y0 + b, y1 = y0 + 1;
+    let q = clip(poly, P => P[0] >= x0, surX(x0)); if (q.length < 3) continue;
+    q = clip(q, P => P[0] <= x1, surX(x1)); if (q.length < 3) continue;
+    q = clip(q, P => P[1] >= y0, surY(y0)); if (q.length < 3) continue;
+    q = clip(q, P => P[1] <= y1, surY(y1)); if (q.length < 3) continue;
+    const h = hCell(a, b);
+    for (const t of THREE.ShapeUtils.triangulateShape(q.map(([x, y]) => new THREE.Vector2(x, y)), [])) {
+      const P3 = t.map(k => [q[k][0], h, -q[k][1]]); const ny = (P3[1][2] - P3[0][2]) * (P3[2][0] - P3[0][0]) - (P3[1][0] - P3[0][0]) * (P3[2][2] - P3[0][2]);
+      if (ny < 0) P3.reverse(); for (const w of P3) v.push(...w); }
+  }
+  // marches entre deux plateaux, seulement à l'intérieur du contour
+  const morceauxDedans = (A, B) => {   // le segment AB découpé par le contour : on garde les bouts à l'intérieur
+    const ts = [0, 1];
+    for (let k = 0; k < poly.length; k++) { const C = poly[k], D = poly[(k + 1) % poly.length], r = [B[0] - A[0], B[1] - A[1]], s2 = [D[0] - C[0], D[1] - C[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-9) continue;
+      const t = ((C[0] - A[0]) * s2[1] - (C[1] - A[1]) * s2[0]) / den, u = ((C[0] - A[0]) * r[1] - (C[1] - A[1]) * r[0]) / den; if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t); }
+    ts.sort((x, y) => x - y); const o = [];
+    for (let m = 0; m + 1 < ts.length; m++) { const tm = (ts[m] + ts[m + 1]) / 2; if (dansPoly(A[0] + (B[0] - A[0]) * tm, A[1] + (B[1] - A[1]) * tm, p)) o.push([[A[0] + (B[0] - A[0]) * ts[m], A[1] + (B[1] - A[1]) * ts[m]], [A[0] + (B[0] - A[0]) * ts[m + 1], A[1] + (B[1] - A[1]) * ts[m + 1]]]); }
+    return o;
+  };
+  for (let b = 0; b < H; b++) for (let a = 0; a < W; a++) { const h = hCell(a, b);
+    if (a + 1 < W) { const h2 = hCell(a + 1, b); if (Math.abs(h2 - h) > 0.05) for (const [P, Q] of morceauxDedans([L.x0 + a + 1, L.y0 + b], [L.x0 + a + 1, L.y0 + b + 1])) quad(P, Q, Math.min(h, h2), Math.max(h, h2), L.x0 + a + (h < h2 ? 0.5 : 1.5), P[1]); }
+    if (b + 1 < H) { const h2 = hCell(a, b + 1); if (Math.abs(h2 - h) > 0.05) for (const [P, Q] of morceauxDedans([L.x0 + a, L.y0 + b + 1], [L.x0 + a + 1, L.y0 + b + 1])) quad(P, Q, Math.min(h, h2), Math.max(h, h2), P[0], L.y0 + b + (h < h2 ? 0.5 : 1.5)); } }
+  // murs : découpés aux lignes de la grille, chaque morceau monte jusqu'au plateau qui le touche
+  for (let k = 0; k < poly.length; k++) {
+    const A = poly[k], B = poly[(k + 1) % poly.length], ts = [0, 1];
+    for (let X = Math.ceil(Math.min(A[0], B[0])); X <= Math.floor(Math.max(A[0], B[0])); X++) if (B[0] !== A[0]) ts.push((X - A[0]) / (B[0] - A[0]));
+    for (let Y = Math.ceil(Math.min(A[1], B[1])); Y <= Math.floor(Math.max(A[1], B[1])); Y++) if (B[1] !== A[1]) ts.push((Y - A[1]) / (B[1] - A[1]));
+    ts.sort((x, y) => x - y);
+    for (let m = 0; m + 1 < ts.length; m++) { if (ts[m + 1] - ts[m] < 1e-6) continue;
+      const P = [A[0] + (B[0] - A[0]) * ts[m], A[1] + (B[1] - A[1]) * ts[m]], Q = [A[0] + (B[0] - A[0]) * ts[m + 1], A[1] + (B[1] - A[1]) * ts[m + 1]];
+      // le plateau de la case juste à l'intérieur du mur
+      const mx = (P[0] + Q[0]) / 2, my = (P[1] + Q[1]) / 2, nx = -(Q[1] - P[1]), ny = Q[0] - P[0], ln = Math.hypot(nx, ny) || 1;
+      let ix = mx + nx / ln * 0.3, iy = my + ny / ln * 0.3; if (!dansPoly(ix, iy, p)) { ix = mx - nx / ln * 0.3; iy = my - ny / ln * 0.3; }
+      quad(P, Q, 0, hAt(ix, iy), 2 * mx - ix, 2 * my - iy); }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); g.computeVertexNormals();
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(new Array(v.length / 3 * 2).fill(0), 2));
+  return g;
+}
+function aireDe(p) { let s = 0; for (let i = 0; i < p.length - 1; i++) s += p[i][0] * p[i + 1][1] - p[i + 1][0] * p[i][1]; return Math.abs(s / 2); }
+
+/* ---------- sol détaillé (PCRS du Grand Lyon) : chaussée en bas, trottoirs surélevés, bordures ---------- */
+const HSOL = [0.12, 0.12, 0.12, 0.12], CSOL = [0xf3efe8, 0xe8e3da, 0xe8e3da, 0xd5dec8];
+function construireSol(sol) {
+  const N = sol.n, P = sol.pas, R0 = sol.r, cls = new Uint8Array(N * N);
+  sol.lignes.split("|").forEach((l, j) => { let i = 0; for (const t of l.match(/[a-z]\d+/g) || []) { const c = t[0] === "z" ? 9 : t.charCodeAt(0) - 97, n = +t.slice(1); cls.fill(c, j * N + i, j * N + i + n); i += n; } });
+  // le sol est peint comme une image (un point = 40 cm) puis lissé : les limites restent nettes mais sans « escalier »
+  const cv = document.createElement("canvas"); cv.width = N; cv.height = N; const cx = cv.getContext("2d"), img = cx.createImageData(N, N), c3 = new THREE.Color();
+  const teintes = CSOL.map(h => { c3.setHex(h); return [Math.round(c3.r * 255), Math.round(c3.g * 255), Math.round(c3.b * 255)]; });
+  for (let k = 0; k < N * N; k++) { const c = cls[k], t = teintes[c === 9 ? 0 : c]; img.data[k * 4] = t[0]; img.data[k * 4 + 1] = t[1]; img.data[k * 4 + 2] = t[2]; img.data[k * 4 + 3] = c === 9 ? 0 : 255; }
+  cx.putImageData(img, 0, 0);
+  // agrandie et adoucie : les bords en biais deviennent des lignes douces
+  const grand = document.createElement("canvas"); grand.width = grand.height = Math.min(3072, N * 3);   // reste sous la limite des iPhone const gx = grand.getContext("2d");
+  gx.imageSmoothingEnabled = true; gx.imageSmoothingQuality = "high"; gx.filter = `blur(${(grand.width / N * 0.55).toFixed(1)}px)`; gx.drawImage(cv, 0, 0, grand.width, grand.height);
+  const tex = new THREE.CanvasTexture(grand); tex.colorSpace = THREE.SRGBColorSpace; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const g = new THREE.CircleGeometry(R0 - 0.5, 128); g.rotateX(-Math.PI / 2); g.translate(0, HSOL[0], 0);
+  const uv = g.attributes.uv, ps = g.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, (ps.getX(i) + R0) / (2 * R0), 1 - (R0 + ps.getZ(i)) / (2 * R0) );
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, roughness: 1, transparent: true })); m.receiveShadow = true; scene.add(m);
+  // les bordures de trottoir, tracées au centimètre (PCRS) : un petit muret de 20 cm de large, 15 cm au-dessus de la chaussée
+  const bg = [];
+  for (const f of sol.bordures || []) { const l = pts(f); for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.05) continue;
+    const b = new THREE.BoxGeometry(L + 0.2, 0.15, 0.2); b.rotateY(Math.atan2(y2 - y1, x2 - x1)); b.translate((x1 + x2) / 2, 0.195, -(y1 + y2) / 2); bg.push(b.toNonIndexed()); } }
+  if (bg.length) { const mb = new THREE.Mesh(mergeGeometries(bg), new THREE.MeshStandardMaterial({ color: 0xc4bbad, roughness: 0.9 })); mb.castShadow = true; mb.receiveShadow = true; scene.add(mb); }
+  return R0;
+}
+
+let RDETAIL = 0;
 function construireQuartier(q) {
+  if (q.sol) RDETAIL = construireSol(q.sol);
   indexerRues(q.routes || []);
   // verdure : taches vert sauge
   const vg = [];
@@ -142,13 +237,17 @@ function construireQuartier(q) {
     arbres.forEach(([x, y, h, r], i) => {
       const hc = Math.min(h * 0.6, r * 2.2), ht = Math.max(1.2, h - hc);           // tronc jusqu'à la couronne, couronne de rayon r
       o.position.set(x, ht, -y); o.scale.set(r, hc / 2, r); o.rotation.set(0, (x * 7 + y * 13) % 6, 0); o.updateMatrix(); im.setMatrixAt(i, o.matrix);
-      o.position.set(x, 0, -y); o.scale.set(1, ht + 0.3, 1); o.updateMatrix(); it.setMatrixAt(i, o.matrix);
+      o.position.set(x, 0, -y); o.scale.set(1, ht + 0.4, 1); o.updateMatrix(); it.setMatrixAt(i, o.matrix);
     });
     im.castShadow = true; it.castShadow = true; scene.add(im, it);
   }
   // routes : rubans clairs, les grands axes un peu plus marqués
   const rg = [], rgGros = [];
-  for (const r of q.routes || []) { const l = pts(r.p); (r.i <= 3 ? rgGros : rg).push(...ruban(l, r.w, r.i <= 3 ? 0.09 : 0.08)); }
+  for (const r of q.routes || []) { const l = pts(r.p);
+    // dans la zone détaillée, la vraie chaussée est déjà dessinée : on ne garde que les morceaux de ruban au-delà
+    let seg = []; const vider = () => { if (seg.length > 1) (r.i <= 3 ? rgGros : rg).push(...ruban(seg, r.w, r.i <= 3 ? 0.09 : 0.08)); seg = []; };
+    for (let k = 0; k < l.length; k++) { const [x, y] = l[k], dedans = RDETAIL && Math.hypot(x, y) < RDETAIL - 2; if (dedans) { if (seg.length) { seg.push(l[k]); vider(); } } else { if (!seg.length && k > 0) seg.push(l[k - 1]); seg.push(l[k]); } }
+    vider(); }
   if (rg.length) { const m = new THREE.Mesh(mergeGeometries(rg), new THREE.MeshStandardMaterial({ color: 0xf6f3ec, roughness: 1 })); m.receiveShadow = true; scene.add(m); }
   if (rgGros.length) { const m = new THREE.Mesh(mergeGeometries(rgGros), new THREE.MeshStandardMaterial({ color: 0xfbf9f4, roughness: 1 })); m.receiveShadow = true; scene.add(m); }
   // bâtiments : un seul volume chacun, toit compris ; le sien ressort
@@ -157,21 +256,22 @@ function construireQuartier(q) {
   let mb = liste.find(b => dansPoly(0, 0, b.pp));
   if (!mb) { let bd = 1e9; for (const b of liste) for (const [x, y] of b.pp) { const d = Math.hypot(x, y); if (d < bd) { bd = d; mb = b; } } }
   for (const b of liste) {
-    const g = batiment(b.pp, Math.max(2.5, b.h), Math.max(b.h, b.t || b.h));
+    const pente = b.l && aireDe(b.pp) < 250 && b.t - b.h > 1.5;   // petite maison au toit en pente : un vrai toit en pente, aux hauteurs du laser
+    const g = b.l && !pente ? batimentLidar(b.pp, b.l) : batiment(b.pp, Math.max(2.5, b.h), Math.max(b.h, b.t || b.h));
     if (b === mb) { maison = g; maisonPoly = b.pp; maisonH = Math.max(b.h, b.t || b.h); } else bg.push(g);
   }
   if (bg.length) {
     const all = mergeGeometries(bg.map(x => { if (!x.attributes.normal) x.computeVertexNormals(); return x; }));
-    const m = new THREE.Mesh(all, new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 0.92 })); m.castShadow = true; m.receiveShadow = true; scene.add(m);
-    scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(all, 25), new THREE.LineBasicMaterial({ color: 0xc8c0b3, transparent: true, opacity: 0.55 })));
+    const m = new THREE.Mesh(all, new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 0.92, side: THREE.DoubleSide })); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+    scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(all, 35), new THREE.LineBasicMaterial({ color: 0xc8c0b3, transparent: true, opacity: 0.55 })));
   }
   if (maison) {
-    const m = new THREE.Mesh(maison, new THREE.MeshStandardMaterial({ color: 0xf2c48a, roughness: 0.8 })); m.castShadow = true; m.receiveShadow = true; scene.add(m);
-    scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(maison, 25), new THREE.LineBasicMaterial({ color: 0xb98a4f })));
+    const m = new THREE.Mesh(maison, new THREE.MeshStandardMaterial({ color: 0xf2c48a, roughness: 0.8, side: THREE.DoubleSide })); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+    scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(maison, 35), new THREE.LineBasicMaterial({ color: 0xb98a4f })));
     const [cx, cy] = maisonPoly.slice(0, -1).reduce((a, [x, y]) => [a[0] + x / (maisonPoly.length - 1), a[1] + y / (maisonPoly.length - 1)], [0, 0]);
     maisonCentre = [cx, cy];
     // l'anneau suit le pied de l'immeuble (un liseré autour des murs), au lieu d'un cercle qui traverse les voisins
-    const ligne = new THREE.BufferGeometry().setFromPoints(maisonPoly.map(([x, y]) => new THREE.Vector3(x, 0.25, -y)));
+    const ligne = new THREE.BufferGeometry().setFromPoints(maisonPoly.map(([x, y]) => new THREE.Vector3(x, 0.3, -y)));
     const anneau = new THREE.Line(ligne, new THREE.LineBasicMaterial({ color: 0xe9a23b, transparent: true, opacity: 0.9 })); scene.add(anneau);
     scene.add(etiquette("Chez toi", "#2b3138", "#f5f1e8", { x: cx, y: maisonH + 4, z: -cy }, 0.028));
   }
@@ -204,7 +304,7 @@ function poserLignes(carte) {
     COUL[l.ligne] = l.couleur;
     for (const t of l.traits) {
       let seg = [];
-      const flush = () => { if (seg.length > 1) (g[l.couleur] ||= []).push(...ruban(seg, 1.4, 0.14)); seg = []; };
+      const flush = () => { if (seg.length > 1) (g[l.couleur] ||= []).push(...ruban(seg, 1.4, 0.34)); seg = []; };
       for (const [la, lo] of t) { let [x, y] = local(la, lo, centre); const r = surLaRue(x, y, 14); if (r) { x = r.x; y = r.y; } if (x * x + y * y < R * R) seg.push([x, y]); else flush(); }
       flush();
     }
@@ -223,7 +323,7 @@ function poserLignes(carte) {
     const toit = new THREE.Mesh(new THREE.BoxGeometry(5, 0.25, 1.8), new THREE.MeshStandardMaterial({ color: 0x2b3138 })); toit.position.y = 2.6;
     const vitre = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 0.12), new THREE.MeshStandardMaterial({ color: 0xcfe0e6, transparent: true, opacity: 0.55 })); vitre.position.set(0, 1.3, -0.8);  // la vitre du fond est côté trottoir
     const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.6, 6), new THREE.MeshStandardMaterial({ color: 0x2b3138 })); pot.position.set(3.2, 1.8, 0);
-    abri.add(toit, vitre, pot); abri.position.set(x, 0, -y); abri.rotation.y = ang; abri.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    abri.add(toit, vitre, pot); abri.position.set(x, RDETAIL ? 0.12 : 0, -y); abri.rotation.y = ang; abri.traverse(o => { if (o.isMesh) o.castShadow = true; });
     scene.add(abri);
     if (!vus.has(a.nom)) { vus.add(a.nom); if (a.nom === "Brossolette Genas") { arretLabel = etiquette("Brossolette Genas", "#2b3138", "#f5f1e8", { x, y: 9, z: -y }, 0.03, "…"); scene.add(arretLabel); arretPos = [x, y]; } }
   }
@@ -267,7 +367,7 @@ function animerBus(t) {
   for (const o of BUS.values()) {
     const a = Math.min(1, (t - o.t0) / 15000), e = a * a * (3 - 2 * a);
     const x = o.depart[0] + (o.cible[0] - o.depart[0]) * e, y = o.depart[1] + (o.cible[1] - o.depart[1]) * e;
-    o.m.position.set(x, 0, -y);
+    o.m.position.set(x, RDETAIL ? 0.12 : 0, -y);
     const vise = -THREE.MathUtils.degToRad(o.cap || 0) + Math.PI;  // cap 0 = nord ; l'avant du bus est vers -z
     let d = vise - o.m.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); o.m.rotation.y += d * 0.08;
   }
