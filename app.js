@@ -995,6 +995,8 @@ const REGLAGES = [
   { name: "ANTHROPIC_API_KEY", label: "Clé Claude", help: "Pour parler avec Jarvis. Elle commence par « sk-ant- » (platform.claude.com › API keys).", type: "password", ph: "sk-ant-…" },
   { name: "MEDINLYON_EMAIL", label: "MédinLyon · e-mail", help: "Pour prendre et annuler les rendez-vous de la famille.", type: "email", ph: "ton e-mail MédinLyon" },
   { name: "MEDINLYON_PASSWORD", label: "MédinLyon · mot de passe", help: "", type: "password", ph: "ton mot de passe MédinLyon" },
+  { name: "GRANDLYON_ID", label: "TCL (Data Grand Lyon) · e-mail", help: "Ton compte gratuit data.grandlyon.com : il sert aux passages des TCL en temps réel et aux perturbations.", type: "email", ph: "ton e-mail Data Grand Lyon" },
+  { name: "GRANDLYON_PASSWORD", label: "TCL (Data Grand Lyon) · mot de passe", help: "", type: "password", ph: "ton mot de passe Data Grand Lyon" },
   { name: "MS_CLIENT_SECRET", label: "Outlook · secret de l’application", help: "La « valeur » du secret client créé dans Microsoft Entra (application Jarvis › Certificats et secrets). Elle sert seulement à lire tes mails.", type: "password", ph: "valeur du secret Microsoft" },
 ];
 let setOpen = false;
