@@ -418,11 +418,25 @@ function motifAjoure() {   // panneau blanc découpé (motif « branches ») : d
   x.globalCompositeOperation = "source-over"; x.strokeStyle = "#f4f3ef"; x.lineWidth = 10; x.strokeRect(0, 0, 128, 512);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
+const ZONES_LIBRES = [];
+function lames(c1, c2, n) {   // lames horizontales (volets roulants, porte de garage)
+  const c = document.createElement("canvas"); c.width = 32; c.height = 64; const x = c.getContext("2d"), col = new THREE.Color();
+  x.fillStyle = "#" + col.setHex(c1).getHexString(); x.fillRect(0, 0, 32, 64); x.fillStyle = "#" + col.setHex(c2).getHexString();
+  for (let i = 0; i < n; i++) x.fillRect(0, Math.floor(i * 64 / n), 32, 2);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function grilleBoites() {   // façade du bloc de boîtes aux lettres
+  const c = document.createElement("canvas"); c.width = 128; c.height = 64; const x = c.getContext("2d");
+  x.fillStyle = "#5d666c"; x.fillRect(0, 0, 128, 64);
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) { x.fillStyle = "#8a949a"; x.fillRect(3 + i * 21, 3 + j * 20, 18, 17); x.fillStyle = "#3a4146"; x.fillRect(6 + i * 21, 8 + j * 20, 12, 2); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 function detaillerMaison(pp, hAt, voisins) {
   const poly = pp.slice(0, -1), n = poly.length;
   let aire = 0; for (let i = 0; i < n; i++) { const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % n]; aire += x1 * y2 - x2 * y1; }
   const sens = aire > 0 ? 1 : -1;   // pour trouver « l'extérieur » de chaque façade
-  const vitres = [], volets = [], cadres = [], dalles = [], verres = [], ajoures = [], garage = [], beton = [];
+  const vitres = [], volets = [], cadres = [], dalles = [], verres = [], ajoures = [], garage = [], beton = [], rails = [], socle = [], portes = [], boites = [];
+  let entreeGarage = null;
   const boite = (arr, w, h, d, x, y, z, ang) => { const b = new THREE.BoxGeometry(w, h, d); b.rotateY(ang); b.translate(x, z, -y); arr.push(b.toNonIndexed()); };
   const ETAGE = 2.9, RDC = 3.1;
   let garagePose = false, boitesPosees = false, k = 0;
@@ -437,7 +451,21 @@ function detaillerMaison(pp, hAt, voisins) {
     for (let w = 0; w < nb; w++) {
       const t = (w + 0.5) * L / nb, px = x1 + ux * t, py = y1 + uy * t, ox = px + nx * 0.04, oy = py + ny * 0.04;
       // rez-de-chaussée : une porte de garage sur la façade côté rue, des fenêtres ailleurs
-      if (versRue && !garagePose && L >= 8 && w === 0) { boite(garage, 3.3, 2.3, 0.1, ox, oy, 1.15, ang); garagePose = true; }
+      if (versRue && !garagePose && L >= 8 && w === 0) {
+        // porte de garage (lames horizontales), encadrement blanc, et l'accès qui descend jusqu'à la route
+        const gx0 = x1 + ux * 2.4, gy0 = y1 + uy * 2.4;
+        boite(cadres, 3.7, 2.55, 0.12, gx0 + nx * 0.03, gy0 + ny * 0.03, 1.27, ang);
+        boite(garage, 3.4, 2.35, 0.14, gx0 + nx * 0.05, gy0 + ny * 0.05, 1.17, ang);
+        entreeGarage = { x: gx0, y: gy0, nx, ny, ux, uy, ang };
+        // entrée de l'immeuble à côté : porte vitrée sous un petit auvent, boîtes aux lettres et interphone devant
+        const ex = x1 + ux * 6.2, ey = y1 + uy * 6.2;
+        boite(portes, 1.6, 2.3, 0.08, ex + nx * 0.04, ey + ny * 0.04, 1.15, ang);
+        boite(dalles, 2.4, 0.15, 1.2, ex + nx * 0.6, ey + ny * 0.6, 2.75, ang);
+        boite(beton, 2.2, 1.35, 0.5, ex + nx * 1.9 + ux * 1.6, ey + ny * 1.9 + uy * 1.6, 0.8, ang);
+        boite(boites, 1.9, 1.0, 0.04, ex + nx * 2.16 + ux * 1.6, ey + ny * 2.16 + uy * 1.6, 0.85, ang);
+        garagePose = true; boitesPosees = true;
+      }
+      if (versRue && garagePose && t < 8.2) { /* rez-de-chaussée : place du garage et de l'entrée */ }
       else { boite(vitres, 1.0, 1.25, 0.06, ox, oy, 1.35, ang); boite(volets, 1.0, 0.35, 0.08, ox, oy, 2.05, ang); }
       for (let e = 0; e < niveaux; e++) {
         const z = RDC + e * ETAGE;
@@ -445,36 +473,58 @@ function detaillerMaison(pp, hAt, voisins) {
         if (loggia) {
           // balcon : dalle débordante, garde-corps en verre, baie vitrée derrière
           const dx = px + nx * 0.75, dy = py + ny * 0.75;
-          boite(dalles, 2.6, 0.2, 1.5, dx, dy, z - 0.1, ang);
+          boite(dalles, 2.7, 0.22, 1.55, dx, dy, z - 0.11, ang);
           boite(verres, 2.6, 1.0, 0.05, px + nx * 1.48, py + ny * 1.48, z + 0.5, ang);
+          boite(rails, 2.62, 0.05, 0.08, px + nx * 1.48, py + ny * 1.48, z + 1.02, ang);
+          boite(verres, 0.05, 1.0, 1.45, px + nx * 0.75 + ux * 1.3, py + ny * 0.75 + uy * 1.3, z + 0.5, ang);
+          boite(verres, 0.05, 1.0, 1.45, px + nx * 0.75 - ux * 1.3, py + ny * 0.75 - uy * 1.3, z + 0.5, ang);
           boite(vitres, 1.8, 2.1, 0.06, ox, oy, z + 1.05, ang);
           if ((e + w) % 3 !== 1) { boite(ajoures, 0.55, ETAGE - 0.25, 0.05, dx + ux * 1.0 + nx * 0.72, dy + uy * 1.0 + ny * 0.72, z + ETAGE / 2, ang); boite(ajoures, 0.55, ETAGE - 0.25, 0.05, dx - ux * 1.0 + nx * 0.72, dy - uy * 1.0 + ny * 0.72, z + ETAGE / 2, ang); }
         } else {
-          boite(cadres, 1.12, 1.47, 0.05, ox, oy, z + 1.3, ang);
-          boite(vitres, 0.95, 1.35, 0.07, ox, oy, z + 1.3, ang);
-          boite(volets, 0.95, 0.45, 0.09, ox, oy, z + 1.75, ang);
+          boite(cadres, 1.14, 1.62, 0.05, ox, oy, z + 1.33, ang);
+          boite(vitres, 0.96, 1.36, 0.07, ox, oy, z + 1.27, ang);
+          const desc = 0.25 + ((e * 7 + w * 3 + k) % 5) * 0.15;   // chaque volet plus ou moins descendu, comme en vrai
+          boite(volets, 0.96, desc, 0.09, ox, oy, z + 1.95 - desc / 2, ang);
         }
       }
     }
-    // garde-corps vitré en haut de chaque façade (toit-terrasse)
+    // socle un peu plus foncé au pied de la façade
+    boite(socle, L + 0.06, 0.55, 0.06, mx + nx * 0.03, my + ny * 0.03, 0.4, ang);
+    // garde-corps vitré en haut de chaque façade (toit-terrasse), avec sa lisse métallique
     boite(verres, L, 0.95, 0.05, mx - nx * 0.1, my - ny * 0.1, hF + 0.47, ang);
+    boite(rails, L, 0.05, 0.08, mx - nx * 0.1, my - ny * 0.1, hF + 0.97, ang);
     // boîtes aux lettres près de l'entrée côté rue
     if (versRue && !boitesPosees && L >= 6) { boite(beton, 1.8, 1.3, 0.5, mx + nx * 1.2, my + ny * 1.2, 0.77, ang); boitesPosees = true; }
     k++;
   }
   const mat = {
-    vitres: new THREE.MeshStandardMaterial({ color: 0x55636d, roughness: 0.15, metalness: 0.3 }),
-    volets: new THREE.MeshStandardMaterial({ color: 0xd9dadb, roughness: 0.6 }),
+    vitres: new THREE.MeshStandardMaterial({ color: 0x7d8f99, roughness: 0.12, metalness: 0.45 }),
+    volets: new THREE.MeshStandardMaterial({ map: lames(0xdcdcda, 0xc9c9c6, 10), roughness: 0.6 }),
+    rails: new THREE.MeshStandardMaterial({ color: 0x9aa0a4, roughness: 0.4, metalness: 0.6 }),
+    socle: new THREE.MeshStandardMaterial({ color: 0xd4d1ca, roughness: 0.95 }),
+    portes: new THREE.MeshStandardMaterial({ color: 0x3e4a52, roughness: 0.2, metalness: 0.5 }),
+    boites: new THREE.MeshStandardMaterial({ map: grilleBoites(), roughness: 0.5, metalness: 0.4 }),
     cadres: new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.5 }),
     dalles: new THREE.MeshStandardMaterial({ color: 0xf3f2ee, roughness: 0.8 }),
     verres: new THREE.MeshStandardMaterial({ color: 0xbfd2d8, roughness: 0.1, transparent: true, opacity: 0.55 }),
     ajoures: new THREE.MeshStandardMaterial({ map: motifAjoure(), alphaTest: 0.5, transparent: true, side: THREE.DoubleSide, roughness: 0.6 }),
-    garage: new THREE.MeshStandardMaterial({ color: 0xc9ccce, roughness: 0.5 }),
+    garage: new THREE.MeshStandardMaterial({ map: lames(0xc4c8cb, 0xa9aeb2, 9), roughness: 0.45, metalness: 0.3 }),
     beton: new THREE.MeshStandardMaterial({ color: 0xe6e2d9, roughness: 0.9 }),
   };
-  for (const [nom, arr] of Object.entries({ vitres, volets, cadres, dalles, verres, ajoures, garage, beton })) {
+  for (const [nom, arr] of Object.entries({ vitres, volets, cadres, dalles, verres, ajoures, garage, beton, rails, socle, portes, boites })) {
     if (!arr.length) continue; const m = new THREE.Mesh(mergeGeometries(arr), mat[nom]); m.castShadow = nom !== "verres"; m.receiveShadow = true; scene.add(m);
   }
+  // l'accès au garage : une rampe en enrobé du garage jusqu'à la chaussée, qui passe par-dessus la bordure (bateau)
+  if (entreeGarage) { const { x, y, nx, ny, ux, uy } = entreeGarage; let d = 0.3; while (d < 16 && cellSol(x + nx * d, y + ny * d) !== 1) d += 0.3;
+    if (d < 16) { const prof = [[0, 0.15], [Math.max(0.5, d - 1.1), 0.2], [d - 0.4, 0.3], [d + 0.3, 0.13]], v = [];
+      for (let i = 0; i < prof.length - 1; i++) { const [a, ha] = prof[i], [b, hb] = prof[i + 1];
+        const P = (t, sg) => [x + nx * t + ux * 1.8 * sg, y + ny * t + uy * 1.8 * sg];
+        const [A1, A2, B1, B2] = [P(a, -1), P(a, 1), P(b, -1), P(b, 1)];
+        v.push(A1[0], ha, -A1[1], B1[0], hb, -B1[1], B2[0], hb, -B2[1], A1[0], ha, -A1[1], B2[0], hb, -B2[1], A2[0], ha, -A2[1]); }
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); g.computeVertexNormals();
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x8f8c87, roughness: 1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 })); m.receiveShadow = true; scene.add(m);
+      ZONES_LIBRES.push([x + nx * d / 2, y + ny * d / 2, d / 2 + 2]); } }
+  if (TEST || location.search.includes("regard")) window.MAISON = { poly, garage: entreeGarage };
   // le jardin : pelouse, haie et clôture (muret + grillage vert) autour de l'immeuble, sans jamais déborder sur la route ni chez les voisins
   const env = [...poly].sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
   const bas = [], haut = []; for (const p of env) { while (bas.length >= 2 && cr(bas[bas.length - 2], bas[bas.length - 1], p) <= 0) bas.pop(); bas.push(p); }
@@ -482,7 +532,7 @@ function detaillerMaison(pp, hAt, voisins) {
   const coque = bas.slice(0, -1).concat(haut.slice(0, -1));
   const [gx0, gy0] = coque.reduce((a, [x, y]) => [a[0] + x / coque.length, a[1] + y / coque.length], [0, 0]);
   const jardin = coque.map(([x, y]) => { const dx = x - gx0, dy = y - gy0, d = Math.hypot(dx, dy) || 1; return [x + dx / d * 3.5, y + dy / d * 3.5]; });
-  const libre = (x, y) => cellSol(x, y) !== 1 && cellSol(x, y) !== 9 && !voisins.some(b => dansPoly(x, y, b.pp));
+  const libre = (x, y) => cellSol(x, y) !== 1 && cellSol(x, y) !== 9 && !voisins.some(b => dansPoly(x, y, b.pp)) && !ZONES_LIBRES.some(([a, b, r]) => Math.hypot(a - x, b - y) < r);
   const pel = new THREE.ShapeGeometry(new THREE.Shape(jardin.map(([x, y]) => V(x, y)))); pel.rotateX(-Math.PI / 2); pel.translate(0, 0.135, 0);
   scene.add(Object.assign(new THREE.Mesh(pel, new THREE.MeshStandardMaterial({ color: 0x9fb784, roughness: 1 })), { receiveShadow: true }));
   const muret = [], grillage = [], haies = [];
