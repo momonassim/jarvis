@@ -661,8 +661,16 @@ const badge = (l, c) => { const b = document.createElement("b"); b.className = "
 const delai = p => !p ? "" : /proche|^0/i.test(p.delai || "") ? "à l’approche" : (p.delai || p.heure || "").replace(/\s*min/, " min");
 function blocBus() {
   const w = document.createElement("div"); w.className = "busbox";
-  w.innerHTML = '<div class="dh"><b>Bus en bas de chez toi</b><span>Brossolette Genas</span></div><div class="busl"><div class="empty">Je regarde les prochains bus…</div></div><button class="btn soft wide buscarte" type="button">Voir les bus en direct sur la carte</button>';
+  w.innerHTML = '<div class="dh"><b>Bus en bas de chez toi</b><span>Brossolette Genas</span></div><div class="busl"><div class="empty">Je regarde les prochains bus…</div></div><button class="btn soft wide buscarte" type="button">Voir les bus en direct sur la carte</button>'
+    + '<form class="busou"><input type="text" enterkeyhint="go" placeholder="Où tu vas ? (adresse, lieu, arrêt)" autocomplete="off"><button class="btn main" type="submit">Itinéraire TCL</button></form>'
+    + '<div class="busvite"></div>';
   w.querySelector(".buscarte").addEventListener("click", ouvrirCarteBus);
+  // Itinéraire en transports en commun dans Plans d'Apple (TCL déjà dedans), depuis là où on est
+  const plans = dest => { location.href = "https://maps.apple.com/?daddr=" + encodeURIComponent(dest) + "&dirflg=r"; };
+  w.querySelector(".busou").addEventListener("submit", e => { e.preventDefault(); const v = e.target.querySelector("input").value.trim(); if (v) plans(v + ", Lyon"); });
+  // raccourcis : les endroits connus de Jarvis
+  const vite = [["MédinLyon Villeurbanne", "MédinLyon, Villeurbanne"], ["Part-Dieu", "Gare de Lyon Part-Dieu"], ["Bellecour", "Place Bellecour, Lyon"], ["Grange Blanche", "Grange Blanche, Lyon"]];
+  vite.forEach(([t, d]) => { const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = t; b.addEventListener("click", () => plans(d)); w.querySelector(".busvite").append(b); });
   const liste = w.querySelector(".busl");
   const maj = async () => {
     if (!w.isConnected) { clearInterval(busT); busT = null; return; }

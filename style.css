@@ -498,3 +498,8 @@ body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!im
 .bmhome{font-size:22px;line-height:30px;text-align:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
 .busmap .leaflet-container{font-family:var(--sans);background:#f2efe9}
 .busmap .leaflet-tile-pane{filter:grayscale(1) brightness(1.06) contrast(.82)}
+.busou{display:flex;gap:8px;margin-top:8px}
+.busou input{flex:1;min-width:0;border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:11px 12px;font:600 15px var(--sans);color:var(--ink);user-select:text;-webkit-user-select:text}
+.busou .btn{flex:0 0 auto;padding:0 14px;min-height:44px}
+.busvite{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.busvite .chip{padding:7px 11px;font-size:13px;border-radius:999px;border:1px solid var(--line);background:var(--paper);font-weight:700}
