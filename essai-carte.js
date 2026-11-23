@@ -253,7 +253,7 @@ function poserPassages() {
   for (const n of noeuds.values()) { if (n.b.length < 3 || Math.hypot(n.x, n.y) > SOL.R0 - 10) continue;
     for (const [bx, by] of n.b) { const L = Math.hypot(bx - n.x, by - n.y) || 1, px = n.x + (bx - n.x) / L * 9, py = n.y + (by - n.y) / L * 9;
       if (cellSol(px, py) === 1 && !liste.some(([a, c]) => Math.hypot(a - px, c - py) < 12)) liste.push([px, py]); } }
-  const bandes = [];
+  const bandes = []; SOL.zebras = liste;
   for (const [px, py] of liste) {
     const r = surLaRue(px, py, 15); if (!r) continue;
     const ux = Math.cos(r.ang), uy = Math.sin(r.ang), nx = -uy, ny = ux;
@@ -716,7 +716,9 @@ function maquetteBus(ligne) {
   const vitres = new THREE.Mesh(new THREE.BoxGeometry(2.62, 1.0, 10.6), new THREE.MeshStandardMaterial({ color: 0x27303a, roughness: 0.3 })); vitres.position.y = 2.35;
   const avant = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.3, 0.1), new THREE.MeshStandardMaterial({ color: 0x27303a })); avant.position.set(0, 2.25, -6.02);
   const roues = new THREE.CylinderGeometry(0.5, 0.5, 2.6, 10); roues.rotateZ(Math.PI / 2);
-  for (const z of [-4, 3.6]) { const r = new THREE.Mesh(roues, new THREE.MeshStandardMaterial({ color: 0x22262b })); r.position.set(0, 0.5, z); g.add(r); }
+  g.userData.roues = [];
+  for (const z of [-4, 3.6]) { const r = new THREE.Mesh(roues, new THREE.MeshStandardMaterial({ color: 0x22262b })); r.position.set(0, 0.5, z); g.add(r); g.userData.roues.push(r);
+    const jante = new THREE.Mesh(new THREE.BoxGeometry(2.64, 0.5, 0.12), new THREE.MeshStandardMaterial({ color: 0xc9ccce })); r.add(jante); }
   g.add(caisse, toit, vitres, avant);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   // taille réelle : un bus de 12 m tient dans sa voie
@@ -726,27 +728,49 @@ function majBus(liste) {
   const vu = new Set(), t = performance.now();
   for (const b of liste) {
     let [x, y] = local(b.lat, b.lon, centre); if (x * x + y * y > 1100 * 1100) continue;
-    const rr = surLaRue(x, y, 25); if (rr) { x = rr.x; y = rr.y; if (!Number.isFinite(b.cap)) b.cap = 90 - rr.ang * 180 / Math.PI; }
-    const id = b.id || `${b.ligne}|${b.vers}|${Math.round(x / 60)}|${Math.round(y / 60)}`;
     // on rattache au bus le plus proche de la même ligne (les identifiants ne sont pas toujours fournis)
     let k = null, dmin = 260;
     for (const [kk, o] of BUS) { if (o.ligne !== b.ligne || vu.has(kk)) continue; const d = Math.hypot(o.cible[0] - x, o.cible[1] - y); if (d < dmin) { dmin = d; k = kk; } }
-    if (!k) { k = id + "|" + Math.random(); const m = maquetteBus(b.ligne); m.position.set(x, 0, -y); scene.add(m);
+    const B = accrocher(x, y, 30);
+    if (!k) {   // nouveau bus : posé sur la rue, tourné dans le sens de sa marche
+      k = (b.id || b.ligne) + "|" + Math.random(); const m = maquetteBus(b.ligne); scene.add(m);
       const lab = etiquette(b.ligne, COUL[b.ligne] || "#2b3138", /^#(D3D8|FFF)/i.test(COUL[b.ligne] || "") ? "#2b3138" : "#ffffff", { x: 0, y: 4.5, z: 0 }, 0.018); m.add(lab);
-      BUS.set(k, { ligne: b.ligne, m, depart: [x, y], cible: [x, y], t0: t, cap: b.cap }); }
-    const o = BUS.get(k); vu.add(k);
-    o.depart = [o.m.position.x, -o.m.position.z]; o.cible = [x, y]; o.t0 = t;
-    if (Number.isFinite(b.cap)) o.cap = b.cap;
+      let tr;
+      if (B) { const a = RESEAU.aretes[B.e], q = surArete(a, B.s); let sens = 1;
+        if (Number.isFinite(b.cap)) { const cx = Math.sin(b.cap * Math.PI / 180), cy = Math.cos(b.cap * Math.PI / 180); sens = cx * q.tx + cy * q.ty >= 0 ? 1 : -1; }
+        const s0 = Math.max(0, Math.min(a.L, B.s - sens * 4)), s1 = Math.max(0, Math.min(a.L, B.s)); tr = trajet(troncon(a, s0, s1 === s0 ? s0 + 0.01 * sens : s1)); }
+      else tr = trajet([[x, y, 3], [x + 0.01, y, 3]]);
+      BUS.set(k, { ligne: b.ligne, m, cible: [x, y], tr, t0: t - 15000, ang: null });
+    } else {
+      const o = BUS.get(k);
+      const A = o.axe ? accrocher(o.axe[0], o.axe[1], 30) : null;
+      if (A && B) {
+        const pts = cheminRue(A, B), droit = Math.hypot(x - o.axe[0], y - o.axe[1]);
+        if (pts) { const tr = trajet(pts);
+          // le GPS a sauté un peu en arrière : on ne recule pas, on attend la prochaine position
+          const recule = A.e === B.e && o.sens && Math.sign(B.s - A.s) === -o.sens && Math.abs(B.s - A.s) < 30;
+          // jamais de demi-tour sur place : si le nouveau trajet part à l'opposé de là où le bus regarde, c'est un saut du GPS
+          const p0 = pointA(tr, 0), p1 = pointA(tr, 5), demi = o.ang != null && tr.L < 120 && ((p1[0] - p0[0]) * -Math.sin(o.ang) + (p1[1] - p0[1]) * Math.cos(o.ang)) < -2;
+          if (!recule && !demi && tr.L < droit * 2.5 + 40) { o.tr = tr; o.t0 = t; o.dPrec = null; if (A.e === B.e && B.s !== A.s) o.sens = Math.sign(B.s - A.s); else o.sens = 0; }
+          else if (droit > 200) { const a = RESEAU.aretes[B.e]; o.tr = trajet(troncon(a, B.s, Math.min(a.L, B.s + 0.01))); o.t0 = t - 15000; o.dPrec = null; } }
+      }
+      o.cible = [x, y];
+    }
+    vu.add(k);
   }
   for (const [k, o] of BUS) if (!vu.has(k)) { scene.remove(o.m); BUS.delete(k); }
 }
 function animerBus(t) {
   for (const o of BUS.values()) {
-    const a = Math.min(1, (t - o.t0) / 15000), e = a * a * (3 - 2 * a);
-    const x = o.depart[0] + (o.cible[0] - o.depart[0]) * e, y = o.depart[1] + (o.cible[1] - o.depart[1]) * e;
-    o.m.position.set(x, RDETAIL ? 0.12 : 0, -y);
-    const vise = -THREE.MathUtils.degToRad(o.cap || 0) + Math.PI;  // cap 0 = nord ; l'avant du bus est vers -z
-    let d = vise - o.m.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); o.m.rotation.y += d * 0.08;
+    // le bus roule le long des rues de la carte, sur sa voie de droite : démarre doucement, roule régulier, freine en douceur
+    const a = Math.min(1, (t - o.t0) / 15000), e = a < 0.15 ? a * a / 0.3 : a > 0.85 ? 0.85 - (1 - a) * (1 - a) / 0.3 : a - 0.075;
+    const d = o.tr.L * Math.min(1, e / 0.85), p = surTrajet(o.tr, d);
+    o.axe = pointA(o.tr, d);
+    o.m.position.set(p.x, RDETAIL ? 0.12 : 0, -p.y);
+    if (p.tx || p.ty) { const vise = Math.atan2(-p.tx, p.ty);   // l'avant du bus (vers -z) dans le sens de la marche
+      if (o.ang == null) o.ang = vise; let dd = vise - o.ang; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); o.ang += dd * 0.2; o.m.rotation.y = o.ang; }
+    const avance = o.dPrec == null ? 0 : Math.abs(d - o.dPrec); o.dPrec = d;
+    for (const r of o.m.userData.roues || []) r.rotation.x -= avance / 0.5;
   }
 }
 
@@ -797,45 +821,204 @@ function rayures() {   // barrière de chantier pleine : bandes rouges et blanch
   x.strokeStyle = "#b8b8b4"; x.lineWidth = 4; x.strokeRect(2, 2, 124, 60);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-function poserChantiers(liste) {
-  const surRoute = (x, y) => { if (SOL && Math.hypot(x, y) < RDETAIL - 2) return cellSol(x, y) === 1; const r = surLaRue(x, y, 14); return !!r && r.d < r.w / 2 + 0.3; };
-  const barr = [], fins = [], cones = [], ateliers = [];
-  // 1) où travailler : dans chaque zone de chantier, un point sur la rue, au moins 120 m entre deux ateliers
-  for (const c of liste.filter(c => c.en_cours).slice(0, 30)) for (const f of c.l) {
-    const p = pts(f); if (p.length < 4) continue;
-    let [x0, y0, x1, y1] = [1e9, 1e9, -1e9, -1e9]; for (const [x, y] of p) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-    const cand = []; for (let x = x0; x <= x1; x += 4) for (let y = y0; y <= y1; y += 4) if (dansPoly(x, y, p) && x * x + y * y < 850 * 850) cand.push([x, y]);
-    cand.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));   // les plus proches de chez toi d'abord
-    for (const [x, y] of cand) {
-      if (ateliers.length >= 6 || ateliers.some(a => Math.hypot(a.x - x, a.y - y) < 120)) continue;
-      const r = surLaRue(x, y, 12); if (!r || r.w < 5) continue;
-      // 2) une voie fermée, dans l'axe de la rue : on avance des deux côtés tant qu'on reste sur la MÊME rue (on s'arrête avant un carrefour)
-      const ux = Math.cos(r.ang), uy = Math.sin(r.ang), nx = -uy, ny = ux;
-      const sd = ((x - r.x) * nx + (y - r.y) * ny) >= 0 ? 1 : -1, vc = sd * r.w / 4;
-      const P = (u, v) => [r.x + ux * u + nx * v, r.y + uy * u + ny * v];
-      const memeRue = (u) => { const [qx, qy] = P(u, vc); if (!surRoute(qx, qy) || ZONES_LIBRES.some(([a, b, rr]) => Math.hypot(a - qx, b - qy) < rr)) return false;
-        const q = surLaRue(qx, qy, 10); if (!q) return false; if (Math.abs(Math.sin(q.ang - r.ang)) > 0.3) return false;
-        // un carrefour : la chaussée continue sur le côté, au-delà de la largeur de la rue
-        const [ex, ey] = P(u, sd * (r.w / 2 + 2.5)); const [fx, fy] = P(u, -sd * (r.w / 2 + 2.5)); return !(surRoute(ex, ey) && Math.hypot(ex, ey) < RDETAIL) && !(surRoute(fx, fy) && Math.hypot(fx, fy) < RDETAIL && r.w < 9); };
-      let t0 = 0, t1 = 0; if (!memeRue(0)) continue;
-      while (t1 < 22 && memeRue(t1 + 1)) t1++; while (t0 > -22 && memeRue(t0 - 1)) t0--;
-      if (t1 - t0 < 16) continue;
-      // on garde une marge de 3 m avant le carrefour, et l'enclos fait au plus 30 m
-      const m = (t0 + t1) / 2, L = Math.min(30, t1 - t0 - 6), a0 = m - L / 2, a1 = m + L / 2;
-      ateliers.push({ x: r.x, y: r.y, ux, uy, nx, ny, sd, vc, w: r.w, a0, a1, ang: r.ang, fort: c.fort, gene: c.gene || "Travaux", fin: c.fin || "", P });
+/* ---------- le réseau des rues : la ligne directrice de tout ce qui bouge ----------
+   Chaque rue de la carte devient un « fil » échantillonné tous les 2 m, recentré sur la vraie chaussée dessinée
+   (dans le quartier détaillé), avec sa demi-largeur. Les voitures, les bus et les chantiers suivent ces fils. */
+let RESEAU = null;
+function construireReseau(routes) {
+  const aretes = [], noeuds = [], gN = new Map(), gS = new Map();
+  const noeud = (x, y) => {
+    const ix = Math.floor(x / 4), iy = Math.floor(y / 4);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const n of gN.get((ix + i) + "|" + (iy + j)) || []) if (Math.hypot(n.x - x, n.y - y) < 1.5) return n;
+    const n = { x, y, a: [], id: noeuds.length }; noeuds.push(n); const k = ix + "|" + iy; (gN.get(k) || gN.set(k, []).get(k)).push(n); return n;
+  };
+  for (const r of routes) {
+    const l = pts(r.p); if (l.length < 2) continue;
+    if (r.w < 4) { if (l.length <= 12) { noeud(l[0][0], l[0][1]).bout = (noeud(l[0][0], l[0][1]).bout || 0) + 1; const f = l[l.length - 1]; noeud(f[0], f[1]).bout = (noeud(f[0], f[1]).bout || 0) + 1; } continue; }   // petites rues : pas de circulation, mais elles font des carrefours
+    if (!l.some(([x, y]) => x * x + y * y < 650 * 650)) continue;
+    const P = []; let t0 = 0;
+    for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.01) continue;
+      let t = t0; for (; t < L; t += 2) P.push([x1 + (x2 - x1) * t / L, y1 + (y2 - y1) * t / L]); t0 = t - L; }
+    const fin = l[l.length - 1]; if (P.length && Math.hypot(P[P.length - 1][0] - fin[0], P[P.length - 1][1] - fin[1]) < 0.8) P.pop(); P.push(fin.slice());
+    if (P.length < 2) continue;
+    const n = P.length, c = new Float32Array(n), hw = new Float32Array(n).fill(r.w / 2), T = [];
+    for (let k = 0; k < n; k++) { const a = P[Math.max(0, k - 1)], b = P[Math.min(n - 1, k + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; T.push([(b[0] - a[0]) / L, (b[1] - a[1]) / L]); }
+    // recentrage sur la chaussée réellement dessinée (bordures du Grand Lyon) : on cherche, en travers, la bande de chaussée qui contient l'axe
+    if (SOL) for (let k = 0; k < n; k++) { const [x, y] = P[k], nx = -T[k][1], ny = T[k][0]; if (Math.hypot(x, y) > RDETAIL - 4) continue;
+      let best = null, a = null; const lim = r.w + 3;
+      for (let v = -lim; v <= lim + 0.01; v += 0.4) { const dedans = cellSol(x + nx * v, y + ny * v) === 1;
+        if (dedans && a === null) a = v; if ((!dedans || v + 0.4 > lim) && a !== null) { const b = dedans ? v : v - 0.4, d = Math.max(0, a - 0, 0 - b); if (b - a >= 2.8 && (!best || d < best.d)) best = { a, b, d }; a = null; } }
+      if (best && best.d < 2.5) { c[k] = (best.a + best.b) / 2; hw[k] = (best.b - best.a) / 2; } }
+    const lisse = (f) => { const g = f.slice(); for (let k = 0; k < n; k++) { let s = 0, m = 0; for (let j = Math.max(0, k - 3); j <= Math.min(n - 1, k + 3); j++) { s += f[j]; m++; } g[k] = s / m; } return g; };
+    const cc = lisse(c), hh = lisse(hw);
+    const p = P.map(([x, y], k) => [x - T[k][1] * cc[k], y + T[k][0] * cc[k]]);
+    const cum = [0]; for (let k = 1; k < n; k++) cum.push(cum[k - 1] + Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]));
+    const a = { p, cum, hw: hh, w: r.w, nom: r.n || "", L: cum[n - 1], ferme: new Int8Array(n), n0: noeud(l[0][0], l[0][1]), n1: noeud(fin[0], fin[1]), id: aretes.length };
+    if (a.L < 1) continue;
+    a.n0.a.push(a.id); a.n1.a.push(a.id); aretes.push(a);
+    for (let k = 0; k < n; k++) { const key = Math.floor(p[k][0] / 20) + "|" + Math.floor(p[k][1] / 20); (gS.get(key) || gS.set(key, []).get(key)).push([a.id, k]); }
+  }
+  return { aretes, noeuds, gS };
+}
+function surArete(a, s) {   // position, direction et demi-largeur à la distance s le long d'une rue
+  s = Math.max(0, Math.min(a.L, s)); const n = a.p.length;
+  let k = Math.min(n - 2, Math.max(0, Math.floor(s / 2))); while (k > 0 && a.cum[k] > s) k--; while (k < n - 2 && a.cum[k + 1] < s) k++;
+  const L = (a.cum[k + 1] - a.cum[k]) || 1, f = Math.max(0, Math.min(1, (s - a.cum[k]) / L)), [x1, y1] = a.p[k], [x2, y2] = a.p[k + 1];
+  return { x: x1 + (x2 - x1) * f, y: y1 + (y2 - y1) * f, tx: (x2 - x1) / L, ty: (y2 - y1) / L, k, hw: a.hw[k] + (a.hw[k + 1] - a.hw[k]) * f };
+}
+function accrocher(x, y, max = 25) {   // le point de rue le plus proche
+  if (!RESEAU) return null; let best = null;
+  const r = Math.ceil(max / 20), ix = Math.floor(x / 20), iy = Math.floor(y / 20);
+  for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) for (const [e, k] of RESEAU.gS.get((ix + i) + "|" + (iy + j)) || []) {
+    const a = RESEAU.aretes[e], [px, py] = a.p[k], d = Math.hypot(px - x, py - y); if (d < max && (!best || d < best.d)) best = { e, k, d }; }
+  if (!best) return null;
+  const a = RESEAU.aretes[best.e], k = best.k, k2 = k < a.p.length - 1 ? k + 1 : k - 1, [x1, y1] = a.p[Math.min(k, k2)], [x2, y2] = a.p[Math.max(k, k2)];
+  const L = Math.hypot(x2 - x1, y2 - y1) || 1, f = Math.max(0, Math.min(1, ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / (L * L)));
+  return { e: best.e, s: a.cum[Math.min(k, k2)] + f * L, d: best.d };
+}
+function troncon(a, s0, s1) {   // les points d'une rue entre s0 et s1, dans le sens du trajet
+  const out = [], q = surArete(a, s0); out.push([q.x, q.y, q.hw]);
+  if (s1 > s0) { for (let k = 0; k < a.p.length; k++) if (a.cum[k] > s0 && a.cum[k] < s1) out.push([a.p[k][0], a.p[k][1], a.hw[k]]); }
+  else { for (let k = a.p.length - 1; k >= 0; k--) if (a.cum[k] < s0 && a.cum[k] > s1) out.push([a.p[k][0], a.p[k][1], a.hw[k]]); }
+  const r = surArete(a, s1); out.push([r.x, r.y, r.hw]); return out;
+}
+function cheminRue(A, B) {   // le plus court chemin par les rues, de A à B (points accrochés)
+  const { aretes, noeuds } = RESEAU, ea = aretes[A.e], eb = aretes[B.e];
+  if (A.e === B.e) return troncon(ea, A.s, B.s);
+  const dist = new Map(), prev = new Map(), ouverts = new Set();
+  const poser = (n, d, pr) => { if (!dist.has(n.id) || d < dist.get(n.id)) { dist.set(n.id, d); prev.set(n.id, pr); ouverts.add(n); } };
+  poser(ea.n0, A.s, null); poser(ea.n1, ea.L - A.s, null);
+  const fini = new Set();
+  while (ouverts.size) { let n = null; for (const o of ouverts) if (!n || dist.get(o.id) < dist.get(n.id)) n = o; ouverts.delete(n); fini.add(n.id);
+    const d = dist.get(n.id); if (d > 900) break;
+    for (const e of n.a) { if (e === A.e) continue; const a = aretes[e], m = a.n0 === n ? a.n1 : a.n0; if (fini.has(m.id)) continue; poser(m, d + a.L, { n, e }); } }
+  const c0 = dist.has(eb.n0.id) ? dist.get(eb.n0.id) + B.s : Infinity, c1 = dist.has(eb.n1.id) ? dist.get(eb.n1.id) + eb.L - B.s : Infinity;
+  if (!Number.isFinite(Math.min(c0, c1))) return null;
+  const entree = c0 <= c1 ? eb.n0 : eb.n1, seq = []; let n = entree;
+  while (prev.get(n.id)) { const pr = prev.get(n.id); seq.unshift({ e: pr.e, de: pr.n }); n = pr.n; }
+  const depart = n, out = troncon(ea, A.s, depart === ea.n0 ? 0 : ea.L);
+  for (const { e, de } of seq) { const a = aretes[e]; out.push(...troncon(a, de === a.n0 ? 0 : a.L, de === a.n0 ? a.L : 0).slice(1)); }
+  out.push(...troncon(eb, entree === eb.n0 ? 0 : eb.L, B.s).slice(1));
+  return out;
+}
+// un trajet : points + longueurs cumulées ; position et direction à la distance d, décalé sur la voie de droite
+function trajet(pts) { const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); return { pts, cum, L: cum[cum.length - 1] }; }
+function surTrajet(tr, d, voie) {
+  const { pts: P, cum } = tr; if (P.length === 1) return { x: P[0][0], y: P[0][1], tx: 0, ty: 0 };
+  d = Math.max(0, Math.min(tr.L, d)); let i = 0; while (i < P.length - 2 && cum[i + 1] < d) i++;
+  const L = (cum[i + 1] - cum[i]) || 1, f = (d - cum[i]) / L, x = P[i][0] + (P[i + 1][0] - P[i][0]) * f, y = P[i][1] + (P[i + 1][1] - P[i][1]) * f;
+  // direction lissée (on regarde 3 m devant et derrière) : pas de virage sec, pas de « patinage »
+  const av = pointA(tr, d + 3), ar = pointA(tr, d - 3); let tx = av[0] - ar[0], ty = av[1] - ar[1]; const n = Math.hypot(tx, ty) || 1; tx /= n; ty /= n;
+  const hw = P[i][2] || 3, dec = voie != null ? voie : (hw >= 2.6 ? Math.min(hw / 2, 3.2) : 0);
+  return { x: x + ty * dec, y: y - tx * dec, tx, ty };
+}
+function pointA(tr, d) { const { pts: P, cum } = tr; d = Math.max(0, Math.min(tr.L, d)); let i = 0; while (i < P.length - 2 && cum[i + 1] < d) i++; const L = (cum[i + 1] - cum[i]) || 1, f = (d - cum[i]) / L; return [P[i][0] + (P[i + 1][0] - P[i][0]) * f, P[i][1] + (P[i + 1][1] - P[i][1]) * f]; }
+
+/* ---------- la circulation : des voitures qui roulent sur la voie de droite, qui suivent les rues,
+   ralentissent aux chantiers (et passent sur l'autre voie si la leur est fermée), et gardent leurs distances ---------- */
+const VOITURES = [];
+function lancerCirculation() {
+  if (!RESEAU) return; const { aretes, noeuds } = RESEAU;
+  // grands axes partout ; petites rues seulement hors du quartier détaillé (là où il y a des voitures garées, on n'en fait pas rouler)
+  const ok = aretes.map(a => a.w >= 9 || (a.w >= 5 && a.p.every(([x, y]) => Math.hypot(x, y) > RDETAIL + 5)));
+  const pool = aretes.filter((a, i) => ok[i] && a.p.some(([x, y]) => Math.hypot(x, y) < 450));
+  const total = pool.reduce((s, a) => s + a.L * (a.w >= 9 ? 2 : 0.6), 0), nb = Math.min(70, Math.round(total / 45));
+  if (!nb) return;
+  let graine = 4242; const alea = () => { graine = (graine * 1103515245 + 12345) & 0x7fffffff; return graine / 0x7fffffff; };
+  const tire = () => { let r = alea() * total; for (const a of pool) { r -= a.L * (a.w >= 9 ? 2 : 0.6); if (r <= 0) return a; } return pool[pool.length - 1]; };
+  const teintes = [0xf4f2ee, 0x2e3237, 0x9aa1a8, 0x6f7b86, 0xb8442f, 0x2f4d6e, 0xd9d4c7, 0x55606a, 0x8a1f2b, 0xe9e4d6];
+  for (let i = 0; i < nb; i++) { const a = tire(); VOITURES.push({ e: a.id, s: alea() * a.L, dir: alea() < 0.5 ? 1 : -1, v: 6, vmax: (a.w >= 9 ? 11 : 8) * (0.85 + alea() * 0.3), off: null, x: 0, y: 0, ang: 0 }); }
+  const caisse = new THREE.BoxGeometry(4.2, 0.78, 1.8); caisse.translate(0, 0.62, 0);
+  const toit = new THREE.BoxGeometry(2.2, 0.55, 1.58); toit.translate(-0.25, 1.27, 0);
+  const feux = new THREE.BoxGeometry(0.06, 0.16, 1.5); feux.translate(-2.12, 0.78, 0);
+  const phares = new THREE.BoxGeometry(0.06, 0.14, 1.4); phares.translate(2.12, 0.72, 0);
+  const ic = new THREE.InstancedMesh(caisse, new THREE.MeshStandardMaterial({ roughness: 0.4 }), nb);
+  const it = new THREE.InstancedMesh(toit, new THREE.MeshStandardMaterial({ color: 0x27303a, roughness: 0.2 }), nb);
+  const ifx = new THREE.InstancedMesh(feux, new THREE.MeshStandardMaterial({ color: 0xff2a2a, emissive: 0xff2a2a, emissiveIntensity: 1.2 }), nb);
+  const iph = new THREE.InstancedMesh(phares, new THREE.MeshStandardMaterial({ color: 0xfff6dc, emissive: 0xfff2c8, emissiveIntensity: 0.8 }), nb);
+  const col = new THREE.Color(); for (let i = 0; i < nb; i++) { col.setHex(teintes[Math.floor(alea() * teintes.length)]); ic.setColorAt(i, col); }
+  for (const m of [ic, it, ifx, iph]) { m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; }
+  ic.castShadow = true; scene.add(ic, it, ifx, iph);
+  const o = new THREE.Object3D(); let avant = null;
+  ANIMS.push(t => {
+    const dt = avant == null ? 0 : Math.min(0.1, (t - avant) / 1000); avant = t;
+    for (const c of VOITURES) {
+      let a = aretes[c.e], q = surArete(a, c.s);
+      const cote = c.dir > 0 ? -1 : 1, ferme = a.ferme[q.k];   // ma voie (côté droit) est-elle fermée par un chantier ?
+      const cible = ferme === cote ? 2.5 : ferme ? 4 : c.vmax;
+      c.v += Math.max(-6 * dt, Math.min(2.5 * dt, cible - c.v));
+      c.s += c.v * dt * c.dir;
+      if (c.s < 0 || c.s > a.L) {   // bout de la rue : on continue sur une autre rue du carrefour (jamais demi-tour sauf impasse)
+        const n = c.dir > 0 ? a.n1 : a.n0, reste = c.dir > 0 ? c.s - a.L : -c.s, choix = n.a.filter(e => e !== c.e && ok[e]);
+        if (choix.length) { const e = choix[Math.floor(alea() * choix.length)], b = aretes[e]; c.e = e; c.dir = b.n0 === n ? 1 : -1; c.s = c.dir > 0 ? reste : b.L - reste; }
+        else { c.dir = -c.dir; c.s = Math.max(0, Math.min(a.L, c.s)); }
+        a = aretes[c.e];
+      }
     }
+    // distances de sécurité : sur une même rue et dans le même sens, on ne rattrape pas la voiture de devant
+    const files = new Map(); for (const c of VOITURES) { const k = c.e + (c.dir > 0 ? "+" : "-"); (files.get(k) || files.set(k, []).get(k)).push(c); }
+    for (const [, f] of files) { f.sort((p, q) => (q.s - p.s) * q.dir); for (let i = 1; i < f.length; i++) { const dev = f[i - 1], c = f[i]; if ((dev.s - c.s) * c.dir < 7.5) { c.s = dev.s - 7.5 * c.dir; c.v = Math.min(c.v, dev.v); } } }
+    VOITURES.forEach((c, i) => {
+      const a = aretes[c.e], q = surArete(a, c.s), cote = c.dir > 0 ? -1 : 1, ferme = a.ferme[q.k];
+      const voie = Math.min(q.hw / 2, 3.2) * (ferme === cote ? -0.6 : 1);
+      c.off = c.off == null ? voie : c.off + (voie - c.off) * Math.min(1, dt * 1.5);
+      const tx = q.tx * c.dir, ty = q.ty * c.dir, x = q.x + ty * c.off, y = q.y - tx * c.off;
+      const ang = Math.atan2(ty, tx); let d = ang - c.ang; d = Math.atan2(Math.sin(d), Math.cos(d)); c.ang += d * Math.min(1, dt * 8);
+      o.position.set(x, 0.12, -y); o.rotation.set(0, c.ang, 0); o.updateMatrix();
+      ic.setMatrixAt(i, o.matrix); it.setMatrixAt(i, o.matrix); ifx.setMatrixAt(i, o.matrix); iph.setMatrixAt(i, o.matrix);
+    });
+    for (const m of [ic, it, ifx, iph]) m.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/* ---------- les chantiers : on prend l'info du Grand Lyon (où, jusqu'à quand, quelle gêne)
+   et on simule le chantier SUR la rue de la carte : une voie fermée tout du long, barrières sur la ligne du milieu,
+   barrières en travers aux deux bouts, rien sur les carrefours (on laisse 9 m libres), trottoirs jamais touchés. ---------- */
+function poserChantiers(liste) {
+  if (!RESEAU) return null; const { aretes } = RESEAU;
+  const zones = [];
+  for (const c of liste.filter(c => c.en_cours)) for (const f of c.l) { const p = pts(f); if (p.length < 4) continue;
+    let b = [1e9, 1e9, -1e9, -1e9]; for (const [x, y] of p) b = [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)]; zones.push({ c, p, b }); }
+  const dans = (x, y) => { for (let i = 0; i < zones.length; i++) { const z = zones[i]; if (x < z.b[0] || y < z.b[1] || x > z.b[2] || y > z.b[3]) continue; if (dansPoly(x, y, z.p)) return i; } return -1; };
+  const libre = (a, s) => { const q = surArete(a, s);
+    if ((s < 10 && a.n0.a.length + (a.n0.bout || 0) >= 3) || (a.L - s < 10 && a.n1.a.length + (a.n1.bout || 0) >= 3)) return false;
+    return !(SOL && (SOL.zebras || SOL.passages || []).some(([px, py]) => Math.hypot(px - q.x, py - q.y) < 7.5)); };
+  const runs = [];
+  for (const a of aretes) {
+    if (a.w < 5) continue;
+    const n = a.p.length, z = new Int16Array(n).fill(-1), g = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      const q = surArete(a, a.cum[k]), nx = -q.ty, ny = q.tx, [x, y] = a.p[k];
+      if (!libre(a, a.cum[k])) continue;   // carrefours et passages piétons restent libres
+      const zl = dans(x + nx * q.hw / 2, y + ny * q.hw / 2), zr = dans(x - nx * q.hw / 2, y - ny * q.hw / 2), zc = dans(x, y);
+      const zi = zc >= 0 ? zc : zl >= 0 ? zl : zr; if (zi < 0) continue; z[k] = zi; g[k] = (zl >= 0 ? 1 : 0) - (zr >= 0 ? 1 : 0);
+    }
+    for (let k = 0; k < n;) { if (z[k] < 0) { k++; continue; } let j = k; let gg = 0; while (j < n && z[j] === z[k]) { gg += g[j]; j++; }
+      if (a.cum[j - 1] - a.cum[k] >= 12) { const cote = gg > 0 ? 1 : gg < 0 ? -1 : (a.id % 2 ? 1 : -1); for (let m = k; m < j; m++) a.ferme[m] = cote;
+        runs.push({ a, s0: a.cum[k], s1: a.cum[j - 1], cote, zone: zones[z[k]], d: Math.hypot(...a.p[(k + j) >> 1]) }); }
+      k = j; }
   }
-  // 3) l'enclos : barrières le long de l'axe de la rue et en travers aux deux bouts ; côté trottoir, ouvert
-  for (const at of ateliers) {
-    const { P, sd, w, a0, a1, ang } = at, vin = sd * 0.35, vout = sd * (w / 2 - 0.35);
-    for (let u = a0 + 1; u <= a1 - 0.9; u += 2.1) { const [x, y] = P(u, vin); barr.push([x, y, ang]); }
-    for (const u of [a0, a1]) { const n = Math.max(1, Math.round(Math.abs(vout - vin) / 2.1));
-      for (let i = 0; i < n; i++) { const v = vin + (vout - vin) * (i + 0.5) / n; const [x, y] = P(u, v); barr.push([x, y, ang + Math.PI / 2]); }
-      const [lx, ly] = P(u, vin); fins.push([lx, ly]); }
-    // cônes en biseau avant l'enclos (on rabat la circulation vers l'autre voie)
-    for (let i = 1; i <= 5; i++) { const [x, y] = P(a0 - i * 2.2, vin + (vout - vin) * (i / 6)); if (surRoute(x, y)) cones.push([x, y]); }
+  runs.sort((p, q) => p.d - q.d);
+  const barr = [], fins = [], cones = [], ateliers = [], Y = 0.14, etiquetees = new Set();
+  const lat = (a, s, v) => { const q = surArete(a, s); return [q.x - q.ty * v, q.y + q.tx * v, Math.atan2(q.ty, q.tx), q.hw]; };   // v > 0 : à gauche de l'axe
+  for (const r of runs) {
+    const { a, s0, s1, cote } = r; if (barr.length > 2500) break;
+    // barrières sur la ligne du milieu, tout du long, en suivant la courbe de la rue
+    for (let s = s0 + 1; s <= s1 - 0.9; s += 2.1) { const [x, y, ang] = lat(a, s, cote * 0.35); barr.push([x, y, ang]); }
+    // en travers aux deux bouts, jusqu'au bord du trottoir ; gyrophare au coin ; cônes en biais devant
+    for (const [s, sens] of [[s0, -1], [s1, 1]]) { const hw = surArete(a, s).hw, n = Math.max(1, Math.round((hw - 0.7) / 2.1));
+      for (let i = 0; i < n; i++) { const v = cote * (0.35 + (hw - 0.75) * (i + 0.5) / n), [x, y, ang] = lat(a, s, v); barr.push([x, y, ang + Math.PI / 2]); }
+      const [fx, fy] = lat(a, s, cote * 0.35); fins.push([fx, fy]);
+      for (let i = 1; i <= 4; i++) { const ss = s + sens * i * 2.4; if (ss < 0 || ss > a.L || !libre(a, ss)) break; const [x, y] = lat(a, ss, cote * (0.35 + (hw - 0.8) * (1 - i / 5))); cones.push([x, y]); } }
+    // les ateliers : sur la voie fermée, tous les ~90 m, jamais deux trop près
+    for (let s = s0 + 11; s <= s1 - 11 && ateliers.length < 10; s += 90) {
+      const [x, y, ang, hw] = lat(a, s, cote * (surArete(a, s).hw / 2 + 0.15)); if (ateliers.some(t => Math.hypot(t.x - x, t.y - y) < 70)) continue;
+      ateliers.push({ x, y, ang, hw, a, s, cote, zone: r.zone, r });
+    }
+    // panneau « travaux » sur le trottoir, 15 m avant le chantier, face aux voitures qui arrivent sur la voie fermée
+    { const sp = cote < 0 ? s0 - 15 : s1 + 15; if (sp > 0 && sp < a.L) { const [x, y, ang, hw] = lat(a, sp, cote * (surArete(a, sp).hw + 0.7)); r.panneau = [x, y, ang]; } }
   }
-  const o = new THREE.Object3D(), Y = 0.14;
+  const o = new THREE.Object3D();
   if (barr.length) {
     const panneau = new THREE.BoxGeometry(2.0, 1.0, 0.22); panneau.translate(0, 0.75, 0);
     const pied = new THREE.BoxGeometry(0.3, 0.25, 0.9); pied.translate(-0.8, 0.12, 0); const pied2 = pied.clone(); pied2.translate(1.6, 0, 0);
@@ -844,60 +1027,42 @@ function poserChantiers(liste) {
     barr.forEach(([x, y, a], i) => { o.position.set(x, Y, -y); o.rotation.set(0, a, 0); o.updateMatrix(); ip.setMatrixAt(i, o.matrix); ie.setMatrixAt(i, o.matrix); });
     ip.castShadow = ie.castShadow = true; scene.add(ip, ie);
   }
-  if (fins.length) {   // gyrophares orange qui clignotent aux coins de l'enclos (on les voit de loin)
+  if (fins.length) {
     const feu = new THREE.MeshStandardMaterial({ color: 0xffa21a, emissive: 0xff8a00, emissiveIntensity: 1.5 });
     const g = new THREE.SphereGeometry(0.28, 12, 8); g.translate(0, 1.55, 0); const im = new THREE.InstancedMesh(g, feu, fins.length);
     fins.forEach(([x, y], i) => { o.position.set(x, Y, -y); o.rotation.set(0, 0, 0); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }); scene.add(im);
     ANIMS.push(t => { feu.emissiveIntensity = (Math.floor(t / 450) % 2) ? 2.2 : 0.2; });
   }
-  const triangle = new THREE.MeshStandardMaterial({ map: panneauTravaux(), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
-  const blancM = new THREE.MeshStandardMaterial({ color: 0xf6f6f2 });
-  const teintes = [0xf4f2ee, 0x2e3237, 0x9aa1a8, 0xb8442f, 0x2f4d6e, 0xd9d4c7];
-  ateliers.forEach((at, k) => {
-    const { P, sd, vc, w, a0, a1, ang } = at, grp = new THREE.Group(); scene.add(grp);
-    const pose = (obj, u, v, rot = 0, h = 0) => { const [x, y] = P(u, v); obj.position.set(x, Y + h, -y); obj.rotation.y = ang + rot; grp.add(obj); };
-    const m = (a0 + a1) / 2;
-    // le trou (terre) et le tas de déblais, dans l'enclos
-    pose(new THREE.Mesh(new THREE.BoxGeometry(Math.min(9, a1 - a0 - 6), 0.08, Math.abs(w / 2) - 1.4), new THREE.MeshStandardMaterial({ color: 0x6b5340, roughness: 1 })), m + 1, vc, 0, 0.03);
-    pose(new THREE.Mesh(new THREE.ConeGeometry(1.4, 1.3, 9), new THREE.MeshStandardMaterial({ color: 0x8a6c50, roughness: 1, flatShading: true })), a1 - 3.5, vc, 0, 0.65);
-    // la pelleteuse (taille généreuse, pour qu'on la voie de loin) : la tourelle pivote, le bras creuse puis vide sur le tas
-    const pel = pelleteuse(); pel.g.scale.setScalar(1.35); pose(pel.g, a0 + 4.5, vc, 0);
-    const dec = k * 1.7;
-    ANIMS.push(t => { const s = t / 1000 + dec, c = (Math.sin(s * 0.7) + 1) / 2;
-      pel.tour.rotation.y = -0.1 + 0.5 * Math.max(0, Math.sin(s * 0.35)); pel.bras.rotation.z = 0.15 - 0.35 * c; pel.coude.rotation.z = -0.25 + 0.55 * c; });
-    // deux ouvriers en gilet, bien visibles : l'un pellette dans le trou, l'autre fait signe aux voitures au début de l'enclos
-    const o1 = ouvrier(0xf06a1d); o1.g.scale.setScalar(1.5); pose(o1.g, m + 2, vc + sd * 0.6, Math.PI / 2);
-    const o2 = ouvrier(0xf2c100); o2.g.scale.setScalar(1.5); pose(o2.g, a0 - 1.2, sd * (w / 2 - 0.9), -Math.PI / 2);
-    ANIMS.push(t => { const s = Math.sin(t / 420 + dec); o1.bras.rotation.x = -0.6 + 0.6 * s; });
-    ANIMS.push(t => { o2.bras.rotation.z = 2.2 + 0.5 * Math.sin(t / 260 + dec); });
-    // une étiquette « Travaux » au-dessus, lisible même de loin
-    { const [x, y] = P(m, vc), fin = at.fin ? " · jusqu'au " + at.fin.slice(8, 10) + "/" + at.fin.slice(5, 7) : "";
-      scene.add(etiquette("⚠ Travaux", "#f2b215", "#2b3138", { x, y: 7, z: -y }, 0.032, at.gene + fin)); }
-    // le panneau « travaux », sur trépied, avant l'enclos, côté trottoir
-    const pan = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), triangle); pose(pan, a0 - 14, sd * (w / 2 - 0.6), Math.PI / 2, 1.9);
-    const mat = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.3, 6), blancM); pose(mat, a0 - 14, sd * (w / 2 - 0.6), 0, 0.65);
-    // le bouchon : une file de voitures sur la voie restée ouverte, qui avance au pas jusqu'à l'enclos
-    if (k < 4) {
-      const n = at.fort ? 6 : 5, file = [];
-      for (let i = 0; i < n; i++) { const v = new THREE.Group();
-        const caisse = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.8, 1.8), new THREE.MeshStandardMaterial({ color: teintes[(i + k) % teintes.length], roughness: 0.45 })); caisse.position.y = 0.62;
-        const haut = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 1.56), new THREE.MeshStandardMaterial({ color: 0x2b333b, roughness: 0.2 })); haut.position.set(-0.2, 1.28, 0);
-        const feux = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 1.5), new THREE.MeshStandardMaterial({ color: 0xff2a2a, emissive: 0xff2a2a, emissiveIntensity: 1.5 })); feux.position.set(-2.13, 0.8, 0);
-        v.add(caisse, haut, feux); v.traverse(q => { if (q.isMesh) q.castShadow = true; }); grp.add(v); file.push(v); }
-      const voie = -sd * Math.min(w / 4, 2.6), long = n * 6;
-      ANIMS.push(t => { const s = t / 1000 + dec;
-        file.forEach((v, i) => { const ph = s / 3.5 + i * 0.37, frac = Math.min(1, (ph % 1) * 2.5);
-          const u = a1 - 2 - ((Math.floor(ph) + frac) * 2.4 + i * 6) % (long + (a1 - a0));   // de la fin de l'enclos vers l'arrière, puis on reboucle
-          const [x, y] = P(u, voie); v.visible = surRoute(x, y); v.position.set(x, Y, -y); v.rotation.y = ang + Math.PI; }); });
-    }
-  });
   if (cones.length) {
     const cg = new THREE.ConeGeometry(0.32, 0.85, 10); cg.translate(0, 0.45, 0); const bg = new THREE.CylinderGeometry(0.2, 0.25, 0.14, 10); bg.translate(0, 0.5, 0);
     const ic = new THREE.InstancedMesh(cg, new THREE.MeshStandardMaterial({ color: 0xf06a1d, roughness: 0.6, emissive: 0xf06a1d, emissiveIntensity: 0.15 }), cones.length);
-    const ib = new THREE.InstancedMesh(bg, blancM, cones.length);
+    const ib = new THREE.InstancedMesh(bg, new THREE.MeshStandardMaterial({ color: 0xf6f6f2 }), cones.length);
     cones.forEach(([x, y], i) => { o.position.set(x, Y, -y); o.rotation.set(0, 0, 0); o.updateMatrix(); ic.setMatrixAt(i, o.matrix); ib.setMatrixAt(i, o.matrix); }); ic.castShadow = true; scene.add(ic, ib);
   }
-  return { barrieres: barr.length, ateliers: ateliers.map(a => [Math.round(a.x), Math.round(a.y), Math.round(a.a1 - a.a0)]) };
+  const triangle = new THREE.MeshStandardMaterial({ map: panneauTravaux(), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
+  const blancM = new THREE.MeshStandardMaterial({ color: 0xf6f6f2 });
+  for (const r of runs) if (r.panneau) { const [x, y, ang] = r.panneau;
+    const pan = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), triangle); pan.position.set(x, Y + 1.9, -y); pan.rotation.y = ang + Math.PI / 2; scene.add(pan);
+    const mat = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.3, 6), blancM); mat.position.set(x, Y + 0.65, -y); scene.add(mat); }
+  ateliers.forEach((at, k) => {
+    const { a, s, cote } = at, grp = new THREE.Group(); scene.add(grp);
+    const pose = (obj, ds, v, rot = 0, h = 0) => { const [x, y, ang] = lat(a, s + ds, v); obj.position.set(x, Y + h, -y); obj.rotation.y = ang + rot; grp.add(obj); };
+    const vc = cote * (at.hw / 2 + 0.15);
+    pose(new THREE.Mesh(new THREE.BoxGeometry(7, 0.08, Math.max(1.6, at.hw - 1.4)), new THREE.MeshStandardMaterial({ color: 0x6b5340, roughness: 1 })), 1, vc, 0, 0.03);
+    pose(new THREE.Mesh(new THREE.ConeGeometry(1.4, 1.3, 9), new THREE.MeshStandardMaterial({ color: 0x8a6c50, roughness: 1, flatShading: true })), 7, vc, 0, 0.65);
+    const pel = pelleteuse(); pel.g.scale.setScalar(1.3); pose(pel.g, -5.5, vc, 0);
+    const dec = k * 1.7;
+    ANIMS.push(t => { const u = t / 1000 + dec, c = (Math.sin(u * 0.7) + 1) / 2;
+      pel.tour.rotation.y = -0.1 + 0.5 * Math.max(0, Math.sin(u * 0.35)); pel.bras.rotation.z = 0.15 - 0.35 * c; pel.coude.rotation.z = -0.25 + 0.55 * c; });
+    const o1 = ouvrier(0xf06a1d); o1.g.scale.setScalar(1.5); pose(o1.g, 2, vc + cote * 0.4, Math.PI / 2);
+    const o2 = ouvrier(0xf2c100); o2.g.scale.setScalar(1.5); pose(o2.g, 4.5, cote * 1.0, -Math.PI / 2);
+    ANIMS.push(t => { o1.bras.rotation.x = -0.6 + 0.6 * Math.sin(t / 420 + dec); });
+    ANIMS.push(t => { o2.bras.rotation.z = 2.2 + 0.5 * Math.sin(t / 260 + dec); });
+    const c = at.zone.c; if (!etiquetees.has(c)) { etiquetees.add(c);
+      const fin = c.fin ? " · jusqu'au " + c.fin.slice(8, 10) + "/" + c.fin.slice(5, 7) : "";
+      scene.add(etiquette("⚠ Travaux", "#f2b215", "#2b3138", { x: at.x, y: 7, z: -at.y }, 0.032, (c.gene || "Circulation perturbée") + fin)); }
+  });
+  return { troncons: runs.length, barrieres: barr.length, ateliers: ateliers.map(t => [Math.round(t.x), Math.round(t.y)]) };
 }
 
 /* ---------- toi, en direct (GPS du téléphone) ---------- */
@@ -946,7 +1111,7 @@ function boucle(t) {
 }
 
 /* ---------- démarrage ---------- */
-if (TEST || location.search.includes("regard")) Object.assign(window, { camera, controls, scene, THREE, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
+if (TEST || location.search.includes("regard")) Object.assign(window, { camera, controls, scene, THREE, majBus, BUS, VOITURES, RES: () => RESEAU, SOLX: () => SOL, dbg: () => ({ p: SOL && SOL.passages, c: SOL && cellSol(30, -22.3), r: surLaRue(30, -22.3, 15) }) });
 try {
   const [q, carte] = await Promise.all([fn("jarvis-quartier", {}), fn("jarvis-tcl", { quoi: "carte" })]);
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
@@ -955,6 +1120,7 @@ try {
   if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); poserPassages(); if (!TEST) chercherPassages(); }
   if (carte && carte.ok) poserLignes(carte);
   if (SOL) habiller(q.sol);   // après les abribus (les bancs se posent à côté)
+  RESEAU = construireReseau(q.routes || []); lancerCirculation();   // les rues de la carte : ce qui roule les suit
   $("msg").hidden = true;
   requestAnimationFrame(boucle);
   // les chantiers en cours (Grand Lyon) et ton point GPS
