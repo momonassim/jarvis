@@ -111,15 +111,28 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     for (const r of rues) { if (r.w < 8) continue; let reste = 4;
       for (let i = 0; i < r.l.length - 1; i++) { const [x1, y1] = r.l[i], [x2, y2] = r.l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.1) continue; const ang = Math.atan2(y2 - y1, x2 - x1);
         let s = reste; for (; s < L - 1.5; s += 8) boiteSol(mq, x1 + (x2 - x1) * (s + 1.5) / L, y1 + (y2 - y1) * (s + 1.5) / L, ang, 3, 0.15, 0.135); reste = s - L; } }
-    // carrefours : là où au moins 3 branches se rejoignent (points partagés des rues)
-    const noeuds = new Map(), cle = ([x, y]) => x + "|" + y;
-    rues.forEach((r, k) => r.px.forEach((q, i) => { const n = noeuds.get(cle(q)) || noeuds.set(cle(q), { x: r.l[i][0], y: r.l[i][1], b: [] }).get(cle(q));
-      if (i > 0) n.b.push({ r, i, sens: -1 }); if (i < r.px.length - 1) n.b.push({ r, i, sens: 1 }); }));
-    for (const n of noeuds.values()) { if (n.b.length < 3) continue; const large = Math.max(...n.b.map(b => b.r.w)) / 2 + 2.2;
-      for (const { r, i, sens } of n.b) { if (r.w < 6 || r.cl === "motorway" || r.cl === "trunk") continue;
-        const [bx, by] = r.l[i + sens], L = Math.hypot(bx - n.x, by - n.y); if (L < large + 5) continue;
-        const ux = (bx - n.x) / L, uy = (by - n.y) / L, cx = n.x + ux * large, cy = n.y + uy * large, ang = Math.atan2(uy, ux), hw = r.w / 2;
-        for (let v = -hw + 0.45; v <= hw - 0.3; v += 1) boiteSol(mq, cx - uy * v, cy + ux * v, ang, 2.6, 0.5, 0.136); } }
+    // carrefours : le bout d'une rue qui touche une autre rue (les tuiles simplifient les tracés : on ne compte pas sur des points communs)
+    const grille = new Map(), C = 30, k2 = (x, y) => Math.floor(x / C) + "|" + Math.floor(y / C);
+    rues.forEach(r => { for (let i = 0; i < r.l.length - 1; i++) { const [x1, y1] = r.l[i], [x2, y2] = r.l[i + 1];
+      for (const k of new Set([k2(x1, y1), k2(x2, y2), k2((x1 + x2) / 2, (y1 + y2) / 2)])) (grille.get(k) || grille.set(k, []).get(k)).push([r, i]); } });
+    const zebras = [];
+    const poserZebra = (r, x, y, ux, uy, d) => { if (r.w < 6 || r.cl === "motorway" || r.cl === "trunk") return;
+      const cx = x + ux * d, cy = y + uy * d; if (zebras.some(([a, b]) => Math.hypot(a - cx, b - cy) < 6)) return; zebras.push([cx, cy]);
+      const ang = Math.atan2(uy, ux), hw = r.w / 2; for (let v = -hw + 0.45; v <= hw - 0.3; v += 1) boiteSol(mq, cx - uy * v, cy + ux * v, ang, 2.6, 0.5, 0.136); };
+    for (const r of rues) for (const bout of [0, r.l.length - 1]) {
+      const [x, y] = r.l[bout]; let best = null;
+      for (let a = -1; a <= 1; a++) for (let c = -1; c <= 1; c++) for (const [o, i] of grille.get((Math.floor(x / C) + a) + "|" + (Math.floor(y / C) + c)) || []) { if (o === r) continue;
+        const [x1, y1] = o.l[i], [x2, y2] = o.l[i + 1], dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / L2)), d = Math.hypot(x - x1 - t * dx, y - y1 - t * dy);
+        if (d < 2 && (!best || d < best.d)) best = { o, i, d, t }; }
+      if (!best) continue;
+      const o = best.o, [x1, y1] = o.l[best.i], [x2, y2] = o.l[best.i + 1], L = Math.hypot(x2 - x1, y2 - y1) || 1, ox = (x2 - x1) / L, oy = (y2 - y1) / L;
+      const larg = Math.max(r.w, o.w) / 2 + 2.2;
+      // la rue qui arrive : un passage juste avant le carrefour
+      const voisin = r.l[bout === 0 ? 1 : bout - 1], Lr = Math.hypot(voisin[0] - x, voisin[1] - y); if (Lr > o.w / 2 + 5) poserZebra(r, x, y, (voisin[0] - x) / Lr, (voisin[1] - y) / Lr, o.w / 2 + 2.2);
+      // la rue traversée : un passage de chaque côté, si elle continue assez loin
+      if (best.t * L > larg + 4 || best.i > 0) poserZebra(o, x, y, -ox, -oy, larg);
+      if ((1 - best.t) * L > larg + 4 || best.i < o.l.length - 2) poserZebra(o, x, y, ox, oy, larg);
+    }
 
     // bâtiments : murs à leur vraie hauteur, toit plat, liserés comme dans le quartier
     const B = { p: [], uv: [], n: [] }, T = [];
