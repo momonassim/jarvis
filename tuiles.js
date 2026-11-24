@@ -31,14 +31,13 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     chaussee: new THREE.MeshStandardMaterial({ map: grain(0xa4a4a2, 14), roughness: 1, polygonOffset: true, polygonOffsetFactor: -1 }),
     trottoir: new THREE.MeshStandardMaterial({ map: grain(0xebe7e0, 6), roughness: 1 }),
     blanc: new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7 }),
-    bati: new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 0.92, side: THREE.DoubleSide }),
+    bati: new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 0.92 }),
     trait: new THREE.LineBasicMaterial({ color: 0xc8c0b3, transparent: true, opacity: 0.55 }),
     vert: new THREE.MeshStandardMaterial({ color: 0xd3dcc6, roughness: 1 }),
     bois: new THREE.MeshStandardMaterial({ color: 0xc3d0b2, roughness: 1 }),
     eau: new THREE.MeshStandardMaterial({ color: 0xbcd0d8, roughness: 0.35 }),
     rail: new THREE.MeshStandardMaterial({ color: 0xb9b4ab, roughness: 1 }),
   };
-  for (const m of Object.values(M)) m.side = THREE.DoubleSide;
   const TUILES = new Map(); let enCours = 0;
 
   /* --- petites briques de géométrie (écrites à la main : beaucoup plus léger que des centaines d'objets) --- */
@@ -57,6 +56,12 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     quad(G, P(-lx / 2, -ly / 2), P(lx / 2, -ly / 2), P(lx / 2, ly / 2), P(-lx / 2, ly / 2), h); }
   function maillage(G, mat, ombre = false) {
     if (!G.p.length) return null; const g = new THREE.BufferGeometry();
+    // chaque triangle tourné du bon côté (vers sa normale) : sinon il est éclairé « par dessous » et paraît sombre
+    const P = G.p, U = G.uv;
+    for (let t = 0; t < P.length; t += 9) { const ax = P[t + 3] - P[t], ay = P[t + 4] - P[t + 1], az = P[t + 5] - P[t + 2], bx = P[t + 6] - P[t], by = P[t + 7] - P[t + 1], bz = P[t + 8] - P[t + 2];
+      const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx, d = G.n ? cx * G.n[t] + cy * G.n[t + 1] + cz * G.n[t + 2] : cy;
+      if (d < 0) { for (let k = 0; k < 3; k++) { const q = P[t + 3 + k]; P[t + 3 + k] = P[t + 6 + k]; P[t + 6 + k] = q; }
+        const u = t / 3 * 2; for (let k = 0; k < 2; k++) { const q = U[u + 2 + k]; U[u + 2 + k] = U[u + 4 + k]; U[u + 4 + k] = q; } } }
     g.setAttribute("position", new THREE.Float32BufferAttribute(G.p, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(G.uv, 2));
     if (G.n) g.setAttribute("normal", new THREE.Float32BufferAttribute(G.n, 3)); else if (ombre) g.computeVertexNormals(); else { const n = new Float32Array(G.p.length); for (let i = 1; i < n.length; i += 3) n[i] = 1; g.setAttribute("normal", new THREE.BufferAttribute(n, 3)); }
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = ombre; return m; }
