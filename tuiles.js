@@ -49,7 +49,10 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
   function ruban(G, l, w, h) { const hw = w / 2;
     for (let i = 0; i < l.length - 1; i++) { const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.05) continue;
       const nx = -(y2 - y1) / L * hw, ny = (x2 - x1) / L * hw; quad(G, [x1 - nx, y1 - ny], [x2 - nx, y2 - ny], [x2 + nx, y2 + ny], [x1 + nx, y1 + ny], h); }
-    for (const [x, y] of l) disque(G, x, y, hw, h, w > 8 ? 12 : 8); }
+    // un disque seulement aux bouts et dans les vrais virages (sinon inutile : les morceaux se touchent déjà)
+    for (let i = 0; i < l.length; i++) { const A = l[i - 1], P = l[i], B = l[i + 1];
+      if (A && B) { const a1 = Math.atan2(P[1] - A[1], P[0] - A[0]), a2 = Math.atan2(B[1] - P[1], B[0] - P[0]); let d = Math.abs(a2 - a1); if (d > Math.PI) d = 2 * Math.PI - d; if (d < 0.12) continue; }
+      disque(G, P[0], P[1], hw, h, w > 8 ? 10 : 6); } }
   function boiteSol(G, x, y, ang, lx, ly, h) { const c = Math.cos(ang), s = Math.sin(ang), P = (a, b) => [x + c * a - s * b, y + s * a + c * b];
     quad(G, P(-lx / 2, -ly / 2), P(lx / 2, -ly / 2), P(lx / 2, ly / 2), P(-lx / 2, ly / 2), h); }
   function maillage(G, mat, ombre = false) {
