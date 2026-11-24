@@ -72,7 +72,7 @@ const HOOKS = {
   frame: () => V && V.decalage(viewShiftGoal),
 };
 V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
-  : await (await import("./carte.js?v=carte4")).creerCarte(canvas, HOOKS, { fn: appeler });
+  : await (await import("./carte.js?v=carte5")).creerCarte(canvas, HOOKS, { fn: appeler });
 document.body.classList.toggle("vuecarte", VUE === "carte");
 if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
 // sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)
@@ -286,26 +286,29 @@ function aRegarder() {
   });
   return out;
 }
+// toucher un lieu dans la liste : on y va tout de suite dans la ville, puis sa fiche s'ouvre avec ce qu'il y a à regarder
 function allerA(x) {
   $("alertwrap").classList.remove("open");
-  select(x.p); openDetails();
-  if (x.d) setTimeout(() => openDoc(x.p, x.d), 750);
+  select(x.p);
+  setTimeout(() => { if (S.sel === x.p) openDetails(); }, 1300);
 }
 function ouvrirListe() {
   const u = aRegarder();
   if (!u.length) { select((S.nextPlace && byId[S.nextPlace]) || byId.home); return; }
-  if (u.length === 1) { allerA(u[0]); return; }
+  // une ligne par lieu (pas une par mail) : la liste reste courte
+  const parLieu = []; for (const x of u) { let g = parLieu.find(q => q.p === x.p); if (!g) parLieu.push(g = { p: x.p, items: [] }); g.items.push(x); }
+  if (parLieu.length === 1) { allerA(parLieu[0]); return; }
   const L = $("alertList"); L.innerHTML = "";
-  $("alertT").textContent = u.length + " choses à regarder";
-  u.forEach(x => {
-    const b = document.createElement("button"); b.type = "button"; b.className = "alertItem"; b.style.setProperty("--c", x.p.color);
-    const ic = document.createElement("span"); ic.className = "aic svgic"; ic.innerHTML = V.icone(x.p.id);
+  $("alertT").textContent = parLieu.length + " lieux à regarder";
+  parLieu.forEach(g => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "alertItem"; b.style.setProperty("--c", g.p.color);
+    const ic = document.createElement("span"); ic.className = "aic svgic"; ic.innerHTML = V.icone(g.p.id);
     const t = document.createElement("span"); t.className = "atx";
-    const n = document.createElement("small"); n.textContent = x.p.name + (x.quand ? " · " + x.quand : "");
-    const h = document.createElement("b"); h.textContent = x.titre;
+    const n = document.createElement("small"); n.textContent = g.p.name + (g.items.length > 1 ? " · " + g.items.length + " choses" : "");
+    const h = document.createElement("b"); h.textContent = g.items[0].titre + (g.items.length > 1 ? " …" : "");
     const go = document.createElement("span"); go.className = "ago"; go.textContent = "›";
     t.append(n, h); b.append(ic, t, go);
-    b.addEventListener("click", () => allerA(x));
+    b.addEventListener("click", () => allerA(g));
     L.append(b);
   });
   $("alertwrap").classList.add("open");

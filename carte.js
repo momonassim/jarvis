@@ -346,6 +346,33 @@ function construireSol(sol) {
   return R0;
 }
 
+/* ---------- le plan « logique » des rues (remplace le plan officiel au centimètre) ----------
+   Chaque rue a sa chaussée (largeur de la rue), un trottoir de chaque côté et ses bordures : d'un trottoir à l'autre,
+   sans morceaux de route ni bouts de trottoir au milieu. Ce plan sert à tout ce qui se pose au sol
+   (voitures garées, rampe du garage, jardin, passages piétons). Le dessin, lui, est fait par dessinerRues. */
+function construireSolSimple(R0, routes) {
+  const P = 0.5, N = Math.ceil(2 * R0 / P), cls = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const x = -R0 + (i + 0.5) * P, y = R0 - (j + 0.5) * P; if (x * x + y * y > R0 * R0) cls[j * N + i] = 9; }
+  const larges = routes.filter(r => r.w >= 4);
+  for (const r of larges) { const l = pts(r.p), hw = r.w / 2;
+    for (let k = 0; k < l.length - 1; k++) { const [x1, y1] = l[k], [x2, y2] = l[k + 1], dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+      const i0 = Math.max(0, Math.floor((Math.min(x1, x2) - hw + R0) / P)), i1 = Math.min(N - 1, Math.ceil((Math.max(x1, x2) + hw + R0) / P));
+      const j0 = Math.max(0, Math.floor((R0 - Math.max(y1, y2) - hw) / P)), j1 = Math.min(N - 1, Math.ceil((R0 - Math.min(y1, y2) + hw) / P));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const q = j * N + i; if (cls[q] === 9) continue;
+        const x = -R0 + (i + 0.5) * P, y = R0 - (j + 0.5) * P; let t = L2 ? ((x - x1) * dx + (y - y1) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(x - x1 - t * dx, y - y1 - t * dy) <= hw) cls[q] = 1; } } }
+  SOL = { cls, N, P, R0, routes: [], passages: [], zebras: [], bordures: [], synth: [] };
+  // les bordures : le bord de chaque chaussée, sauf là où une autre rue arrive (le carrefour reste ouvert)
+  for (const r of larges) { const l = pts(r.p), hw = r.w / 2;
+    for (const sg of [-1, 1]) { let cur = [];
+      const pousser = () => { if (cur.length >= 4) SOL.bordures.push(cur); cur = []; };
+      for (let k = 0; k < l.length - 1; k++) { const [x1, y1] = l[k], [x2, y2] = l[k + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.2) continue;
+        const nx = -(y2 - y1) / L * sg, ny = (x2 - x1) / L * sg;
+        for (let t = 0; t <= L; t += 1) { const x = x1 + (x2 - x1) * t / L + nx * hw, y = y1 + (y2 - y1) * t / L + ny * hw;
+          if (Math.hypot(x, y) < R0 - 2 && cellSol(x + nx * 0.4, y + ny * 0.4) === 0) cur.push(x, y); else pousser(); } }
+      pousser(); } }
+  return R0;
+}
 
 /* ---------- deuxième couche : l'habillage (placé « à la logique », pour un rendu vivant) ---------- */
 function habiller(sol) {
@@ -360,27 +387,9 @@ function habiller(sol) {
   let graine = 777; const alea = () => { graine = (graine * 1103515245 + 12345) & 0x7fffffff; return graine / 0x7fffffff; };
   const lamp = [], autos = [];
   const passageProche = (x, y, d) => SOL.passages.some(([a, b]) => Math.hypot(a - x, b - y) < d);
-  for (const f of sol.bordures || []) {
-    const l = pts(f); let reste = 8 + alea() * 10;
-    for (let i = 0; i < l.length - 1; i++) {
-      const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.1) continue;
-      const ux = (x2 - x1) / L, uy = (y2 - y1) / L; let t = reste;
-      for (; t < L; t += 1) {
-        const x = x1 + ux * t, y = y1 + uy * t;
-        // de quel côté est le trottoir ? (la chaussée est de l'autre)
-        const g = cellSol(x - uy * 1.2, y + ux * 1.2), d = cellSol(x + uy * 1.2, y - ux * 1.2);
-        const cote = g === 1 && d !== 1 ? -1 : d === 1 && g !== 1 ? 1 : 0; if (!cote) continue;
-        // un lampadaire tous les ~25 m, côté trottoir
-        if (!lamp.length || Math.hypot(lamp[lamp.length - 1][0] - x, lamp[lamp.length - 1][1] - y) > 24) {
-          const lx = x - uy * 0.6 * cote, ly = y + ux * 0.6 * cote;
-          if (cellSol(lx, ly) !== 1 && !passageProche(lx, ly, 3)) lamp.push([lx, ly, Math.atan2(-ux * cote, uy * cote)]);
-        }
-      }
-      reste = t - L;
-    }
-  }
+  // (les lampadaires sont posés par habillerRues, partout de la même façon)
   // voitures garées : le long des bordures des rues calmes (pas sur la route de Genas ni près des passages piétons)
-  for (const f of sol.bordures || []) {
+  for (const f of SOL.bordures) {
     const l = pts(f);
     for (let i = 0; i < l.length - 1; i++) {
       const [x1, y1] = l[i], [x2, y2] = l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 5) continue;
@@ -413,15 +422,6 @@ function habiller(sol) {
     for (const ab of ABRIS) { const b1 = new THREE.BoxGeometry(1.8, 0.08, 0.45); b1.translate(0, 0.45, 0.1); const b2 = new THREE.BoxGeometry(1.8, 0.45, 0.06); b2.translate(0, 0.7, 0.33);
       for (const b of [b1, b2]) { b.rotateY(ab.ang); b.translate(ab.x + Math.cos(ab.ang) * 3.6, 0.12, -(ab.y + Math.sin(ab.ang) * 3.6)); bancs.push(b.toNonIndexed()); } }
     if (bancs.length) { const m = new THREE.Mesh(mergeGeometries(bancs), new THREE.MeshStandardMaterial({ color: 0x6b5a48, roughness: 0.8 })); m.castShadow = true; scene.add(m); } }
-  if (lamp.length) {
-    const mat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6 });
-    const mat2 = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xffe2a0, emissiveIntensity: 0.6 });
-    const pied = new THREE.CylinderGeometry(0.07, 0.1, 6, 6); pied.translate(0, 3.1, 0);
-    const tete = new THREE.BoxGeometry(0.9, 0.12, 0.3); tete.translate(0.35, 6.05, 0);
-    const ip = new THREE.InstancedMesh(pied, mat, lamp.length), it = new THREE.InstancedMesh(tete, mat2, lamp.length);
-    lamp.forEach(([x, y, a], i) => { o.position.set(x, 0, -y); o.rotation.set(0, a, 0); o.updateMatrix(); ip.setMatrixAt(i, o.matrix); it.setMatrixAt(i, o.matrix); });
-    ip.castShadow = true; scene.add(ip, it);
-  }
   if (autos.length) {
     const teintes = [0xf4f2ee, 0x2e3237, 0x9aa1a8, 0x6f7b86, 0xb8442f, 0x2f4d6e, 0xd9d4c7, 0x55606a];
     const caisse = new THREE.BoxGeometry(4.2, 0.75, 1.75); caisse.translate(0, 0.62, 0);
@@ -450,7 +450,7 @@ function motifAjoure() {   // panneau blanc découpé (motif « branches ») : d
   x.globalCompositeOperation = "source-over"; x.strokeStyle = "#f4f3ef"; x.lineWidth = 10; x.strokeRect(0, 0, 128, 512);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-const ZONES_LIBRES = [];
+const ZONES_LIBRES = []; let ABRI_VELOS = null, COIN_JARDIN = null;
 function lames(c1, c2, n) {   // lames horizontales (volets roulants, porte de garage)
   const c = document.createElement("canvas"); c.width = 32; c.height = 64; const x = c.getContext("2d"), col = new THREE.Color();
   x.fillStyle = "#" + col.setHex(c1).getHexString(); x.fillRect(0, 0, 32, 64); x.fillStyle = "#" + col.setHex(c2).getHexString();
@@ -497,15 +497,14 @@ function detaillerMaison(pp, hAt, voisins) {
         for (let b = -0.5; b <= 0.51; b += 0.1) boite(metal, 0.025, 1.8, 0.025, ex + ux * b, ey + uy * b, 1.05, ang);
         boite(metal, 1.2, 0.06, 0.05, ex, ey, 1.95, ang); boite(metal, 1.2, 0.06, 0.05, ex, ey, 0.2, ang); boite(metal, 1.2, 0.06, 0.05, ex, ey, 1.05, ang);
         boite(rails, 0.05, 0.16, 0.08, ex + ux * 0.42 + nx * 0.05, ey + uy * 0.42 + ny * 0.05, 1.05, ang);   // poignée
-        // l'abri en lattes de bois, juste à gauche du portillon
-        const ax = x1 - ux * 3.7 - nx * 0.4, ay = y1 - uy * 3.7 - ny * 0.4;
-        boite(bois, 3.9, 2.45, 3.0, ax, ay, 1.36, ang);
-        // l'auvent plat blanc au-dessus des deux
-        boite(dalles, 6.3, 0.18, 3.8, x1 - ux * 2.9 - nx * 0.2, y1 - uy * 2.9 - ny * 0.2, 2.72, ang);
-        boite(metal, 0.1, 2.6, 0.1, x1 - ux * 0.3 + nx * 1.6, y1 - uy * 0.3 + ny * 1.6, 1.42, ang);
+        // l'abri à vélos, juste à côté du portillon : un toit arrondi transparent (comme un petit chapiteau) sur des arceaux, des vélos dessous
+        const ax = x1 - ux * 4.4 + nx * 0.6, ay = y1 - uy * 4.4 + ny * 0.6;
+        ABRI_VELOS = { x: ax, y: ay, ang };
+        // le petit auvent plat au-dessus du portillon
+        boite(dalles, 2.2, 0.16, 1.8, ex + nx * 0.7, ey + ny * 0.7, 2.62, ang);
         boite(lampes, 0.25, 0.06, 0.25, ex + nx * 0.4, ey + ny * 0.4, 2.6, ang);
         entreeGarage.porte = [ex, ey];
-        ZONES_LIBRES.push([ax, ay, 2.6], [ex, ey, 1.3]);
+        ZONES_LIBRES.push([ax, ay, 3.4], [ex, ey, 1.3]);
         // boîtes aux lettres et interphone : deux blocs blancs bas devant, entre le portillon et le garage
         const bx = x1 + ux * 0.0 + nx * 2.3, by = y1 + uy * 0.0 + ny * 2.3;
         boite(beton, 1.5, 1.15, 0.55, bx, by, 0.72, ang);
@@ -574,6 +573,13 @@ function detaillerMaison(pp, hAt, voisins) {
   for (const [nom, arr] of Object.entries({ vitres, volets, cadres, dalles, verres, ajoures, garage, beton, rails, socle, portes, boites, lampes, metal, bois })) {
     if (!arr.length) continue; const m = new THREE.Mesh(mergeGeometries(arr), mat[nom]); m.castShadow = nom !== "verres"; m.receiveShadow = true; scene.add(m);
   }
+  if (ABRI_VELOS) poserAbriVelos(ABRI_VELOS);
+  // le coin jardin : au bout de la façade côté rue, à l'opposé de l'entrée (pelouse, deux arbres, un banc, un massif)
+  if (entreeGarage) { const { nx, ny, ux, uy, ang } = entreeGarage;
+    let best = null;   // le bout de façade le plus loin du garage, côté rue
+    for (const [px, py] of poly) { const d = (px - entreeGarage.x) * ux + (py - entreeGarage.y) * uy; if (!best || d > best.d) best = { d, px, py }; }
+    if (best && best.d > 8) { const cx = best.px - ux * 3.2 + nx * 3.6, cy = best.py - uy * 3.2 + ny * 3.6;
+      if (cellSol(cx, cy) === 0 && cellSol(cx + nx * 2.5, cy + ny * 2.5) === 0) { COIN_JARDIN = { x: cx, y: cy, ang, ux, uy, nx, ny }; ZONES_LIBRES.push([cx, cy, 3.8]); poserCoinJardin(COIN_JARDIN); } } }
   // l'accès au garage : une rampe en enrobé du garage jusqu'à la chaussée, qui passe par-dessus la bordure (bateau)
   if (entreeGarage) { const { x, y, nx, ny, ux, uy } = entreeGarage; let d = 0.3; while (d < 16 && cellSol(x + nx * d, y + ny * d) !== 1) d += 0.3;
     if (d < 16) { const prof = [[0, 0.15], [Math.max(0.5, d - 1.1), 0.2], [d - 0.4, 0.3], [d + 0.3, 0.13]], v = [];
@@ -616,9 +622,48 @@ function detaillerMaison(pp, hAt, voisins) {
     im.castShadow = true; scene.add(im); }
 }
 
-let RDETAIL = 0;
+function poserAbriVelos({ x, y, ang }) {
+  const g = new THREE.Group(); g.position.set(x, 0.12, -y); g.rotation.y = ang; scene.add(g);
+  const metal = new THREE.MeshStandardMaterial({ color: 0x5f6468, roughness: 0.45, metalness: 0.6 });
+  const toitM = new THREE.MeshStandardMaterial({ color: 0xdfe9ec, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+  const LONG = 5.2, R = 1.35, HB = 1.15;   // longueur, rayon de l'arrondi, hauteur des montants
+  const toit = new THREE.Mesh(new THREE.CylinderGeometry(R, R, LONG, 24, 1, true, 0, Math.PI), toitM);
+  toit.rotation.z = Math.PI / 2; toit.position.y = HB; g.add(toit);   // demi-cylindre couché : le dos arrondi en haut
+  for (const u of [-LONG / 2, -LONG / 6, LONG / 6, LONG / 2]) {
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(R, 0.045, 6, 20, Math.PI), metal); arc.rotation.y = Math.PI / 2; arc.position.set(u, HB, 0); g.add(arc);
+    for (const z of [-R, R]) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, HB, 6), metal); m.position.set(u, HB / 2, z); g.add(m); } }
+  const sol2 = new THREE.Mesh(new THREE.BoxGeometry(LONG + 0.4, 0.06, 2 * R + 0.4), new THREE.MeshStandardMaterial({ color: 0xcfcac1, roughness: 0.95 })); sol2.position.y = 0.03; sol2.receiveShadow = true; g.add(sol2);
+  // les vélos, rangés côte à côte
+  const coul = [0x2f5f8a, 0xb8442f, 0x2e3237, 0x6b8f5a, 0xe9e4d6, 0x2e3237];
+  const pneu = new THREE.TorusGeometry(0.32, 0.035, 6, 20), noir = new THREE.MeshStandardMaterial({ color: 0x1f2226, roughness: 0.8 });
+  for (let i = 0; i < 6; i++) { const v = new THREE.Group(), cm = new THREE.MeshStandardMaterial({ color: coul[i], roughness: 0.5, metalness: 0.3 });
+    for (const z of [-0.52, 0.52]) { const r = new THREE.Mesh(pneu, noir); r.position.set(0, 0.36, z); r.rotation.y = Math.PI / 2; v.add(r); }
+    const cadre = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.95), cm); cadre.position.y = 0.62; v.add(cadre);
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.42, 0.04), cm); tube.position.set(0, 0.5, -0.12); tube.rotation.x = 0.35; v.add(tube);
+    const selle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.24), noir); selle.position.set(0, 0.78, -0.22); v.add(selle);
+    const guidon = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.04), noir); guidon.position.set(0, 0.86, 0.42); v.add(guidon);
+    v.position.set(-LONG / 2 + 0.55 + i * ((LONG - 1.1) / 5), 0.06, 0.15); v.rotation.y = (i % 2 ? 0.06 : -0.06); g.add(v); }
+  g.traverse(o => { if (o.isMesh && o.material !== toitM) { o.castShadow = true; o.receiveShadow = true; } });
+}
+function poserCoinJardin({ x, y, ang }) {
+  const g = new THREE.Group(); g.position.set(x, 0.12, -y); g.rotation.y = ang; scene.add(g);
+  const herbe = new THREE.Mesh(new THREE.BoxGeometry(6, 0.08, 5), new THREE.MeshStandardMaterial({ color: 0x93b277, roughness: 1 })); herbe.position.y = 0.04; herbe.receiveShadow = true; g.add(herbe);
+  const bord = new THREE.MeshStandardMaterial({ color: 0xe6e2d9, roughness: 0.9 });
+  for (const [w, d, px, pz] of [[6.2, 0.15, 0, -2.55], [6.2, 0.15, 0, 2.55], [0.15, 5.2, -3.05, 0], [0.15, 5.2, 3.05, 0]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, 0.22, d), bord); b.position.set(px, 0.11, pz); b.castShadow = true; g.add(b); }
+  const massif = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.12, 0.9), new THREE.MeshStandardMaterial({ color: 0x6d5644, roughness: 1 })); massif.position.set(0, 0.1, 1.9); g.add(massif);
+  const fleurs = ["#e07a8a", "#f2c14e", "#f4f1ea", "#b07cc6"]; for (let i = 0; i < 14; i++) { const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), new THREE.MeshStandardMaterial({ color: fleurs[i % 4], roughness: 0.8, flatShading: true })); f.position.set(-2.5 + i * 0.38, 0.3, 1.75 + ((i * 7) % 3) * 0.12); g.add(f); }
+  const feuil = new THREE.MeshStandardMaterial({ color: 0x6f9a55, roughness: 1, flatShading: true }), tr = new THREE.MeshStandardMaterial({ color: 0x8a7462, roughness: 1 });
+  for (const [px, pz, h] of [[-1.9, -0.9, 3.2], [1.8, -1.2, 2.6]]) { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, h, 6), tr); t.position.set(px, h / 2, pz); g.add(t);
+    const c = new THREE.Mesh(new THREE.IcosahedronGeometry(1.1, 1), feuil); c.position.set(px, h + 0.5, pz); c.scale.set(1, 1.15, 1); g.add(c); }
+  const bois = new THREE.MeshStandardMaterial({ color: 0x8a6a4c, roughness: 0.8 });
+  const assise = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.07, 0.42), bois); assise.position.set(0.2, 0.45, 0.4); g.add(assise);
+  const dos = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.4, 0.06), bois); dos.position.set(0.2, 0.72, 0.62); g.add(dos);
+  for (const px of [-0.5, 0.9]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.45, 0.42), new THREE.MeshStandardMaterial({ color: 0x3a3f45 })); p.position.set(px, 0.22, 0.4); g.add(p); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+}
+let RDETAIL = 0, RCALME = 0;   // RDETAIL reste à 0 : toutes les rues sont dessinées pareil ; RCALME = le quartier calme autour de chez toi
 function construireQuartier(q) {
-  if (q.sol) { RDETAIL = construireSol(q.sol); SOL.routes = (q.routes || []).filter(r => pts(r.p).some(([x, y]) => Math.hypot(x, y) < RDETAIL)); }
+  if (q.sol) RCALME = construireSolSimple(q.sol.r, q.routes || []);   // plan logique : mêmes rues partout, d'un trottoir à l'autre
   indexerRues(q.routes || []);
   // verdure : taches vert sauge
   const vg = [];
@@ -725,7 +770,7 @@ function poserLignes(carte) {
     const toit = new THREE.Mesh(new THREE.BoxGeometry(5, 0.25, 1.8), new THREE.MeshStandardMaterial({ color: 0x2b3138 })); toit.position.y = 2.6;
     const vitre = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 0.12), new THREE.MeshStandardMaterial({ color: 0xcfe0e6, transparent: true, opacity: 0.55 })); vitre.position.set(0, 1.3, -0.8);  // la vitre du fond est côté trottoir
     const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.6, 6), new THREE.MeshStandardMaterial({ color: 0x2b3138 })); pot.position.set(3.2, 1.8, 0);
-    abri.add(toit, vitre, pot); abri.position.set(x, RDETAIL ? 0.12 : 0, -y); abri.rotation.y = ang; ABRIS.push({ x, y, ang }); abri.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    abri.add(toit, vitre, pot); abri.position.set(x, 0.12, -y); abri.rotation.y = ang; ABRIS.push({ x, y, ang }); abri.traverse(o => { if (o.isMesh) o.castShadow = true; });
     scene.add(abri);
     if (!vus.has(a.nom)) { vus.add(a.nom); if (a.nom === "Brossolette Genas") { arretLabel = etiquette("Brossolette Genas", "#2b3138", "#f5f1e8", { x, y: 9, z: -y }, 0.03, "…"); scene.add(arretLabel); arretPos = [x, y]; } }
   }
@@ -788,12 +833,14 @@ function majBus(liste) {
 function animerBus(t) {
   for (const o of BUS.values()) {
     // le bus roule le long des rues de la carte, sur sa voie de droite : démarre doucement, roule régulier, freine en douceur
-    const a = Math.min(1, (t - o.t0) / 15000), e = a < 0.15 ? a * a / 0.3 : a > 0.85 ? 0.85 - (1 - a) * (1 - a) / 0.3 : a - 0.075;
-    const d = o.tr.L * Math.min(1, e / 0.85), p = surTrajet(o.tr, d);
+    // vitesse régulière jusqu'à la prochaine position (≈ 16 s) : plus d'arrêt-départ toutes les 15 s
+    const d = o.tr.L * Math.min(1, (t - o.t0) / 16000), p = surTrajet(o.tr, d);
     o.axe = pointA(o.tr, d);
-    o.m.position.set(p.x, RDETAIL ? 0.12 : 0, -p.y);
+    if (o.px == null) { o.px = p.x; o.py = p.y; } const k = o.tp == null ? 1 : 1 - Math.exp(-Math.min(0.1, (t - o.tp) / 1000) * 10); o.tp = t;
+    o.px += (p.x - o.px) * k; o.py += (p.y - o.py) * k;   // lissé : le changement de trajet ne fait jamais sauter le bus
+    o.m.position.set(o.px, 0.125, -o.py);
     if (p.tx || p.ty) { const vise = Math.atan2(-p.tx, p.ty);   // l'avant du bus (vers -z) dans le sens de la marche
-      if (o.ang == null) o.ang = vise; let dd = vise - o.ang; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); o.ang += dd * 0.2; o.m.rotation.y = o.ang; }
+      if (o.ang == null) o.ang = vise; let dd = vise - o.ang; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); o.ang += dd * Math.min(1, k * 0.6); o.m.rotation.y = o.ang; }
     const avance = o.dPrec == null ? 0 : Math.abs(d - o.dPrec); o.dPrec = d;
     for (const r of o.m.userData.roues || []) r.rotation.x -= avance / 0.5;
   }
@@ -878,7 +925,7 @@ function dessinerRues(routes) {
 }
 function habillerRues() {   // une fois le réseau prêt : marquages, passages piétons et lampadaires hors du quartier détaillé
   if (!RESEAU) return; const { aretes, noeuds } = RESEAU, hors = (x, y) => !RDETAIL || Math.hypot(x, y) > RDETAIL + 1;
-  const tirets = [], bandes = [], lamp = [];
+  const tirets = [], bandes = [], lamp = [], passagesPoses = [];
   const deg = n => n.a.length + (n.bout || 0);
   for (const a of aretes) {
     const libre = s => !((s < 12 && deg(a.n0) >= 3) || (a.L - s < 12 && deg(a.n1) >= 3));
@@ -888,15 +935,20 @@ function habillerRues() {   // une fois le réseau prêt : marquages, passages p
     for (let s = 10; s < a.L - 6; s += 28) { const q = surArete(a, s); if (!hors(q.x, q.y)) continue; cote = -cote;
       const v = cote * (q.hw + 1.4); lamp.push([q.x - q.ty * v, q.y + q.tx * v, Math.atan2(-cote * q.tx, cote * q.ty)]); }
   }
+  const lampOk = ([x, y]) => { const r = surLaRue(x, y, 15); return !(r && r.d < r.w / 2 + 0.4) && !(SOL && cellSol(x, y) === 1) && !passagesPoses.some(([px, py]) => Math.hypot(px - x, py - y) < 4); };
   // passages piétons : sur chaque branche d'un carrefour, à 7 m du centre, sur toute la largeur de la chaussée
   for (const n of noeuds) { if (deg(n) < 3 || !hors(n.x, n.y)) continue;
     const large = Math.max(...n.a.map(e => aretes[e].w)) / 2;   // le passage se pose juste après la chaussée de la plus grande rue du carrefour
     for (const e of n.a) { const a = aretes[e], d0 = (a.w / 2 >= large ? Math.max(...n.a.filter(f => f !== e).map(f => aretes[f].w / 2), 3) : large) + 2.2; if (a.L < d0 + 8 || a.w < 5) continue;
       const s = a.n0 === n ? d0 : a.L - d0, q = surArete(a, s), ang = Math.atan2(q.ty, q.tx);
+      if (passagesPoses.some(([px, py]) => Math.hypot(px - q.x, py - q.y) < 6)) continue;   // jamais deux passages l'un sur l'autre
+      passagesPoses.push([q.x, q.y]);
       for (let v = -q.hw + 0.45; v <= q.hw - 0.3; v += 1) { const zx = q.x - q.ty * v, zy = q.y + q.tx * v; if (surAutreRue(zx, zy, a.src, 0)) continue; const g = new THREE.BoxGeometry(2.6, 0.025, 0.5); g.rotateY(ang); g.translate(q.x - q.ty * v, 0.135, -(q.y + q.tx * v)); bandes.push(g); } } }
   const blanc = new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7 });
   if (tirets.length) scene.add(new THREE.Mesh(mergeGeometries(tirets), blanc));
   if (bandes.length) { const m = new THREE.Mesh(mergeGeometries(bandes), blanc); m.receiveShadow = true; scene.add(m); }
+  if (SOL) { SOL.passages = passagesPoses; SOL.zebras = passagesPoses; }
+  for (let i = lamp.length - 1; i >= 0; i--) if (!lampOk(lamp[i])) lamp.splice(i, 1);
   if (lamp.length) {
     const o = new THREE.Object3D(), pied = new THREE.CylinderGeometry(0.07, 0.1, 6, 6); pied.translate(0, 3.1, 0); const tete = new THREE.BoxGeometry(0.9, 0.12, 0.3); tete.translate(0.35, 6.05, 0);
     const ip = new THREE.InstancedMesh(pied, new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6 }), lamp.length), it = new THREE.InstancedMesh(tete, new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xffe2a0, emissiveIntensity: 0.6 }), lamp.length);
@@ -1003,7 +1055,7 @@ const VOITURES = [];
 function lancerCirculation() {
   if (!RESEAU) return; const { aretes, noeuds } = RESEAU;
   // grands axes partout ; petites rues seulement hors du quartier détaillé (là où il y a des voitures garées, on n'en fait pas rouler)
-  const ok = aretes.map(a => a.w >= 9 || (a.w >= 5 && a.p.every(([x, y]) => Math.hypot(x, y) > RDETAIL + 5)));
+  const ok = aretes.map(a => a.w >= 9 || (a.w >= 5 && a.p.every(([x, y]) => Math.hypot(x, y) > RCALME + 5)));
   const pool = aretes.filter((a, i) => ok[i] && a.p.some(([x, y]) => Math.hypot(x, y) < 650));
   const total = pool.reduce((s, a) => s + a.L * (a.w >= 9 ? 2 : 0.6), 0), nb = Math.min(110, Math.round(total / 45));
   if (!nb) return;
@@ -1025,12 +1077,17 @@ function lancerCirculation() {
   const o = new THREE.Object3D(); let avant = null;
   ANIMS.push(t => {
     const dt = avant == null ? 0 : Math.min(0.1, (t - avant) / 1000); avant = t;
+    // distances de sécurité : chaque voiture regarde celle de devant (même rue, même sens) et ralentit en douceur,
+    // au lieu d'être recollée d'un coup derrière elle (c'est ce qui faisait les à-coups)
+    const files = new Map(); for (const c of VOITURES) { c.gap = 1e9; const k = c.e + (c.dir > 0 ? "+" : "-"); (files.get(k) || files.set(k, []).get(k)).push(c); }
+    for (const [, f] of files) { f.sort((p, q) => (q.s - p.s) * q.dir); for (let i = 1; i < f.length; i++) f[i].gap = (f[i - 1].s - f[i].s) * f[i].dir; }
     for (const c of VOITURES) {
       let a = aretes[c.e], q = surArete(a, c.s);
       const cote = c.dir > 0 ? -1 : 1, ferme = a.ferme[q.k];   // ma voie (côté droit) est-elle fermée par un chantier ?
       const lent = a.lent ? a.lent[q.k] : 0;   // un bouchon signalé par TomTom à cet endroit
-      const cible = ferme === cote ? 2.5 : ferme ? 4 : lent ? Math.min(c.vmax, lent) : c.vmax;
-      c.v += Math.max(-6 * dt, Math.min(2.5 * dt, cible - c.v));
+      let cible = ferme === cote ? 2.5 : ferme ? 4 : lent ? Math.min(c.vmax, lent) : c.vmax;
+      if (c.gap < 40) cible = Math.min(cible, Math.max(0, (c.gap - 7) * 0.7));
+      c.v += Math.max(-7 * dt, Math.min(2.5 * dt, cible - c.v)); if (c.v < 0) c.v = 0;
       c.s += c.v * dt * c.dir;
       if (c.s < 0 || c.s > a.L) {   // bout de la rue : on continue sur une autre rue du carrefour (jamais demi-tour sauf impasse)
         const n = c.dir > 0 ? a.n1 : a.n0, reste = c.dir > 0 ? c.s - a.L : -c.s, choix = n.a.filter(e => e !== c.e && ok[e]);
@@ -1039,16 +1096,18 @@ function lancerCirculation() {
         a = aretes[c.e];
       }
     }
-    // distances de sécurité : sur une même rue et dans le même sens, on ne rattrape pas la voiture de devant
-    const files = new Map(); for (const c of VOITURES) { const k = c.e + (c.dir > 0 ? "+" : "-"); (files.get(k) || files.set(k, []).get(k)).push(c); }
-    for (const [, f] of files) { f.sort((p, q) => (q.s - p.s) * q.dir); for (let i = 1; i < f.length; i++) { const dev = f[i - 1], c = f[i]; if ((dev.s - c.s) * c.dir < 7.5) { c.s = dev.s - 7.5 * c.dir; c.v = Math.min(c.v, dev.v); } } }
     VOITURES.forEach((c, i) => {
       const a = aretes[c.e], q = surArete(a, c.s), cote = c.dir > 0 ? -1 : 1, ferme = a.ferme[q.k];
       const voie = Math.min(q.hw / 2, 3.2) * (ferme === cote ? -0.6 : 1);
       c.off = c.off == null ? voie : c.off + (voie - c.off) * Math.min(1, dt * 1.5);
-      const tx = q.tx * c.dir, ty = q.ty * c.dir, x = q.x + ty * c.off, y = q.y - tx * c.off;
-      const ang = Math.atan2(ty, tx); let d = ang - c.ang; d = Math.atan2(Math.sin(d), Math.cos(d)); c.ang += d * Math.min(1, dt * 8);
-      o.position.set(x, 0.12, -y); o.rotation.set(0, c.ang, 0); o.updateMatrix();
+      // direction lissée : on vise un point 4 m devant (les virages s'arrondissent, la voiture ne pivote plus sur place)
+      const qa = surArete(a, c.s + 4 * c.dir), qb = surArete(a, c.s - 2 * c.dir);
+      let tx = (qa.x - qb.x) * c.dir, ty = (qa.y - qb.y) * c.dir; const nl = Math.hypot(tx, ty); if (nl > 0.01) { tx /= nl; ty /= nl; } else { tx = q.tx * c.dir; ty = q.ty * c.dir; }
+      const x = q.x + q.ty * c.dir * c.off, y = q.y - q.tx * c.dir * c.off;
+      if (c.px == null) { c.px = x; c.py = y; } const lis = 1 - Math.exp(-dt * 12); c.px += (x - c.px) * lis; c.py += (y - c.py) * lis;   // aucun saut de position, même au carrefour
+      c.x = c.px; c.y = c.py;
+      const ang = Math.atan2(ty, tx); let d = ang - c.ang; d = Math.atan2(Math.sin(d), Math.cos(d)); c.ang += d * (1 - Math.exp(-dt * 7));
+      o.position.set(c.px, 0.12, -c.py); o.rotation.set(0, c.ang, 0); o.updateMatrix();
       ic.setMatrixAt(i, o.matrix); it.setMatrixAt(i, o.matrix); ifx.setMatrixAt(i, o.matrix); iph.setMatrixAt(i, o.matrix);
     });
     for (const m of [ic, it, ifx, iph]) m.instanceMatrix.needsUpdate = true;
@@ -1078,7 +1137,10 @@ function poserChantiers(liste) {
       const zi = zc >= 0 ? zc : zl >= 0 ? zl : zr; if (zi < 0) continue; z[k] = zi; g[k] = (zl >= 0 ? 1 : 0) - (zr >= 0 ? 1 : 0);
     }
     for (let k = 0; k < n;) { if (z[k] < 0) { k++; continue; } let j = k; let gg = 0; while (j < n && z[j] === z[k]) { gg += g[j]; j++; }
-      if (a.cum[j - 1] - a.cum[k] >= 12) { const cote = gg > 0 ? 1 : gg < 0 ? -1 : (a.id % 2 ? 1 : -1); for (let m = k; m < j; m++) a.ferme[m] = cote;
+      if (a.cum[j - 1] - a.cum[k] >= 12) { let cote = gg > 0 ? 1 : gg < 0 ? -1 : (a.id % 2 ? 1 : -1);
+        // devant chez toi, les travaux sont de ton côté de la rue (en bas de ton immeuble), pas en face
+        if (maisonCentre && LIEU === "maison") { const q = surArete(a, a.cum[(k + j) >> 1]); if (Math.hypot(q.x - maisonCentre[0], q.y - maisonCentre[1]) < 170) cote = ((maisonCentre[0] - q.x) * -q.ty + (maisonCentre[1] - q.y) * q.tx) >= 0 ? 1 : -1; }
+        for (let m = k; m < j; m++) a.ferme[m] = cote;
         runs.push({ a, s0: a.cum[k], s1: a.cum[j - 1], cote, zone: zones[z[k]], d: Math.hypot(...a.p[(k + j) >> 1]) }); }
       k = j; }
   }
@@ -1216,13 +1278,27 @@ function poserLieux() {
 // double-toucher le sol → la caméra s'approche de cet endroit ; ailleurs → on referme
 { const ray = new THREE.Raycaster(), v = new THREE.Vector2(), plan = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); let d0 = null, dernier = 0;
   canvas.addEventListener("pointerdown", e => { d0 = [e.clientX, e.clientY]; });
-  canvas.addEventListener("pointerup", e => { if (!d0 || Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 8) return;
+  canvas.addEventListener("pointerup", e => { if (!d0 || Math.hypot(e.clientX - d0[0], e.clientY - d0[1]) > 14) return;
     v.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(v, camera); ray.camera = camera;
-    const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) { const P = hit.object.userData.pin; if (APP) HK.pick(P.L.id); else choisirLieu(P); dernier = 0; return; }
+    // un seul toucher suffit : le mât, l'étiquette, le bâtiment du lieu, ou tout près (44 px) du repère à l'écran
+    const P = lieuTouche(e.clientX, e.clientY, ray); if (P) { if (APP) HK.pick(P.L.id); else choisirLieu(P); dernier = 0; return; }
     const bus = [...BUS.values()].find(o => ray.intersectObject(o.m, true).length); if (bus) { suivreBus(bus); dernier = 0; return; }
     const now = performance.now();
     if (now - dernier < 320) { const p = new THREE.Vector3(); if (ray.ray.intersectPlane(plan, p)) approcher(p); dernier = 0; return; }   // double toucher
     dernier = now; setTimeout(() => { if (dernier === now && (FOCUS || SUIVI)) fermerFiche(); }, 330); });
+}
+function lieuTouche(cx, cy, ray) {
+  const hit = ray.intersectObjects(PINS.flatMap(p => [p.tete, p.lab]), false)[0]; if (hit) return hit.object.userData.pin;
+  // tout près d'un repère à l'écran (le doigt est plus gros que la boule)
+  const r = canvas.getBoundingClientRect(), v3 = new THREE.Vector3(); let best = null, bd = 44;
+  for (const P of PINS) { for (const o of [P.tete, P.lab]) { o.getWorldPosition(v3); v3.project(camera); if (v3.z > 1) continue;
+      const sx = r.left + (v3.x + 1) / 2 * r.width, sy = r.top + (1 - v3.y) / 2 * r.height, d = Math.hypot(sx - cx, sy - cy); if (d < bd) { bd = d; best = P; } } }
+  if (best) return best;
+  // le bâtiment d'un lieu : le point touché tombe dans son contour
+  const objs = []; scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && o.visible && o.geometry && o.geometry.attributes.position.count > 200) objs.push(o); });
+  const h = ray.intersectObjects(objs, false)[0];
+  if (h) { const x = h.point.x, y = -h.point.z; for (const P of PINS) if (P.b && dansPoly(x, y, P.b.pp)) return P; }
+  return null;
 }
 function approcher(p) {   // on se rapproche du point touché, en gardant l'angle de vue
   const dir = camera.position.clone().sub(controls.target), d = Math.max(controls.minDistance + 4, dir.length() * 0.45);
@@ -1750,10 +1826,10 @@ DEMARRE = (async () => { try {
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;
   construireQuartier(q);
-  if (SOL) { if (TEST && TEST.passages) { SOL.passages = TEST.passages; } peindreMarquages(); poserPassages(); if (!TEST) chercherPassages(); }
   if (carte && carte.ok) poserLignes(carte);
-  if (SOL) habiller(q.sol);   // après les abribus (les bancs se posent à côté)
-  RESEAU = construireReseau(q.routes || []); habillerRues(); lancerCirculation();
+  RESEAU = construireReseau(q.routes || []); habillerRues();   // marquages, passages piétons et lampadaires, partout pareil
+  if (SOL) habiller(q.sol);   // après les abribus (bancs) et les passages piétons (pas de voiture garée dessus)
+  lancerCirculation();
   poserLieux();   // tes lieux Jarvis, aux vrais endroits
   if (LIEU === "usine") { const P = PINS.find(p => p.L.ici); if (P) setTimeout(() => choisirLieu(P), 600); }   // au travail : on arrive directement sur l'usine   // les rues de la carte : ce qui roule les suit
   $("msg").hidden = true;
