@@ -30,7 +30,7 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
   const M = {
     chaussee: new THREE.MeshStandardMaterial({ map: grain(0xa4a4a2, 14), roughness: 1, polygonOffset: true, polygonOffsetFactor: -1 }),
     trottoir: new THREE.MeshStandardMaterial({ map: grain(0xebe7e0, 6), roughness: 1 }),
-    blanc: new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7 }),
+    blanc: new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }),
     bati: new THREE.MeshStandardMaterial({ color: 0xfbfaf6, roughness: 0.92 }),
     trait: new THREE.LineBasicMaterial({ color: 0xc8c0b3, transparent: true, opacity: 0.55 }),
     vert: new THREE.MeshStandardMaterial({ color: 0xd3dcc6, roughness: 1 }),
@@ -110,7 +110,7 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     // tirets du milieu sur les rues à deux voies
     for (const r of rues) { if (r.w < 8) continue; let reste = 4;
       for (let i = 0; i < r.l.length - 1; i++) { const [x1, y1] = r.l[i], [x2, y2] = r.l[i + 1], L = Math.hypot(x2 - x1, y2 - y1); if (L < 0.1) continue; const ang = Math.atan2(y2 - y1, x2 - x1);
-        let s = reste; for (; s < L - 1.5; s += 8) boiteSol(mq, x1 + (x2 - x1) * (s + 1.5) / L, y1 + (y2 - y1) * (s + 1.5) / L, ang, 3, 0.15, 0.135); reste = s - L; } }
+        let s = reste; for (; s < L - 1.5; s += 8) boiteSol(mq, x1 + (x2 - x1) * (s + 1.5) / L, y1 + (y2 - y1) * (s + 1.5) / L, ang, 3, 0.15, 0.15); reste = s - L; } }
     // carrefours : le bout d'une rue qui touche une autre rue (les tuiles simplifient les tracés : on ne compte pas sur des points communs)
     const grille = new Map(), C = 30, k2 = (x, y) => Math.floor(x / C) + "|" + Math.floor(y / C);
     rues.forEach(r => { for (let i = 0; i < r.l.length - 1; i++) { const [x1, y1] = r.l[i], [x2, y2] = r.l[i + 1];
@@ -118,7 +118,7 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     const zebras = [];
     const poserZebra = (r, x, y, ux, uy, d) => { if (r.w < 6 || r.cl === "motorway" || r.cl === "trunk") return;
       const cx = x + ux * d, cy = y + uy * d; if (zebras.some(([a, b]) => Math.hypot(a - cx, b - cy) < 6)) return; zebras.push([cx, cy]);
-      const ang = Math.atan2(uy, ux), hw = r.w / 2; for (let v = -hw + 0.45; v <= hw - 0.3; v += 1) boiteSol(mq, cx - uy * v, cy + ux * v, ang, 2.6, 0.5, 0.136); };
+      const ang = Math.atan2(uy, ux), hw = r.w / 2; for (let v = -hw + 0.45; v <= hw - 0.3; v += 1) boiteSol(mq, cx - uy * v, cy + ux * v, ang, 2.6, 0.5, 0.15); };
     for (const r of rues) for (const bout of [0, r.l.length - 1]) {
       const [x, y] = r.l[bout]; let best = null;
       for (let a = -1; a <= 1; a++) for (let c = -1; c <= 1; c++) for (const [o, i] of grille.get((Math.floor(x / C) + a) + "|" + (Math.floor(y / C) + c)) || []) { if (o === r) continue;
@@ -149,7 +149,6 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
 
     for (const [G, m, o] of [[eau, M.eau], [vert, M.vert], [bois, M.bois], [rail, M.rail], [tr, M.trottoir], [ch, M.chaussee], [mq, M.blanc], [B, M.bati, true]]) { const me = maillage(G, m, o); if (me) groupe.add(me); }
     if (T.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(T, 3)); groupe.add(new THREE.LineSegments(g, M.trait)); }
-    groupe.userData = { zebras: zebras.length, rues: rues.length };
     return groupe;
   }
 
