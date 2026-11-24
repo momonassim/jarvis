@@ -1877,8 +1877,8 @@ DEMARRE = (async () => { try {
   centre = q.centre;
   construireQuartier(q);
   { const R0 = (q.rayon || 700), G = new Map(); for (const b of BATS) { let x = 0, y = 0; for (const [a, c] of b.pp) { x += a; y += c; } x /= b.pp.length; y /= b.pp.length; const k = Math.floor(x / 20) + "|" + Math.floor(y / 20); (G.get(k) || G.set(k, []).get(k)).push([x, y]); }
-    const prisParQuartier = (x, y) => { if (x * x + y * y < (R0 - 15) ** 2) return true; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [a, c] of G.get((Math.floor(x / 20) + i) + "|" + (Math.floor(y / 20) + j)) || []) if (Math.hypot(a - x, c - y) < 6) return true; return false; };
-    GPS = creerTuiles({ scene, centre, exclu: prisParQuartier, rayonRues: R0 - 20, grain: grainBitume }); }
+    const prisParQuartier = (x, y) => { if (Math.abs(x) < R0 - 15 && Math.abs(y) < R0 - 15) return true; /* le quartier officiel : un carré de 1,4 km */ for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [a, c] of G.get((Math.floor(x / 20) + i) + "|" + (Math.floor(y / 20) + j)) || []) if (Math.hypot(a - x, c - y) < 6) return true; return false; };
+    try { GPS = creerTuiles({ scene, centre, exclu: prisParQuartier, rayonRues: R0 - 20, grain: grainBitume }); } catch (e) { console.warn("carte GPS", e); } }
   if (carte && carte.ok) poserLignes(carte);
   try { REELS = await Promise.race([lireReels(centre, q.rayon || 700), new Promise((_, n) => setTimeout(() => n(new Error("lent")), 9000))]); } catch (_) { REELS = null; }
   RESEAU = construireReseau(q.routes || []); habillerRues(); poserPanneaux();   // marquages, passages piétons et lampadaires, partout pareil

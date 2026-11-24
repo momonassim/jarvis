@@ -79,7 +79,7 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     const [lo0, la0] = coinLonLat(tx, ty), [lo1, la1] = coinLonLat(tx + 1, ty + 1);
     const conv = (ext) => ([px, py]) => versLocal(lo0 + (lo1 - lo0) * px / ext, la0 + (la1 - la0) * py / ext);
     const dansTuile = (px, py, ext) => px >= 0 && px < ext && py >= 0 && py < ext;
-    const rueExclue = (x, y) => x * x + y * y < rayonRues * rayonRues;   // le quartier a déjà ses rues (identiques : pas de raccord visible)
+    const rueExclue = (x, y) => Math.abs(x) < rayonRues && Math.abs(y) < rayonRues;   // le quartier a déjà ses rues (identiques : pas de raccord visible)
     const groupe = new THREE.Group();
     const lire = (nom, f) => { const L = vt.layers[nom]; if (!L) return; const c = conv(L.extent); for (let i = 0; i < L.length; i++) { const ft = L.feature(i); f(ft, ft.loadGeometry().map(r => r.map(p => [p.x, p.y])), c, L.extent); } };
 
