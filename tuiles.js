@@ -58,7 +58,7 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
   function maillage(G, mat, ombre = false) {
     if (!G.p.length) return null; const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(G.p, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(G.uv, 2));
-    if (ombre) g.computeVertexNormals(); else { const n = new Float32Array(G.p.length); for (let i = 1; i < n.length; i += 3) n[i] = 1; g.setAttribute("normal", new THREE.BufferAttribute(n, 3)); }
+    if (G.n) g.setAttribute("normal", new THREE.Float32BufferAttribute(G.n, 3)); else if (ombre) g.computeVertexNormals(); else { const n = new Float32Array(G.p.length); for (let i = 1; i < n.length; i += 3) n[i] = 1; g.setAttribute("normal", new THREE.BufferAttribute(n, 3)); }
     const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = ombre; return m; }
   const aire = r => { let s = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) s += (r[j][0] - r[i][0]) * (r[j][1] + r[i][1]); return s / 2; };
   function polygones(rings) {   // anneaux → [contour, ...trous]
@@ -117,14 +117,16 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
         for (let v = -hw + 0.45; v <= hw - 0.3; v += 1) boiteSol(mq, cx - uy * v, cy + ux * v, ang, 2.6, 0.5, 0.136); } }
 
     // bâtiments : murs à leur vraie hauteur, toit plat, liserés comme dans le quartier
-    const B = { p: [], uv: [] }, T = [];
+    const B = { p: [], uv: [], n: [] }, T = [];
     lire("building", (ft, rings, c, ext) => {
       if (ft.type !== 3) return; const h = Math.max(3, +ft.properties.render_height || 6), h0 = +ft.properties.render_min_height || 0;
       for (const poly of polygones(rings)) { let sx = 0, sy = 0; for (const [x, y] of poly[0]) { sx += x; sy += y; } sx /= poly[0].length; sy /= poly[0].length;
         if (!dansTuile(sx, sy, ext)) continue; const P = poly.map(r => r.map(c)); const [cx, cy] = c([sx, sy]); if (exclu(cx, cy)) continue;
-        surface(B, P, h);
+        const n0 = B.p.length; surface(B, P, h); for (let k = n0; k < B.p.length; k += 3) B.n.push(0, 1, 0);   // toit : vers le ciel
+        const sens = aire(P[0]) > 0 ? 1 : -1;   // murs : normale vers l'extérieur (sinon ombres en rayures)
         for (const r of P) for (let i = 0; i < r.length - 1; i++) { const [x1, y1] = r[i], [x2, y2] = r[i + 1]; if (x1 === x2 && y1 === y2) continue;
-          for (const q of [[x1, h0, y1], [x2, h0, y2], [x2, h, y2], [x1, h0, y1], [x2, h, y2], [x1, h, y1]]) { B.p.push(q[0], q[1], -q[2]); B.uv.push(0, 0); }
+          const L = Math.hypot(x2 - x1, y2 - y1), nx = (y2 - y1) / L * sens, nz = (x2 - x1) / L * sens;
+          for (const q of [[x1, h0, y1], [x2, h0, y2], [x2, h, y2], [x1, h0, y1], [x2, h, y2], [x1, h, y1]]) { B.p.push(q[0], q[1], -q[2]); B.uv.push(0, 0); B.n.push(nx, 0, nz); }
           T.push(x1, h, -y1, x2, h, -y2); if (h - h0 > 4) T.push(x1, h0 + 0.15, -y1, x1, h, -y1); } } });
 
     for (const [G, m, o] of [[eau, M.eau], [vert, M.vert], [bois, M.bois], [rail, M.rail], [tr, M.trottoir], [ch, M.chaussee], [mq, M.blanc], [B, M.bati, true]]) { const me = maillage(G, m, o); if (me) groupe.add(me); }
