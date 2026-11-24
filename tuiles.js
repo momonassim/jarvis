@@ -138,14 +138,17 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
     if (!actif) return; const t = performance.now(); if (t - dernier < 400) return; dernier = t;
     if (!URL_T) { charger().catch(e => { console.warn("carte GPS", e); actif = false; }); return; }
     const [lon, lat] = versLonLat(cible.x, -cible.z), [cx, cy] = tuileDe(lon, lat);
-    const R = Math.max(1, Math.min(2, Math.round(distance / 900)));   // 3×3 tuiles de près, 5×5 de haut
+    // seulement les tuiles à portée de vue (le brouillard cache tout au-delà de ~1,5 km)
+    const portee = Math.max(1200, Math.min(2600, distance * 1.3 + 600));
+    const ecart = (x, y) => { const [lo0, la0] = coinLonLat(x, y), [lo1, la1] = coinLonLat(x + 1, y + 1), [x0, y1] = versLocal(lo0, la0), [x1, y0] = versLocal(lo1, la1);
+      const px = cible.x, py = -cible.z; return Math.hypot(Math.max(x0 - px, 0, px - x1), Math.max(y0 - py, 0, py - y1)); };
     const voulues = [];
-    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) voulues.push([cx + dx, cy + dy, dx * dx + dy * dy]);
+    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) { const d = ecart(cx + dx, cy + dy); if (d < portee) voulues.push([cx + dx, cy + dy, d]); }
     voulues.sort((a, b) => a[2] - b[2]);
     for (const [x, y] of voulues) { const k = x + "/" + y; if (TUILES.has(k) || enCours >= 2) continue;
       enCours++; TUILES.set(k, { x, y, g: null });
       construire(x, y).then(g => { const e = TUILES.get(k); if (e) { e.g = g; scene.add(g); } }).catch(e => { console.warn("tuile", k, e); TUILES.delete(k); }).finally(() => enCours--); }
-    for (const [k, e] of TUILES) if (Math.max(Math.abs(e.x - cx), Math.abs(e.y - cy)) > R + 2 && e.g) {   // trop loin : on libère la mémoire
+    for (const [k, e] of TUILES) if (e.g && ecart(e.x, e.y) > portee + 1200) {   // trop loin : on libère la mémoire
       scene.remove(e.g); e.g.traverse(o => o.geometry && o.geometry.dispose()); TUILES.delete(k); }
   }
   return { maj, M };
