@@ -951,7 +951,7 @@ function habillerRues() {   // une fois le réseau prêt : marquages, passages p
     const q = surArete(a, A.s), ang = Math.atan2(q.ty, q.tx); if (passagesPoses.some(([px, py]) => Math.hypot(px - q.x, py - q.y) < 4.5)) continue;
     passagesPoses.push([q.x, q.y]); o.q = { ...q, a };
     for (let v = -q.hw + 0.45; v <= q.hw - 0.3; v += 1) { const zx = q.x - q.ty * v, zy = q.y + q.tx * v; if (surAutreRue(zx, zy, a.src, 0)) continue; const g = new THREE.BoxGeometry(2.6, 0.025, 0.5); g.rotateY(ang); g.translate(zx, 0.135, -zy); bandes.push(g); } }
-  const blanc = new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7 });
+  const blanc = new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });   // toujours au-dessus du bitume, même de loin
   if (tirets.length) scene.add(new THREE.Mesh(mergeGeometries(tirets), blanc));
   if (bandes.length) { const m = new THREE.Mesh(mergeGeometries(bandes), blanc); m.receiveShadow = true; scene.add(m); }
   if (SOL) { SOL.passages = passagesPoses; SOL.zebras = passagesPoses; }
@@ -1881,7 +1881,7 @@ DEMARRE = (async () => { try {
     try { GPS = creerTuiles({ scene, centre, exclu: prisParQuartier, rayonRues: R0 - 20, grain: grainBitume }); } catch (e) { console.warn("carte GPS", e); } }
   if (carte && carte.ok) poserLignes(carte);
   try { REELS = await Promise.race([lireReels(centre, q.rayon || 700), new Promise((_, n) => setTimeout(() => n(new Error("lent")), 9000))]); } catch (_) { REELS = null; }
-  RESEAU = construireReseau(q.routes || []); habillerRues(); poserPanneaux();   // marquages, passages piétons et lampadaires, partout pareil
+  RESEAU = construireReseau(q.routes || []); habillerRues(); try { poserPanneaux(); } catch (e) { console.warn("panneaux", e); }   // marquages, passages piétons et lampadaires, partout pareil
   if (SOL) habiller(q.sol);   // après les abribus (bancs) et les passages piétons (pas de voiture garée dessus)
   lancerCirculation();
   poserLieux();   // tes lieux Jarvis, aux vrais endroits
