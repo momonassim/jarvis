@@ -149,6 +149,7 @@ export function creerTuiles({ scene, centre, exclu = () => false, rayonRues = 0,
 
     for (const [G, m, o] of [[eau, M.eau], [vert, M.vert], [bois, M.bois], [rail, M.rail], [tr, M.trottoir], [ch, M.chaussee], [mq, M.blanc], [B, M.bati, true]]) { const me = maillage(G, m, o); if (me) groupe.add(me); }
     if (T.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(T, 3)); groupe.add(new THREE.LineSegments(g, M.trait)); }
+    groupe.userData = { zebras: zebras.length, rues: rues.length };
     return groupe;
   }
 
