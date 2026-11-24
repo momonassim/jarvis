@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { creerTuiles } from "./tuiles.js?v=1";
 
 
 const ICON={
@@ -937,13 +938,19 @@ function habillerRues() {   // une fois le réseau prêt : marquages, passages p
   }
   const lampOk = ([x, y]) => { const r = surLaRue(x, y, 15); return !(r && r.d < r.w / 2 + 0.4) && !(SOL && cellSol(x, y) === 1) && !passagesPoses.some(([px, py]) => Math.hypot(px - x, py - y) < 4); };
   // passages piétons : sur chaque branche d'un carrefour, à 7 m du centre, sur toute la largeur de la chaussée
-  for (const n of noeuds) { if (deg(n) < 3 || !hors(n.x, n.y)) continue;
+  const dansQ = (x, y) => REELS && Math.hypot(x, y) < REELS.r - 10;   // dans le quartier : les vrais passages, pas ceux « à la logique »
+  for (const n of noeuds) { if (deg(n) < 3 || !hors(n.x, n.y) || dansQ(n.x, n.y)) continue;
     const large = Math.max(...n.a.map(e => aretes[e].w)) / 2;   // le passage se pose juste après la chaussée de la plus grande rue du carrefour
     for (const e of n.a) { const a = aretes[e], d0 = (a.w / 2 >= large ? Math.max(...n.a.filter(f => f !== e).map(f => aretes[f].w / 2), 3) : large) + 2.2; if (a.L < d0 + 8 || a.w < 5) continue;
       const s = a.n0 === n ? d0 : a.L - d0, q = surArete(a, s), ang = Math.atan2(q.ty, q.tx);
       if (passagesPoses.some(([px, py]) => Math.hypot(px - q.x, py - q.y) < 6)) continue;   // jamais deux passages l'un sur l'autre
       passagesPoses.push([q.x, q.y]);
       for (let v = -q.hw + 0.45; v <= q.hw - 0.3; v += 1) { const zx = q.x - q.ty * v, zy = q.y + q.tx * v; if (surAutreRue(zx, zy, a.src, 0)) continue; const g = new THREE.BoxGeometry(2.6, 0.025, 0.5); g.rotateY(ang); g.translate(q.x - q.ty * v, 0.135, -(q.y + q.tx * v)); bandes.push(g); } } }
+  if (REELS) for (const o of REELS.l) { if (o.t !== "crossing" || !dansQ(o.x, o.y)) continue;
+    const A = accrocher(o.x, o.y, 9); if (!A) continue; const a = aretes[A.e]; if (a.w < 4) continue;
+    const q = surArete(a, A.s), ang = Math.atan2(q.ty, q.tx); if (passagesPoses.some(([px, py]) => Math.hypot(px - q.x, py - q.y) < 4.5)) continue;
+    passagesPoses.push([q.x, q.y]); o.q = { ...q, a };
+    for (let v = -q.hw + 0.45; v <= q.hw - 0.3; v += 1) { const zx = q.x - q.ty * v, zy = q.y + q.tx * v; if (surAutreRue(zx, zy, a.src, 0)) continue; const g = new THREE.BoxGeometry(2.6, 0.025, 0.5); g.rotateY(ang); g.translate(zx, 0.135, -zy); bandes.push(g); } }
   const blanc = new THREE.MeshStandardMaterial({ color: 0xfafaf7, roughness: 0.7 });
   if (tirets.length) scene.add(new THREE.Mesh(mergeGeometries(tirets), blanc));
   if (bandes.length) { const m = new THREE.Mesh(mergeGeometries(bandes), blanc); m.receiveShadow = true; scene.add(m); }
@@ -954,6 +961,45 @@ function habillerRues() {   // une fois le réseau prêt : marquages, passages p
     const ip = new THREE.InstancedMesh(pied, new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6 }), lamp.length), it = new THREE.InstancedMesh(tete, new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xffe2a0, emissiveIntensity: 0.6 }), lamp.length);
     lamp.forEach(([x, y, a], i) => { o.position.set(x, 0, -y); o.rotation.set(0, a, 0); o.updateMatrix(); ip.setMatrixAt(i, o.matrix); it.setMatrixAt(i, o.matrix); }); ip.castShadow = true; scene.add(ip, it);
   }
+}
+
+/* ---------- les vrais passages piétons, feux et panneaux (OpenStreetMap), gardés sur le téléphone ---------- */
+let REELS = null;
+async function lireReels(c, r) {
+  const k = "jarvis_osm_" + LIEU + "_v1";
+  try { const m = JSON.parse(localStorage.getItem(k) || "null"); if (m && m.l && Math.abs(m.lat - c.lat) < 1e-5) return m; } catch (_) { /* rien en mémoire */ }
+  const q = `[out:json][timeout:20];node["highway"~"^(crossing|traffic_signals|stop|give_way)$"](around:${Math.round(r)},${c.lat},${c.lon});out;`;
+  const j = await (await fetch("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(q), { signal: AbortSignal.timeout(9000) })).json();
+  const m = { r, lat: c.lat, l: (j.elements || []).map(e => { const [x, y] = local(e.lat, e.lon, c); return { x, y, t: e.tags.highway }; }) };
+  try { localStorage.setItem(k, JSON.stringify(m)); } catch (_) { /* plein : tant pis */ }
+  return m;
+}
+function texturePanneau(dessin) { const c = document.createElement("canvas"); c.width = c.height = 128; dessin(c.getContext("2d")); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }
+const DESSINS = {
+  stop: x => { x.fillStyle = "#c8202a"; x.beginPath(); for (let i = 0; i < 8; i++) { const a = (i + 0.5) / 8 * 6.2832; x.lineTo(64 + Math.cos(a) * 60, 64 + Math.sin(a) * 60); } x.fill(); x.strokeStyle = "#fff"; x.lineWidth = 5; x.stroke();
+    x.fillStyle = "#fff"; x.font = "900 38px Arial"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("STOP", 64, 66); },
+  give_way: x => { x.fillStyle = "#c8202a"; x.beginPath(); x.moveTo(6, 14); x.lineTo(122, 14); x.lineTo(64, 120); x.fill(); x.fillStyle = "#fff"; x.beginPath(); x.moveTo(30, 28); x.lineTo(98, 28); x.lineTo(64, 92); x.fill(); },
+  crossing: x => { x.fillStyle = "#1f5fb5"; x.fillRect(4, 4, 120, 120); x.fillStyle = "#fff"; x.beginPath(); x.moveTo(64, 14); x.lineTo(118, 112); x.lineTo(10, 112); x.fill();
+    x.fillStyle = "#111"; x.fillRect(30, 92, 68, 8); x.beginPath(); x.arc(64, 46, 7, 0, 6.3); x.fill(); x.fillRect(60, 54, 8, 24); x.fillRect(52, 76, 7, 16); x.fillRect(69, 76, 7, 16); },
+  traffic_signals: x => { x.fillStyle = "#23262b"; x.fillRect(34, 0, 60, 128); for (const [y, c] of [[22, "#ff3b30"], [64, "#ffb020"], [106, "#2bd15f"]]) { x.fillStyle = c; x.beginPath(); x.arc(64, y, 17, 0, 6.3); x.fill(); } },
+};
+function poserPanneaux() {
+  if (!REELS || !RESEAU) return; const mats = {}, faces = {}, mats0 = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6 }), dos = [], poteaux = [];
+  const deja = [];
+  for (const o of REELS.l) {
+    let q = o.q; if (!q) { const A = accrocher(o.x, o.y, 9); if (!A) continue; const a = RESEAU.aretes[A.e]; q = { ...surArete(a, A.s), a }; }
+    if (!DESSINS[o.t] || deja.some(([x, y, t]) => t === o.t && Math.hypot(x - q.x, y - q.y) < 8)) continue; deja.push([q.x, q.y, o.t]);
+    // le poteau au bord du trottoir, côté droit de la rue (sinon l'autre côté s'il tombe sur une autre chaussée)
+    let px = 0, py = 0; for (const sg of [1, -1]) { px = q.x + q.ty * sg * (q.hw + 0.8); py = q.y - q.tx * sg * (q.hw + 0.8); const r = surLaRue(px, py, 12); if (!r || r.d > r.w / 2 + 0.4) break; }
+    const feu = o.t === "traffic_signals", h = feu ? 3.2 : 2.3, s = feu ? 0.42 : 0.62, ang = Math.atan2(q.ty, q.tx);
+    const p = new THREE.CylinderGeometry(0.05, 0.05, h, 6); p.translate(px, h / 2 + 0.12, -py); poteaux.push(p);
+    const f = new THREE.PlaneGeometry(feu ? s : s, feu ? s * 2.1 : s); f.rotateY(ang - Math.PI / 2); f.translate(px - q.tx * 0.07, h + 0.12 - (feu ? s * 1.05 : s / 2) + 0.05, -(py - q.ty * 0.07)); (faces[o.t] || (faces[o.t] = [])).push(f);
+    const d = new THREE.BoxGeometry(0.04, feu ? s * 2.1 : s, feu ? s : s); d.rotateY(ang); d.translate(px - q.tx * 0.02, h + 0.12 - (feu ? s * 1.05 : s / 2) + 0.05, -(py - q.ty * 0.02)); dos.push(d);
+  }
+  if (poteaux.length) { const m = new THREE.Mesh(mergeGeometries(poteaux), mats0); m.castShadow = true; scene.add(m); }
+  if (dos.length) scene.add(new THREE.Mesh(mergeGeometries(dos), mats0));
+  for (const [t, l] of Object.entries(faces)) { const tx = texturePanneau(DESSINS[t]);
+    scene.add(new THREE.Mesh(mergeGeometries(l), new THREE.MeshBasicMaterial({ map: tx, transparent: true, alphaTest: 0.3, toneMapped: false }))); }
 }
 
 /* ---------- le réseau des rues : la ligne directrice de tout ce qui bouge ----------
@@ -1415,7 +1461,7 @@ function suivreMoi() {
   g.add(bord, point, halo); g.visible = false; scene.add(g);
   ANIMS.push(t => { const s = 1 + ((t / 1400) % 1) * 1.6; halo.scale.set(s, s, 1); halo.material.opacity = 0.5 * (1 - ((t / 1400) % 1)); });
   navigator.geolocation.watchPosition(p => { const [x, y] = local(p.coords.latitude, p.coords.longitude, centre);
-    if (x * x + y * y > 1500 * 1500) { g.visible = false; return; } g.visible = true; g.position.set(x, 0.12, -y); moiPoint = [x, y]; },
+    g.visible = true; g.position.set(x, 0.12, -y); moiPoint = [x, y]; },
     () => { g.visible = false; }, { enableHighAccuracy: true, maximumAge: 5000 });
 }
 
@@ -1449,6 +1495,9 @@ if (!APP) $("moi").addEventListener("click", () => allerA("maison"));
 if (!APP) $("travail").addEventListener("click", () => allerA("usine"));
 function boucle(t) {
   if (CINE.on) majCine(); else controls.update(); animerBus(t); for (const f of ANIMS) f(t);
+  if (GPS) { const c = controls.target; GPS.maj(c, camera.position.distanceTo(c));
+    const sx = Math.round(c.x / 60) * 60, sz = Math.round(c.z / 60) * 60;   // par pas de 60 m : le grain du sol et les ombres ne « glissent » pas
+    if (sol.position.x !== sx || sol.position.z !== sz) { sol.position.set(sx, 0, sz); soleil.position.set(sx - 300, 420, sz + 220); soleil.target.position.set(sx, 0, sz); soleil.target.updateMatrixWorld(); } }
   for (const a of anneaux) { const s = 1 + 0.04 * Math.sin(t / 700); a.scale.set(s, s, 1); a.material.opacity = 0.55 + 0.25 * Math.sin(t / 700); }
   renderer.render(scene, camera); requestAnimationFrame(boucle);
 }
@@ -1723,6 +1772,7 @@ async function lireTrafic() {
    ouvrir un lieu, fermer, vue d'ensemble, nuit, décalage sous la fiche, pilotage par Claude,
    mode documentaire, ta DS5 devant ton immeuble.
    ========================================================= */
+let GPS = null;   // la carte GPS autour du quartier (se charge par morceaux)
 let DEMARRE = null, ATTENTE = null, VOITURE_URL = null, NUIT = false, SHIFT = 0, DONNEES = [], DS5 = null;
 const LIEU_DE = { logement: "home", chez_toi: "home", maison: "home", energie: "energie", sante: "clinique", travail: "usine", usine: "usine", impots: "impots", voiture: "garage", garage: "garage", ds5: "garage", papiers: "mairie", mairie: "mairie", banque: "banque", bebe: "medecin", abonnements: "orange" };
 const couleurs = Object.fromEntries([...LIEUX_CARTE.usine, ...LIEUX_CARTE.maison].map(L => [L.id, L.c]));
@@ -1826,8 +1876,12 @@ DEMARRE = (async () => { try {
   if (!q || q.erreur) throw new Error(q?.erreur || "quartier introuvable");
   centre = q.centre;
   construireQuartier(q);
+  { const R0 = (q.rayon || 700), G = new Map(); for (const b of BATS) { let x = 0, y = 0; for (const [a, c] of b.pp) { x += a; y += c; } x /= b.pp.length; y /= b.pp.length; const k = Math.floor(x / 20) + "|" + Math.floor(y / 20); (G.get(k) || G.set(k, []).get(k)).push([x, y]); }
+    const prisParQuartier = (x, y) => { if (x * x + y * y < (R0 - 15) ** 2) return true; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [a, c] of G.get((Math.floor(x / 20) + i) + "|" + (Math.floor(y / 20) + j)) || []) if (Math.hypot(a - x, c - y) < 6) return true; return false; };
+    GPS = creerTuiles({ scene, centre, exclu: prisParQuartier, rayonRues: R0 - 20, grain: grainBitume }); }
   if (carte && carte.ok) poserLignes(carte);
-  RESEAU = construireReseau(q.routes || []); habillerRues();   // marquages, passages piétons et lampadaires, partout pareil
+  try { REELS = await Promise.race([lireReels(centre, q.rayon || 700), new Promise((_, n) => setTimeout(() => n(new Error("lent")), 9000))]); } catch (_) { REELS = null; }
+  RESEAU = construireReseau(q.routes || []); habillerRues(); poserPanneaux();   // marquages, passages piétons et lampadaires, partout pareil
   if (SOL) habiller(q.sol);   // après les abribus (bancs) et les passages piétons (pas de voiture garée dessus)
   lancerCirculation();
   poserLieux();   // tes lieux Jarvis, aux vrais endroits
