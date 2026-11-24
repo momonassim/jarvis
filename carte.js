@@ -969,7 +969,10 @@ async function lireReels(c, r) {
   const k = "jarvis_osm_" + LIEU + "_v1";
   try { const m = JSON.parse(localStorage.getItem(k) || "null"); if (m && m.l && Math.abs(m.lat - c.lat) < 1e-5) return m; } catch (_) { /* rien en mémoire */ }
   const q = `[out:json][timeout:20];node["highway"~"^(crossing|traffic_signals|stop|give_way)$"](around:${Math.round(r)},${c.lat},${c.lon});out;`;
-  const j = await (await fetch("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(q), { signal: AbortSignal.timeout(9000) })).json();
+  let j = null;
+  for (const srv of ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]) {   // le premier est parfois saturé
+    try { const r = await fetch(srv + "?data=" + encodeURIComponent(q), { signal: AbortSignal.timeout(7000) }); if (r.ok) { j = await r.json(); break; } } catch (_) { /* serveur suivant */ } }
+  if (!j) throw new Error("OpenStreetMap ne répond pas");
   const m = { r, lat: c.lat, l: (j.elements || []).map(e => { const [x, y] = local(e.lat, e.lon, c); return { x, y, t: e.tags.highway }; }) };
   try { localStorage.setItem(k, JSON.stringify(m)); } catch (_) { /* plein : tant pis */ }
   return m;
@@ -1880,7 +1883,7 @@ DEMARRE = (async () => { try {
     const prisParQuartier = (x, y) => { if (Math.abs(x) < R0 - 15 && Math.abs(y) < R0 - 15) return true; /* le quartier officiel : un carré de 1,4 km */ for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [a, c] of G.get((Math.floor(x / 20) + i) + "|" + (Math.floor(y / 20) + j)) || []) if (Math.hypot(a - x, c - y) < 6) return true; return false; };
     try { GPS = creerTuiles({ scene, centre, exclu: prisParQuartier, rayonRues: R0 - 20, grain: grainBitume }); } catch (e) { console.warn("carte GPS", e); } }
   if (carte && carte.ok) poserLignes(carte);
-  try { REELS = await Promise.race([lireReels(centre, q.rayon || 700), new Promise((_, n) => setTimeout(() => n(new Error("lent")), 9000))]); } catch (_) { REELS = null; }
+  try { REELS = await Promise.race([lireReels(centre, q.rayon || 700), new Promise((_, n) => setTimeout(() => n(new Error("lent")), 15000))]); } catch (_) { REELS = null; }
   RESEAU = construireReseau(q.routes || []); habillerRues(); try { poserPanneaux(); } catch (e) { console.warn("panneaux", e); }   // marquages, passages piétons et lampadaires, partout pareil
   if (SOL) habiller(q.sol);   // après les abribus (bancs) et les passages piétons (pas de voiture garée dessus)
   lancerCirculation();
