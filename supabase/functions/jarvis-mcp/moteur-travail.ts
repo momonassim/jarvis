@@ -114,6 +114,7 @@ export class Planning {
     for (const d of jours) {
       const e = this.ev[d], h = this.h(d);
       if (h && genreAbsence(h.absence)) continue;
+      if (e && estAbsence(e.genre)) continue; // congé, récup ou maladie saisis à la main : jour non travaillé
       const pl = posteDe(h?.planifie);
       if (pl) { if (pl !== "R") { travailles.push(d); if (e?.genre === "patron") imposes.push(d); } continue; } // MyHorsys fait foi
       if (!e || e.poste === "R" || estAbsence(e.genre)) continue;
@@ -138,7 +139,8 @@ export class Planning {
     const e = this.ev[d], h = this.h(d);
     const ga = genreAbsence(h?.absence);
     if (h && ga) return [posteDe(h.planifie) ?? posteDe(h.prevu) ?? this.posteCycle(d), ga];
-    if (e && estAbsence(e.genre) && !h?.planifie) return [e.poste, e.genre];
+    // une absence saisie à la main l'emporte sur MyHorsys (son extraction ne montre pas toujours les congés posés)
+    if (e && estAbsence(e.genre)) return [e.poste, e.genre];
     const deb = this.debutRemonte(d);
     if (deb) {
       const r = this.repartition(deb);
@@ -207,9 +209,10 @@ export function paye(P: Planning, moisPaye: string): Paye {
     const dernier = joursSup[joursSup.length - 1];
     if (!dernier || mois(dernier) !== m) continue;
     let hc = 0;
-    for (const x of j35) { const [po, g] = P.info(x); if (po !== "R" && !(g === "conge" || g === "maladie")) hc += R.heuresPoste; } // la récup compte comme travaillée
+    for (const x of j35) { const [po, g] = P.info(x); if (po !== "R" && g !== "maladie") hc += R.heuresPoste; } // congés et récup comptent comme travaillés
     for (const x of joursSup) { const po = P.info(x)[0]; p.sup++; p.majSup += 8 * R.taux + ((po === "N" || js(x) === 6 || estFerie(x)) ? 8 * R.maj75 : 0); }
-    const ex = Math.max(0, hc - R.seuilCycle), a = Math.min(ex, R.plafond25), b = Math.max(0, ex - R.plafond25);
+    // la majoration ne dépasse pas les heures des jours sup du cycle
+    const ex = Math.min(Math.max(0, hc - R.seuilCycle), joursSup.length * 8), a = Math.min(ex, R.plafond25), b = Math.max(0, ex - R.plafond25);
     p.heuresCycle = hc; p.h25 += a; p.h50 += b; p.majSup += a * R.maj25 + b * R.maj50;
   }
   p.brut = p.fixe + p.exceptionnel + p.four + p.nuit + p.dimanche + p.ferie + p.majSup;
