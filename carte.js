@@ -796,6 +796,13 @@ function maquetteBus(ligne) {
   return g;
 }
 /* la position d'un bus arrive en retard (son âge + les ~8 s de l'animation) : on l'avance d'autant le long de sa rue, dans son sens de marche */
+/* les virages des bus arrondis (on coupe les angles deux fois), pour qu'ils tournent comme de vrais bus et pas à angle droit */
+function lisser(P) { if (P.length < 3) return P; let Q = P;
+  for (let it = 0; it < 2; it++) { const R = [Q[0]];
+    for (let i = 0; i < Q.length - 1; i++) { const a = Q[i], b = Q[i + 1], h = a[2] || b[2] || 3;
+      R.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25, h], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75, h]); }
+    R.push(Q[Q.length - 1]); Q = R; }
+  return Q; }
 function avancerBus(B, b) {
   if (!B || !Number.isFinite(b.cap)) return B;
   const ext = Math.min(350, ((b.age || 0) + 8) * 6.5); if (ext < 5) return B;   // ≈ 23 km/h, la vitesse moyenne d'un bus en ville
@@ -824,7 +831,7 @@ function majBus(liste) {
       const A = o.axe ? accrocher(o.axe[0], o.axe[1], 30) : null;
       if (A && B) {
         const pts = cheminRue(A, B), droit = Math.hypot(x - o.axe[0], y - o.axe[1]);
-        if (pts) { const tr = trajet(pts);
+        if (pts) { const tr = trajet(lisser(pts));
           // le GPS a sauté un peu en arrière : on ne recule pas, on attend la prochaine position
           const recule = A.e === B.e && o.sens && Math.sign(B.s - A.s) === -o.sens && Math.abs(B.s - A.s) < 30;
           // jamais de demi-tour sur place : si le nouveau trajet part à l'opposé de là où le bus regarde, c'est un saut du GPS
@@ -842,7 +849,11 @@ function animerBus(t) {
   for (const o of BUS.values()) {
     // le bus roule le long des rues de la carte, sur sa voie de droite : démarre doucement, roule régulier, freine en douceur
     // vitesse régulière jusqu'à la prochaine position (≈ 16 s) : plus d'arrêt-départ toutes les 15 s
-    const d = o.tr.L * Math.min(1, (t - o.t0) / 16000), p = surTrajet(o.tr, d);
+    let d = o.tr.L * Math.min(1, (t - o.t0) / 16000), p = surTrajet(o.tr, d);
+    // un chantier ferme sa voie ? il passe sur l'autre voie, en douceur (comme les voitures), et revient après
+    { const A = accrocher(p.x, p.y, 8); let v = 1; if (A) { const a = RESEAU.aretes[A.e], q = surArete(a, A.s), meme = p.tx * q.tx + p.ty * q.ty > 0; if (a.ferme[q.k] === (meme ? -1 : 1)) v = -1; }
+      o.voie = o.voie == null ? v : o.voie + (v - o.voie) * Math.min(1, (o.tp == null ? 0.016 : (t - o.tp) / 1000) * 1.5);
+      if (Math.abs(o.voie - 1) > 0.01) { const P = o.tr.pts, hw = (P[0] && P[0][2]) || 3, dec = hw >= 2.6 ? Math.min(hw / 2, 3.2) : 0; p = surTrajet(o.tr, d, dec * o.voie); } }
     o.axe = pointA(o.tr, d);
     if (o.px == null) { o.px = p.x; o.py = p.y; } const k = o.tp == null ? 1 : 1 - Math.exp(-Math.min(0.1, (t - o.tp) / 1000) * 10); o.tp = t;
     o.px += (p.x - o.px) * k; o.py += (p.y - o.py) * k;   // lissé : le changement de trajet ne fait jamais sauter le bus

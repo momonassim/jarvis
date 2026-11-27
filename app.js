@@ -73,7 +73,7 @@ const HOOKS = {
   info: (t, s) => toast(t + (s ? " · " + s : "")),   // un panneau touché sur la carte (travaux, trafic) : son détail, juste en bas de l'écran
 };
 V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
-  : await (await import("./carte.js?v=carte9")).creerCarte(canvas, HOOKS, { fn: appeler });
+  : await (await import("./carte.js?v=carte10")).creerCarte(canvas, HOOKS, { fn: appeler });
 document.body.classList.toggle("vuecarte", VUE === "carte");
 if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
 // sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)
