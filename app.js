@@ -70,9 +70,10 @@ const HOOKS = {
   cine: e => { document.body.classList.toggle("cine", !!e); const st = $("cineSub");
     if (e) { st.textContent = e.sous_titre || ""; st.classList.toggle("on", !!e.sous_titre); } else { st.classList.remove("on"); overview(); } },
   frame: () => V && V.decalage(viewShiftGoal),
+  info: (t, s) => toast(t + (s ? " · " + s : "")),   // un panneau touché sur la carte (travaux, trafic) : son détail, juste en bas de l'écran
 };
 V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
-  : await (await import("./carte.js?v=carte6")).creerCarte(canvas, HOOKS, { fn: appeler });
+  : await (await import("./carte.js?v=carte7")).creerCarte(canvas, HOOKS, { fn: appeler });
 document.body.classList.toggle("vuecarte", VUE === "carte");
 if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
 // sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)
@@ -138,7 +139,10 @@ function select(p) {
   sheet.classList.remove("open"); viewShiftGoal = 0;
   V.ouvrir(p.id);
   const bar = $("lieubar"); bar.style.setProperty("--c", p.color);
-  icone($("lbIc"), p); $("lbName").textContent = p.name; $("lbSub").textContent = p.status || p.place || "";
+  icone($("lbIc"), p); $("lbName").textContent = p.name;
+  // la fiche du bas : l'essentiel d'un coup d'œil — ce qui est urgent d'abord (en rouge), sinon l'état du lieu
+  const urg = (p.docs || []).find(d => d.alerteId), sub = $("lbSub");
+  sub.textContent = urg ? urg.t.replace(/^⚠︎\s*/, "") : (p.status || p.place || ""); sub.classList.toggle("rouge", !!urg);
   $("lbDot").hidden = !p.urgent;
   const nd = (p.docs || []).length; $("lbGo").textContent = nd ? (innerWidth < 420 ? "Papiers ›" : `Papiers · ${nd} ›`) : "Actions ›";
   bar.classList.add("on"); $("ask").classList.add("away");

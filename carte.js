@@ -45,7 +45,7 @@ else {
 /* ---------- la scène : même ambiance que la ville (crème, blanc, ombres douces) ---------- */
 const FOND = 0xebe6dc;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: !!TEST });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, matchMedia("(pointer:coarse)").matches ? 1.5 : 1.75));   // plus léger : la carte reste fluide
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
@@ -64,7 +64,7 @@ controls.screenSpacePanning = false;
 scene.add(new THREE.HemisphereLight(0xfffbf2, 0xcfc6b6, 1.15));
 const soleil = new THREE.DirectionalLight(0xfff1dc, 2.1);
 soleil.position.set(-300, 420, 220); soleil.castShadow = true;
-soleil.shadow.mapSize.set(matchMedia("(pointer:coarse)").matches ? 2048 : 4096, matchMedia("(pointer:coarse)").matches ? 2048 : 4096);
+soleil.shadow.mapSize.set(matchMedia("(pointer:coarse)").matches ? 1024 : 2048, matchMedia("(pointer:coarse)").matches ? 1024 : 2048);
 Object.assign(soleil.shadow.camera, { left: -720, right: 720, top: 720, bottom: -720, near: 50, far: 1600 });
 soleil.shadow.bias = -0.0004; soleil.shadow.normalBias = 0.6;
 scene.add(soleil);
@@ -852,6 +852,7 @@ function animerBus(t) {
    et à quelques endroits un « atelier » : pelleteuse qui creuse, deux ouvriers en gilet orange, cônes, panneau « travaux »,
    et une petite file de voitures qui avance au ralenti à côté (le bouchon). Rien de tout ça n'est exact : ça montre où ça bouge. */
 const ANIMS = [];
+const TAPS = [];   // les petits panneaux qu'on peut toucher (travaux, trafic) : le détail ne s'affiche qu'au toucher
 function panneauTravaux() {   // triangle rouge, pictogramme « travaux »
   const c = document.createElement("canvas"); c.width = 128; c.height = 128; const x = c.getContext("2d");
   x.fillStyle = "#d8262f"; x.beginPath(); x.moveTo(64, 6); x.lineTo(124, 116); x.lineTo(4, 116); x.closePath(); x.fill();
@@ -1238,6 +1239,7 @@ function poserChantiers(liste) {
   const blancM = new THREE.MeshStandardMaterial({ color: 0xf6f6f2 });
   for (const r of runs) if (r.panneau) { const [x, y, ang] = r.panneau;
     const pan = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), triangle); pan.position.set(x, Y + 1.9, -y); pan.rotation.y = ang + Math.PI / 2; scene.add(pan);
+    const c = r.zone.c, fin = c.fin ? "jusqu'au " + c.fin.slice(8, 10) + "/" + c.fin.slice(5, 7) : ""; TAPS.push({ o: pan, titre: "🚧 Travaux", sous: [c.gene || "Circulation perturbée", fin].filter(Boolean).join(" · ") });
     const mat = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.3, 6), blancM); mat.position.set(x, Y + 0.65, -y); scene.add(mat); }
   ateliers.forEach((at, k) => {
     const { a, s, cote } = at, grp = new THREE.Group(); scene.add(grp);
@@ -1253,9 +1255,6 @@ function poserChantiers(liste) {
     const o2 = ouvrier(0xf2c100); o2.g.scale.setScalar(1.5); pose(o2.g, 4.5, cote * 1.0, -Math.PI / 2);
     ANIMS.push(t => { o1.bras.rotation.x = -0.6 + 0.6 * Math.sin(t / 420 + dec); });
     ANIMS.push(t => { o2.bras.rotation.z = 2.2 + 0.5 * Math.sin(t / 260 + dec); });
-    const c = at.zone.c; if (!etiquetees.has(c)) { etiquetees.add(c);
-      const fin = c.fin ? " · jusqu'au " + c.fin.slice(8, 10) + "/" + c.fin.slice(5, 7) : "";
-      scene.add(etiquette("⚠ Travaux", "#f2b215", "#2b3138", { x: at.x, y: 6, z: -at.y }, 0.022, (c.gene || "Circulation perturbée") + fin)); }
   });
   return { troncons: runs.length, barrieres: barr.length, ateliers: ateliers.map(t => [Math.round(t.x), Math.round(t.y)]) };
 }
@@ -1331,6 +1330,7 @@ function poserLieux() {
     v.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(v, camera); ray.camera = camera;
     // un seul toucher suffit : le mât, l'étiquette, le bâtiment du lieu, ou tout près (44 px) du repère à l'écran
     const P = lieuTouche(e.clientX, e.clientY, ray); if (P) { if (APP) HK.pick(P.L.id); else choisirLieu(P); dernier = 0; return; }
+    const tp = TAPS.length && ray.intersectObjects(TAPS.map(x => x.o), false)[0]; if (tp) { const T = TAPS.find(x => x.o === tp.object); montrerInfo(T.titre, T.sous); dernier = 0; return; }
     const bus = [...BUS.values()].find(o => ray.intersectObject(o.m, true).length); if (bus) { suivreBus(bus); dernier = 0; return; }
     const now = performance.now();
     if (now - dernier < 320) { const p = new THREE.Vector3(); if (ray.ray.intersectPlane(plan, p)) approcher(p); dernier = 0; return; }   // double toucher
@@ -1359,9 +1359,9 @@ function choisirLieu(P, naviguer = true) {
   // ta voiture : elle sort du garage et se gare le long du trottoir ; la caméra vient tout près et tourne autour d'elle
   const gare = L.garage && cheminGarage() ? DECOR.garage.chemin.getPoint(1) : null;
   // comme dans ta ville : on lève d'abord les yeux vers le lieu (vue haute), puis on descend de trois quarts, et la caméra tourne doucement autour
-  const R = gare ? 13 : Math.max(105, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2.6 + P.h * 2 : 0), a = Math.atan2(-P.y, -P.x) + 0.5, cible = gare ? gare.clone().setY(1.2) : new THREE.Vector3(P.x, P.h * 0.5, -P.y);
+  const R = gare ? 13 : Math.max(70, P.b ? Math.sqrt(aireDe(P.b.pp)) * 2 + P.h * 1.6 : 0), a = Math.atan2(-P.y, -P.x) + 0.5, cible = gare ? gare.clone().setY(1.2) : new THREE.Vector3(P.x, P.h * 0.5, -P.y);
   const fin = gare ? new THREE.Vector3(cible.x + Math.cos(a) * R, 6.5, cible.z - Math.sin(a) * R) : new THREE.Vector3(P.x + Math.cos(a) * R, P.h + R * 0.55, -(P.y + Math.sin(a) * R));
-  const it = !gare && DECOR.T && DECOR.T[L.id];
+  const it = null;   // (les anciennes fiches collées sur les façades sont retirées : les infos sont dans la fiche du bas)
   if (it) {   // comme dans l'ancienne ville : la caméra vient se placer face aux infos du lieu, sur sa façade
     const c = it.tab.position.clone(), nn = new THREE.Vector3(it.f.nx, 0, -it.f.ny), pr = it.tab.geometry.parameters, fv = camera.fov * Math.PI / 360, asp = innerWidth / innerHeight;
     let hh = pr.height, cc = c.clone(); if (it.nrg) { const top = it.nrg.g.position.y + 2; hh = top - (c.y - pr.height / 2); cc.y = (top + c.y - pr.height / 2) / 2; }
@@ -1392,6 +1392,10 @@ function suivreBus(o) {   // la caméra se met derrière le bus et le suit, comm
   f.innerHTML = `<b>🚌 Ligne ${o.ligne}</b><span>Position en direct (TCL) · la caméra le suit</span><div><button type="button" id="ffer">✕</button></div>`;
   f.hidden = false; $("ffer").onclick = fermerFiche;
 }
+function montrerInfo(titre, sous) {
+  if (APP) { if (HK.info) HK.info(titre, sous); return; }
+  const f = $("fiche"); f.style.setProperty("--c", "#f2b215");
+  f.innerHTML = `<b>${titre}</b><span>${sous || ""}</span><div><button type="button" id="ffer">✕</button></div>`; f.hidden = false; $("ffer").onclick = fermerFiche; }
 function fermerFiche() { const f = $("fiche"); if (f) f.hidden = true; DECOR.sel = null; FOCUS = null; ORBITE = null; SUIVI = null; }
 
 /* ---------- la caméra, comme dans ta ville Jarvis ----------
@@ -1403,7 +1407,7 @@ function voler(pos, cible, duree = 1600, fov = null, puis = null) {
   const p0 = camera.position.clone(), t0 = controls.target.clone(), d = Math.hypot(pos.x - p0.x, pos.z - p0.z);
   let ctrl = null; if (d > 40) { ctrl = p0.clone().lerp(pos, 0.5); ctrl.y = Math.max(p0.y, pos.y) + Math.min(160, d * 0.18); }
   ORBITE = null; controls.autoRotate = false;
-  VOL = { p0, t0, p: pos.clone(), t: cible.clone(), ctrl, f0: camera.fov, f: fov || camera.fov, puis, debut: performance.now(), duree: Math.min(3200, duree + d * 1.2) };
+  VOL = { p0, t0, p: pos.clone(), t: cible.clone(), ctrl, f0: camera.fov, f: fov || camera.fov, puis, debut: performance.now(), duree: Math.min(1700, duree * 0.6 + d * 0.5) };
 }
 controls.addEventListener("start", () => { VOL = null; TOUCHE = true; controls.autoRotate = false; ORBITE = null; if (FOCUS) FOCUS.libre = true; SUIVI = null; });   // tu touches : tu reprends la main, plus rien ne bouge tout seul
 controls.addEventListener("end", () => { TOUCHE = false; LACHE = performance.now(); });
@@ -1420,7 +1424,7 @@ ANIMS.push(t => {
     if (VOL.f !== VOL.f0) { camera.fov = VOL.f0 + (VOL.f - VOL.f0) * e; camera.updateProjectionMatrix(); }
     if (k >= 1) { const cb = VOL.puis; VOL = null; cb && cb(); } }
   // 2) le lieu choisi : va-et-vient lent autour de lui (reprend 2,5 s après que tu as lâché)
-  else if (FOCUS && !FOCUS.libre && !TOUCHE) {
+  else if (false && FOCUS && !FOCUS.libre && !TOUCHE) {
     if (!ORBITE) ORBITE = { a0: Math.atan2(camera.position.z - FOCUS.cible.z, camera.position.x - FOCUS.cible.x), t0: now, r: Math.hypot(camera.position.x - FOCUS.cible.x, camera.position.z - FOCUS.cible.z), h: camera.position.y - FOCUS.cible.y, k: 0 };
     ORBITE.k = Math.min(1, ORBITE.k + dt / 2);   // le mouvement démarre en douceur
     const a = ORBITE.a0 + 0.35 * Math.sin((now - ORBITE.t0) / 1000 * 0.18) * ORBITE.k, r = ORBITE.r || FOCUS.R;
@@ -1574,11 +1578,7 @@ function construireDecor() {
     const f = faceRue(P.b); if (!f) continue;
     const hb = Math.max(P.b.h || 3, 3), w = Math.min(f.L * 0.7, 12), bas = hb < 7;
     const hT = bas ? Math.min(5, w * 0.6) : Math.min(hb - 2.8, w * 0.75, 9);
-    const tab = toile(w, hT); tab.renderOrder = 4;
-    if (bas) { poserFace(tab, f, hb + hT / 2 + 0.4, -0.2); }   // bâtiment bas : une enseigne posée sur le toit, côté rue
-    else poserFace(tab, f, 2.4 + hT / 2);
-    scene.add(tab);
-    const it = { id, P, f, tab, k: "" }; DECOR.items.push(it); T[id] = it;
+    const it = { id, P, f, k: "" };   // plus de tableau collé sur la façade : les infos sont dans la fiche du bas DECOR.items.push(it); T[id] = it;
     // ---- chez toi : la fenêtre et l'enveloppe
     if (id === "home") {
       const fen = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.3), new THREE.MeshBasicMaterial({ color: 0xffbf5e, transparent: true, toneMapped: false }));
@@ -1601,8 +1601,7 @@ function construireDecor() {
       const fum = []; for (let i = 0; i < 14; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: DOT, color: 0xe9e6e1, transparent: true, depthWrite: false })); s.userData.ph = i / 14; scene.add(s); fum.push(s); }
       it.usine = { fum, top: new THREE.Vector3(cx, top + 10, -cy), k: 0 }; }
     // ---- santé : la croix verte en points + le bandeau qui défile
-    if (id === "clinique") { const cr = toile(3, 3, 85); poserFace(cr, f, Math.min(hb - 1.6, 2.4 + hT + 2), 0.3, w / 2 + 2.2); scene.add(cr);
-      const bd = toile(Math.min(w, 10), 0.9, 110); poserFace(bd, f, 1.8, 0.35); scene.add(bd); it.cln = { cr, bd }; }
+    // (santé : plus de bandeau ni de croix sur la façade)
     // ---- papiers : le drapeau français de la mairie, au vent (doucement)
     if (id === "mairie") { const top = (P.b.t || hb), mat2 = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 6, 6), new THREE.MeshStandardMaterial({ color: 0xd8d8d8, metalness: 0.5 }));
       mat2.position.set(P.x, top + 3, -P.y); scene.add(mat2);
@@ -1618,7 +1617,7 @@ function majDecor(force) {
     if (it.id === "usine") L = [{ l: "Aujourd'hui", v: D.aujTxt || "—" }, { l: "Demain", v: D.demTxt || "—" }, ...lignesDe(D, 3).filter(r => r.rouge)];
     if (it.id === "clinique" && D.prochain) L = [{ l: "Prochain rendez-vous", v: [D.prochain.qui, D.prochain.quand].filter(Boolean).join(" · ") }, ...L].slice(0, 5);
     if (it.id === "home" && D.gest) L = [...L.slice(0, 3), { l: "Ton gestionnaire (interphone)", v: String(D.gest).slice(0, 40) }];
-    const k = cle([titre, L, D.c]); if (k !== it.k || force) { it.k = k; dessinTableau(it.tab, D, titre, L); }
+    const k = cle([titre, L, D.c]); if (k !== it.k || force) { it.k = k; if (it.tab) dessinTableau(it.tab, D, titre, L); }
     if (it.nrg) { const val = re => { const f = (D.facts || []).find(r => re.test(r[0])); return f ? String(f[1]).replace(/\s*par mois/, "") : null; };
       for (const [key, re, col, y] of [["elec", /électri/i, NUIT ? 0x7ff4ff : 0x00b8ff, 0], ["gaz", /gaz/i, NUIT ? 0xffb35c : 0xff7a12, -3.4]]) { const s = val(re), o = it.nrg.nums[key];
         if (o && o.s === s) continue; if (o) { it.nrg.g.remove(o.p); o.p.geometry.dispose(); delete it.nrg.nums[key]; }
@@ -1718,8 +1717,8 @@ function poserVivant(d) {
     pose(etiquette("🅿️ " + p.places + " places", "#2563b8", "#ffffff", { x: 0, y: 0, z: 0 }, 0.022, [p.nom, p.usage].filter(Boolean).join(" · ")), x, y, 4.6); }
   scene.add(g);
 }
-ANIMS.push(() => { if (!VIVANT.etiq.length) return; const c = controls.target, r = camera.position.distanceTo(c), lim = Math.max(120, r * 0.9);
-  for (const l of VIVANT.etiq) { const [x, y] = l.userData.xy; l.visible = r < 520 && Math.hypot(x - c.x, -y - c.z) < lim; } });
+ANIMS.push(() => { if (!VIVANT.etiq.length) return; const c = controls.target, r = camera.position.distanceTo(c), lim = Math.max(80, r * 0.6);
+  for (const l of VIVANT.etiq) { const [x, y] = l.userData.xy; l.visible = r < 240 && Math.hypot(x - c.x, -y - c.z) < lim; } });
 async function lireVivant() {
   if (typeof document !== "undefined" && document.hidden) return;
   try { const r = await fn("jarvis-quartier", { quoi: "vivant", lieu: LIEU }); if (r && r.ok) poserVivant(r); } catch (_) { /* prochain tour */ }
@@ -1728,30 +1727,32 @@ async function lireVivant() {
 /* ---------- le trafic en direct (TomTom) : bouchons, accidents, routes fermées ----------
    La rue touchée se colore (jaune : ça ralentit, orange : ça bouchonne, rouge : bloqué), des points lumineux y avancent
    au pas du trafic, et les voitures de la carte ralentissent vraiment à cet endroit. Une étiquette dit ce qui se passe. */
-const TRAFIC = { g: null, liste: [], lu: null, cle: null };
+const TRAFIC = { g: null, liste: [], lu: null, cle: null, pans: [] };
 const COUL_TRAFIC = g => g >= 4 ? 0x9e1f1f : g === 3 ? 0xd8413a : g === 2 ? 0xf08a24 : 0xf2c230;
 function poserTrafic(liste) {
-  if (TRAFIC.g) { scene.remove(TRAFIC.g); TRAFIC.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); }
+  if (TRAFIC.g) { scene.remove(TRAFIC.g); TRAFIC.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map && o.material.map !== DOT && o.material.map !== TRAFIC.tri) o.material.map.dispose(); o.material.dispose(); } }); }
   if (RESEAU) for (const a of RESEAU.aretes) a.lent = null;
+  for (let i = TAPS.length - 1; i >= 0; i--) if (TAPS[i].trafic) TAPS.splice(i, 1); TRAFIC.pans = [];
   const g = new THREE.Group(); g.name = "trafic"; TRAFIC.g = g; TRAFIC.liste = liste;
   const flux = [];
   for (const inc of liste) {
     const l = pts(inc.l); if (l.length < 2) continue;
     const ferme = inc.cat === 8 || inc.cat === 7, grav = ferme ? 4 : inc.cat === 1 ? Math.max(3, inc.gravite) : Math.max(1, inc.gravite || (inc.cat === 6 ? 2 : 1));
-    const col = COUL_TRAFIC(grav);
-    // la rue colorée, juste au-dessus de la chaussée (qui respire doucement)
-    const geo = mergeGeometries(ruban(l, 4.6, 0.2).map(x => x.index ? x.toNonIndexed() : x));
-    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+    const col = COUL_TRAFIC(grav), tr = trajet(l), mil = pointA(tr, tr.L / 2), min = Math.round((inc.retard || 0) / 60);
+    const titre = (ferme ? "⛔ " : inc.cat === 1 ? "💥 " : inc.cat === 9 ? "🚧 " : "🚗 ") + inc.type + (min >= 1 ? " · +" + min + " min" : "");
+    const sous = [inc.routes && inc.routes[0], inc.de && inc.vers ? inc.de + " → " + inc.vers : inc.de || inc.vers].filter(Boolean).join(" · ").slice(0, 80);
+    // un seul petit panneau au milieu de la zone (le détail quand on le touche)
+    { const pan = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), new THREE.MeshBasicMaterial({ map: inc.cat === 9 ? (TRAFIC.tri || (TRAFIC.tri = panneauTravaux())) : DOT, color: inc.cat === 9 ? 0xffffff : col, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, toneMapped: false }));
+      pan.position.set(mil[0], 2.6, -mil[1]); g.add(pan); const mat0 = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.6, 6), new THREE.MeshBasicMaterial({ color: 0xdad6ce })); mat0.position.set(mil[0], 0.8, -mil[1]); g.add(mat0);
+      TAPS.push({ o: pan, titre, sous, trafic: true }); TRAFIC.pans.push(pan); }
+    // travaux et petits ralentissements : rien de plus sur la rue
+    if (!ferme && (inc.cat === 9 || grav < 2)) continue;
+    // vrai bouchon ou route fermée : une ligne fine sur la rue (qui respire doucement)
+    const geo = mergeGeometries(ruban(l, 1.6, 0.2).map(x => x.index ? x.toNonIndexed() : x));
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
     const m = new THREE.Mesh(geo, mat); m.renderOrder = 3; g.add(m);
     // des points lumineux qui avancent au pas du trafic
-    const tr = trajet(l), n = Math.max(2, Math.min(10, Math.round(tr.L / 25))), v = ferme ? 0 : [0, 7, 4, 2, 1][Math.min(4, grav)];
-    const boules = []; for (let i = 0; i < n; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.85, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })); b.userData.d = i / n * tr.L; g.add(b); boules.push(b); }
-    flux.push({ tr, boules, v, mat, dec: Math.random() * 6 });
-    // l'étiquette, au milieu de la zone touchée
-    const mil = pointA(tr, tr.L / 2), min = Math.round((inc.retard || 0) / 60);
-    const titre = (ferme ? "⛔ " : inc.cat === 1 ? "💥 " : inc.cat === 9 ? "🚧 " : "🚗 ") + inc.type + (min >= 1 ? " · +" + min + " min" : "");
-    const sous = [inc.routes && inc.routes[0], inc.de && inc.vers ? inc.de + " → " + inc.vers : inc.de || inc.vers].filter(Boolean).join(" · ").slice(0, 60);
-    const lab = etiquette(titre, "#" + new THREE.Color(col).getHexString(), "#ffffff", { x: mil[0], y: 7, z: -mil[1] }, 0.026, sous); g.add(lab);
+    flux.push({ tr, boules: [], v: 0, mat, dec: Math.random() * 6 });
     // les voitures de la carte ralentissent là où TomTom voit un ralentissement
     if (RESEAU) { const vit = ferme ? 0.8 : [9, 6, 3.5, 1.8, 0.8][Math.min(4, grav)];
       for (let d = 0; d <= tr.L; d += 4) { const [x, y] = pointA(tr, d);
@@ -1760,10 +1761,10 @@ function poserTrafic(liste) {
           if (!a.lent) a.lent = new Float32Array(a.p.length); a.lent[k] = a.lent[k] ? Math.min(a.lent[k], vit) : vit; } } }
   }
   scene.add(g);
-  TRAFIC.anim = t => { for (const f of flux) { f.mat.opacity = 0.62 + 0.15 * Math.sin(t / 650 + f.dec);
+  TRAFIC.anim = t => { for (const f of flux) { f.mat.opacity = 0.45 + 0.1 * Math.sin(t / 650 + f.dec);
     for (const b of f.boules) { b.userData.d = (b.userData.d + f.v * 0.016) % f.tr.L; const [x, y] = pointA(f.tr, b.userData.d); b.position.set(x, 0.75, -y); } } };
 }
-ANIMS.push(t => { if (TRAFIC.anim) TRAFIC.anim(t); });
+ANIMS.push(t => { if (TRAFIC.anim) TRAFIC.anim(t); for (const p of TRAFIC.pans) p.rotation.y = Math.atan2(camera.position.x - p.position.x, camera.position.z - p.position.z); });
 async function lireTrafic() {
   if (typeof document !== "undefined" && document.hidden) return;
   try { const r = await fn("jarvis-quartier", { quoi: "trafic", lieu: LIEU }); TRAFIC.cle = r ? r.cle : null;

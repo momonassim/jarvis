@@ -504,3 +504,10 @@ body.cine>*:not(canvas):not(#cineSub){opacity:0!important;pointer-events:none!im
 .busvite{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .busvite .chip{padding:7px 11px;font-size:13px;font-weight:700}
 .round[hidden]{display:none}
+
+/* la fiche du bas (carte) : plus grande et lisible d'un coup d'œil — le nom, puis l'essentiel sur deux lignes */
+.lieubar{width:min(560px,calc(100vw - 24px));padding:10px 10px 10px 12px}
+.lbtx{gap:3px}
+.lieubar .lbtx small{display:-webkit-box!important;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;font-size:14px!important;line-height:1.3;font-weight:600}
+.lieubar .lbtx small.rouge{color:var(--red,#c9483a)!important;font-weight:700}
+.toast{max-width:min(560px,calc(100vw - 24px));font-size:15px;line-height:1.35}
