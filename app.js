@@ -73,7 +73,7 @@ const HOOKS = {
   info: (t, s) => toast(t + (s ? " · " + s : "")),   // un panneau touché sur la carte (travaux, trafic) : son détail, juste en bas de l'écran
 };
 V = VUE === "ville" ? await (await import("./ville.js?v=ville14")).creerVille(canvas, HOOKS)
-  : await (await import("./carte.js?v=carte7")).creerCarte(canvas, HOOKS, { fn: appeler });
+  : await (await import("./carte.js?v=carte8")).creerCarte(canvas, HOOKS, { fn: appeler });
 document.body.classList.toggle("vuecarte", VUE === "carte");
 if (location.search.includes("regard")) window.__V = V;   // (outil de vérification)
 // sur la carte : un bouton pour passer de chez toi au quartier de ton travail (et revenir)
@@ -101,8 +101,13 @@ function applySky(night) {
   $("skyIc").innerHTML = night ? '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>'
     : '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>';
 }
-{ const h = new Date().getHours(); applySky(h < 7 || h >= 19); }
+// la carte suit l'heure : elle passe en nuit le soir (et pour tes postes de nuit) et revient au jour le matin, toute seule ;
+// si tu touches le bouton jour/nuit, ton choix tient jusqu'au prochain changement (soir ou matin)
+const nuitMaintenant = () => { const h = new Date().getHours(); return h < 7 || h >= 19; };
+let skyAuto = nuitMaintenant();
+applySky(skyAuto);
 $("sky").addEventListener("click", () => applySky(!S.night));
+setInterval(() => { const n = nuitMaintenant(); if (n !== skyAuto) { skyAuto = n; applySky(n); } }, 60000);
 
 /* =========================================================
    Les lieux dans la ville : mâts 3D et panneaux sur les façades (dans ville.js).

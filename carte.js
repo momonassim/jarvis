@@ -1776,6 +1776,41 @@ async function lireTrafic() {
    ouvrir un lieu, fermer, vue d'ensemble, nuit, décalage sous la fiche, pilotage par Claude,
    mode documentaire, ta DS5 devant ton immeuble.
    ========================================================= */
+/* ---------- ton trajet vers l'usine, affiché seulement au moment de partir (les 2 h avant ton poste) ----------
+   La route que TomTom conseille avec le trafic du moment, une ligne fine à la couleur du retard,
+   et une étiquette « Usine · 18 min » devant chez toi (le détail au toucher). */
+const TRAJET = { g: null, lu: 0, pans: [] };
+const DEBUT_POSTE = { M: 4, A: 12, N: 20 };
+function prochainPoste() {   // le prochain début de poste (matin 4 h, après-midi 12 h, nuit 20 h), d'après ton planning
+  const u = DONNEES.find(d => d.id === "usine"); const sem = (u && u.semaine) || []; const now = Date.now();
+  for (const o of sem) { const h = DEBUT_POSTE[o.poste]; if (h == null || ["conge", "rc", "maladie"].includes(o.g)) continue;
+    const t = new Date(o.d + "T00:00:00"); t.setHours(h); if (t.getTime() > now - 5 * 60e3) return t; }
+  return null; }
+function effacerTrajet() { if (TRAJET.g) { scene.remove(TRAJET.g); TRAJET.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); TRAJET.g = null; }
+  for (let i = TAPS.length - 1; i >= 0; i--) if (TAPS[i].trajet) TAPS.splice(i, 1); }
+async function majTrajet() {
+  if (LIEU !== "maison" || (typeof document !== "undefined" && document.hidden)) return;
+  const debut = prochainPoste(), now = Date.now(), avant = debut ? (debut.getTime() - now) / 60e3 : 1e9;
+  if (avant > 120 || avant < -5) { effacerTrajet(); return; }   // pas l'heure de partir : rien sur la carte
+  if (TRAJET.g && now - TRAJET.lu < 5 * 60e3) return;           // relu toutes les 5 minutes
+  let r = null; try { r = await fn("jarvis-quartier", { quoi: "trajet" }); } catch (_) { return; }
+  if (!r || !r.ok) return; TRAJET.lu = now; effacerTrajet();
+  const l = pts(r.l); if (l.length < 2) return;
+  const g = new THREE.Group(); g.name = "trajet"; TRAJET.g = g;
+  const col = r.retard >= 10 ? 0xd8413a : r.retard >= 4 ? 0xf08a24 : 0x2f7cf6;
+  const geo = mergeGeometries(ruban(l, 2.2, 0.25).map(x => x.index ? x.toNonIndexed() : x));
+  const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+  const m = new THREE.Mesh(geo, mat); m.renderOrder = 4; g.add(m);
+  const hh = debut.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", " h ");
+  const titre = "🏭 Usine · " + r.minutes + " min" + (r.retard >= 2 ? " (+" + r.retard + ")" : "");
+  const sous = "Poste à " + hh + " · " + String(r.km).replace(".", ",") + " km" + (r.retard >= 2 ? " · " + r.retard + " min de bouchons" : " · ça roule");
+  const [x0, y0] = l[Math.min(l.length - 1, 6)];
+  const lab = etiquette(titre, "#" + new THREE.Color(col).getHexString(), "#ffffff", { x: x0, y: 8, z: -y0 }, 0.026, sous); g.add(lab);
+  TAPS.push({ o: lab, titre, sous: sous + " · trajet conseillé avec le trafic du moment", trajet: true });
+  scene.add(g);
+}
+ANIMS.push(t => { if (TRAJET.g) TRAJET.g.children[0].material.opacity = 0.65 + 0.15 * Math.sin(t / 700); });
+
 let GPS = null;   // la carte GPS autour du quartier (se charge par morceaux)
 let DEMARRE = null, ATTENTE = null, VOITURE_URL = null, NUIT = false, SHIFT = 0, DONNEES = [], DS5 = null;
 const LIEU_DE = { logement: "home", chez_toi: "home", maison: "home", energie: "energie", sante: "clinique", travail: "usine", usine: "usine", impots: "impots", voiture: "garage", garage: "garage", ds5: "garage", papiers: "mairie", mairie: "mairie", banque: "banque", bebe: "medecin", abonnements: "orange" };
@@ -1783,10 +1818,14 @@ const couleurs = Object.fromEntries([...LIEUX_CARTE.usine, ...LIEUX_CARTE.maison
 
 /* un lieu qui a quelque chose d'important (alerte, retard) : sa tête et son halo passent au rouge */
 const ROUGE = new THREE.Color(0xd8413a);
+ANIMS.push(() => { const c = controls.target, r = camera.position.distanceTo(c);   // les noms des lieux calmes n'apparaissent que de près (ou quand on les choisit)
+  for (const P of PINS) P.lab.visible = P.urgent || DECOR.sel === P.L.id || P.L.ici || (r < 380 && Math.hypot(P.x - c.x, -P.y - c.z) < Math.max(160, r * 0.9)); });
 function majAlertes() {
   for (const P of PINS) { const d = DONNEES.find(x => x.id === P.L.id), urgent = !!(d && (d.urgent || (d.alerts || []).length));
-    const c = urgent ? ROUGE : new THREE.Color(P.L.c);
-    P.tete.material.color.copy(c); P.tete.material.emissive.copy(c); P.halo.material.color.copy(c); P.urgent = urgent; }
+    // calme : un lieu sans rien à faire reste discret (couleur douce, pas de halo, nom seulement de près) ; un lieu avec une urgence s'allume en rouge
+    const c = urgent ? ROUGE : new THREE.Color(P.L.c).lerp(new THREE.Color(0xb9b4ab), 0.55);
+    P.tete.material.color.copy(c); P.tete.material.emissive.copy(c); P.tete.material.emissiveIntensity = urgent ? 0.5 : 0.08;
+    P.halo.material.color.copy(c); P.halo.visible = urgent; P.tete.scale.setScalar(urgent ? 1.15 : 0.8); P.urgent = urgent; }
 }
 
 /* la nuit : ciel bleu nuit, lampadaires allumés, la lumière du soleil devient un clair de lune */
@@ -1899,6 +1938,7 @@ DEMARRE = (async () => { try {
   (async () => { try { const ch = await fn("jarvis-quartier", { quoi: "chantiers", lieu: LIEU }); if (ch && ch.ok) window.__chantiers = poserChantiers(ch.liste || []); } catch (_) { /* tant pis : la carte reste sans chantiers */ } })();
   suivreMoi();
   lireTrafic(); setInterval(lireTrafic, 120000);
+  setTimeout(majTrajet, 4000); setInterval(majTrajet, 60000);   // ton trajet vers l'usine, au moment de partir
   lireVivant(); setInterval(lireVivant, 300000);   // stations-service, Vélo'v, parkings : toutes les 5 minutes   // le trafic TomTom, toutes les 2 minutes (si la clé est rangée dans les Réglages)
   const vivre = async () => { try { const v = await fn("jarvis-tcl", { quoi: "vehicules" }); if (v && v.ok) majBus(v.bus || []); } catch (_) { /* prochain tour */ } };
   const passages = async () => { try { const p = await fn("jarvis-tcl", { quoi: "passages" }); if (p && p.ok) panneau(p); } catch (_) { /* prochain tour */ } };

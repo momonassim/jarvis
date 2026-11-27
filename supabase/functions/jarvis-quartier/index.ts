@@ -383,6 +383,20 @@ async function traficAutour(lieu = "maison") {
   }).filter((x: any) => x.l.length >= 2);
   return { ok: true, cle: true, lu_le: new Date().toISOString(), liste };
 }
+/* ton trajet de chez toi à l'usine, avec le trafic du moment (TomTom) : le tracé, la durée et le retard */
+async function trajetUsine() {
+  const cle = await secret("TOMTOM_KEY"); if (!cle) return { ok: false, cle: false };
+  const g = JSON.parse((await secret("LIEUX_GPS")) || "{}"), m = g.maison, u = g.usine; if (!m || !u) throw new Error("adresses absentes");
+  const url = `https://api.tomtom.com/routing/1/calculateRoute/${m.lat},${m.lon}:${u.lat},${u.lon}/json?key=${encodeURIComponent(cle)}&traffic=true&travelMode=car&routeType=fastest&departAt=now&computeTravelTimeFor=all&language=fr-FR`;
+  const rep = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!rep.ok) return { ok: false, cle: true, erreur: "TomTom HTTP " + rep.status };
+  const j = await rep.json(), r = j.routes?.[0]; if (!r) return { ok: false, cle: true, erreur: "pas de trajet" };
+  const kx = Math.cos(m.lat * Math.PI / 180) * 111320, ky = 110574;
+  const l = (r.legs ?? []).flatMap((x: any) => x.points ?? []).map((q: any) => [Math.round((q.longitude - m.lon) * kx * 10) / 10, Math.round((q.latitude - m.lat) * ky * 10) / 10]).flat();
+  const s = r.summary ?? {};
+  return { ok: true, cle: true, lu_le: new Date().toISOString(), minutes: Math.round((s.travelTimeInSeconds ?? 0) / 60), retard: Math.round((s.trafficDelayInSeconds ?? 0) / 60),
+    sansTrafic: Math.round((s.noTrafficTravelTimeInSeconds ?? s.travelTimeInSeconds ?? 0) / 60), km: Math.round((s.lengthInMeters ?? 0) / 100) / 10, arrivee: s.arrivalTime ?? null, l };
+}
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!(await autorise(req))) return json({ erreur: "non autorisé" }, 401);
@@ -390,6 +404,7 @@ Deno.serve(async (req) => {
   const lieu = b.lieu === "usine" ? "usine" : "maison";   // chez toi, ou ton travail
   if (b.quoi === "vivant") { try { return json(await vivantAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   if (b.quoi === "trafic") { try { return json(await traficAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
+  if (b.quoi === "trajet") { try { return json(await trajetUsine()); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   if (b.quoi === "chantiers") { try { return json(await chantiersAutour(lieu)); } catch (e) { return json({ ok: false, erreur: String(e instanceof Error ? e.message : e) }, 502); } }
   const CHEMIN = `cache/quartier-${lieu}.json`;
   const r = Number(b.apercu) || 0;
