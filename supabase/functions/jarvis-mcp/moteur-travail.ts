@@ -167,7 +167,7 @@ export class Planning {
 }
 
 // ---------- la paye (en net) ----------
-// Bulletin du mois M (versé le dernier jour de M) = FIXE du mois M + VARIABLES des pointages du mois M − 1.
+// Bulletin du mois M (versé à la date du calendrier Tokai Cobex, sinon le dernier jour de M) = FIXE du mois M + VARIABLES des pointages du mois M − 1.
 export type Paye = {
   mois: string; moisTravail: string; verseLe: string;
   jours: number; heures: number; nuits: number; dimanches: number; feries: number; repos: number; sup: number; conges: number; maladies: number;
@@ -176,9 +176,16 @@ export type Paye = {
   heuresCycle: number; h25: number; h50: number;
   brut: number; netAvantImpot: number; impot: number; net: number;
 };
+// Dates de virement de la paie (calendrier Tokai Cobex) ; sinon, le dernier jour du mois.
+const VIREMENTS: Record<string, string> = {
+  "2026-01": "2026-01-29", "2026-02": "2026-02-26", "2026-03": "2026-03-27", "2026-04": "2026-04-28",
+  "2026-05": "2026-05-27", "2026-06": "2026-06-26", "2026-07": "2026-07-29", "2026-08": "2026-08-28",
+  "2026-09": "2026-09-28", "2026-10": "2026-10-29", "2026-11": "2026-11-27", "2026-12": "2026-12-21",
+};
+export const dateVirement = (mp: string) => VIREMENTS[mp.slice(0, 7)] ?? finMois(mp);
 export function paye(P: Planning, moisPaye: string): Paye {
   const R = P.R, mp = debutMois(moisPaye);
-  const p: Paye = { mois: mp, moisTravail: moisPlus(mp, -1), verseLe: finMois(mp), jours: 0, heures: 0, nuits: 0, dimanches: 0, feries: 0, repos: 0, sup: 0, conges: 0, maladies: 0,
+  const p: Paye = { mois: mp, moisTravail: moisPlus(mp, -1), verseLe: dateVirement(mp), jours: 0, heures: 0, nuits: 0, dimanches: 0, feries: 0, repos: 0, sup: 0, conges: 0, maladies: 0,
     exceptionnel: 0, nomExceptionnel: "", fixe: R.base + R.anciennete, four: 0, nuit: 0, dimanche: 0, ferie: 0, majSup: 0, nonSoumis: 0,
     heuresCycle: 0, h25: 0, h50: 0, brut: 0, netAvantImpot: 0, impot: 0, net: 0 };
   if (mois(mp) === 6) { p.exceptionnel = R.primeVacances; p.nomExceptionnel = "Prime de vacances"; }
