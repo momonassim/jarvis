@@ -163,7 +163,7 @@ export function payeTexte(rows: Row[], a: Record<string, any>, dateDe: (s?: stri
     const a0 = annee(d), cur = annee(today()) === a0 ? mois(today()) : (a0 < annee(today()) ? 12 : 0);
     const ys = Array.from({ length: 12 }, (_, i) => paye(P, `${a0}-${String(i + 1).padStart(2, "0")}-01`));
     const percu = ys.slice(0, cur).reduce((s, y) => s + y.net, 0), prevu = ys.reduce((s, y) => s + y.net, 0);
-    return `Payes ${a0} (net, versées en fin de mois) :\n` + ys.map((y, i) => `- ${MOIS[i]} : ≈ ${eur(y.net)}${y.nomExceptionnel ? ` (avec ${y.nomExceptionnel.toLowerCase()})` : ""}${y.sup ? `, dont ${y.sup} jours sup` : ""}`).join("\n")
+    return `Payes ${a0} (net) :\n` + ys.map((y, i) => `- ${MOIS[i]} (versée le ${+y.verseLe.slice(8)}) : ≈ ${eur(y.net)}${y.nomExceptionnel ? ` (avec ${y.nomExceptionnel.toLowerCase()})` : ""}${y.sup ? `, dont ${y.sup} jours sup` : ""}`).join("\n")
       + (cur ? `\nDéjà perçu jusqu'à ${MOIS[cur - 1]} : ≈ ${eur(percu)} (moyenne ≈ ${eur(percu / cur)} par mois).` : "") + `\nPrévu sur l'année : ≈ ${eur(prevu)}.` + fin;
   }
   // mois : la paye VERSÉE à la fin de ce mois-là
