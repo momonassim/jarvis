@@ -795,6 +795,13 @@ function maquetteBus(ligne) {
   // taille réelle : un bus de 12 m tient dans sa voie
   return g;
 }
+/* la position d'un bus arrive en retard (son âge + les ~8 s de l'animation) : on l'avance d'autant le long de sa rue, dans son sens de marche */
+function avancerBus(B, b) {
+  if (!B || !Number.isFinite(b.cap)) return B;
+  const ext = Math.min(350, ((b.age || 0) + 8) * 6.5); if (ext < 5) return B;   // ≈ 23 km/h, la vitesse moyenne d'un bus en ville
+  const a = RESEAU.aretes[B.e], q = surArete(a, B.s), cx = Math.sin(b.cap * Math.PI / 180), cy = Math.cos(b.cap * Math.PI / 180), sens = cx * q.tx + cy * q.ty >= 0 ? 1 : -1;
+  return { e: B.e, s: Math.max(0, Math.min(a.L, B.s + sens * ext)), d: B.d };
+}
 function majBus(liste) {
   const vu = new Set(), t = performance.now();
   for (const b of liste) {
@@ -802,7 +809,7 @@ function majBus(liste) {
     // on rattache au bus le plus proche de la même ligne (les identifiants ne sont pas toujours fournis)
     let k = null, dmin = 260;
     for (const [kk, o] of BUS) { if (o.ligne !== b.ligne || vu.has(kk)) continue; const d = Math.hypot(o.cible[0] - x, o.cible[1] - y); if (d < dmin) { dmin = d; k = kk; } }
-    const B = accrocher(x, y, 30);
+    const B = avancerBus(accrocher(x, y, 30), b);   // remis là où il est vraiment (sa position arrive en retard)
     if (!k) {   // nouveau bus : posé sur la rue, tourné dans le sens de sa marche
       k = (b.id || b.ligne) + "|" + Math.random(); const m = maquetteBus(b.ligne); scene.add(m);
       const lab = etiquette(b.ligne, COUL[b.ligne] || "#2b3138", /^#(D3D8|FFF)/i.test(COUL[b.ligne] || "") ? "#2b3138" : "#ffffff", { x: 0, y: 4.5, z: 0 }, 0.018); m.add(lab);

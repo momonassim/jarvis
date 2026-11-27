@@ -111,7 +111,9 @@ async function vehicules() {
     const m = a.MonitoredVehicleJourney ?? {}, loc = m.VehicleLocation ?? {};
     const nom = String(val(m.PublishedLineName) || val(m.LineRef));
     const ligne = ligneDe(nom) || ligneDe(String(val(m.LineRef)).split(":").find((p: string) => ligneDe(p)) ?? "");
-    return { ligne, vers: val(m.DestinationName) || val(m.DirectionName), lat: Number(loc.Latitude), lon: Number(loc.Longitude), cap: Number(m.Bearing ?? 0), retard: val(m.Delay) };
+    // l'âge de la position : le flux TCL donne souvent une position vieille d'une ou deux minutes, la carte s'en sert pour remettre le bus là où il est vraiment
+    const vu = Date.parse(String(val(a.RecordedAtTime) || val(m.RecordedAtTime) || "")), age = Number.isFinite(vu) ? Math.max(0, Math.min(600, Math.round((Date.now() - vu) / 1000))) : null;
+    return { ligne, vers: val(m.DestinationName) || val(m.DirectionName), lat: Number(loc.Latitude), lon: Number(loc.Longitude), cap: Number(m.Bearing ?? 0), retard: val(m.Delay), age };
   }).filter((b: any) => b.ligne && Number.isFinite(b.lat) && Number.isFinite(b.lon));
   const v = { lu_le: new Date().toISOString(), bus, total_reseau: acts.length };
   CACHE_V = { v, t: Date.now() };
